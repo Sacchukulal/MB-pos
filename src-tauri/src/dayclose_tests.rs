@@ -55,6 +55,8 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
 
     let app = App::new(crate::config::AppConfig::default()).expect("the font loads");
     app.open_shop(db, path);
+    // A new shop does not close its days; every test in this file is about a shop that does.
+    closing(&app, true);
     app
 }
 
@@ -801,11 +803,17 @@ fn the_handover_report_names_the_shift_the_person_and_the_difference() {
 
 // The switch.
 
-/// Turn this shop's day closing on or off, the way the settings screen does.
+/// Turn this shop's day closing on or off, through the door the screen uses — so it survives
+/// the next save, which reads the configuration back from the book.
 fn closing(app: &App, on: bool) {
-    let mut config = app.shop_config();
-    config.day.must_close = on;
-    app.publish_shop_config(config);
+    crate::settings::ipc::save_on(
+        app,
+        vec![crate::settings::ipc::SettingEdit {
+            key: "day.must_close".to_owned(),
+            value: if on { "1" } else { "0" }.to_owned(),
+        }],
+    )
+    .expect("the switch");
 }
 
 /// Switched off: no gate, no lock, nothing refused — and what each day came to is still there.
@@ -828,27 +836,46 @@ fn a_shop_that_does_not_close_its_days_is_never_asked_and_never_refused() {
     let view = days_on(&app).expect("the days");
     assert!(!view.may_act, "nothing on the screen may be pressed");
     assert!(!view.may_plan_holiday);
-    assert!(
-        view.closing_says.contains("does not close its days"),
-        "{}",
-        view.closing_says
-    );
+    assert!(!view.closes_days, "the screen still thinks days are closed");
+    // The owner is handed the switch, so nothing on the screen explains it to them twice.
+    assert_eq!(view.closing_says, "");
+    assert!(view.days.is_empty(), "days are listed with the switch off");
+    // The counter's owner is handed the switch on the screen itself, with the rest of the rules.
+    let rules = view.rules.expect("the rules");
+    assert!(rules.can_edit);
+    assert_eq!(rules.settings[0].key, "day.must_close");
     // The figures are still figures: switching it off hides no money.
-    assert!(
-        view.days.iter().any(|row| row.bills > 0),
-        "yesterday's bills went missing"
-    );
+    let takings = crate::reports::report_on(
+        &app,
+        "sales_day".to_owned(),
+        crate::reports::PeriodArg {
+            from: today().previous().to_string(),
+            to: today().to_string(),
+        },
+    )
+    .expect("the report");
+    assert!(!takings.rows.is_empty(), "yesterday's bills went missing");
 
     // And the writes are refused as a switch that is off, not silently ignored.
     for refused in [
         close_day_on(&app, today().to_string(), None, String::new(), false).expect_err("closed"),
         set_holiday_on(&app, vec![today().next().to_string()], true).expect_err("holiday"),
         close_pending_on(&app, Vec::new()).expect_err("pending"),
+        count_drawer_on(
+            &app,
+            vec![CountArg {
+                value: 50_000,
+                count: 1,
+            }],
+            String::new(),
+            false,
+        )
+        .expect_err("counted"),
     ] {
         assert_eq!(refused.code, "day.closing_off");
         assert!(
-            refused.message.contains("Close the day every day"),
-            "the refusal does not name the setting: {}",
+            refused.message.contains("Day open/close"),
+            "the refusal does not say where the switch is: {}",
             refused.message
         );
     }
@@ -1427,7 +1454,11 @@ fn the_day_start_is_the_owners_and_reaches_the_screen() {
     let app = a_shop(&scratch, "start_owner");
 
     let view = days_on(&app).expect("the days");
-    assert!(view.day_runs_says.contains("calendar date"), "{}", view.day_runs_says);
+    assert!(
+        view.day_runs_says.contains("calendar date"),
+        "{}",
+        view.day_runs_says
+    );
 
     let edit = |value: &str| {
         crate::settings::ipc::save_on(

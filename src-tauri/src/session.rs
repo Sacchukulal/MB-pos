@@ -32,6 +32,15 @@ pub struct Session {
     pub is_stand_in: bool,
 }
 
+impl Session {
+    /// Whether this is the owner: the owner role, or the stand-in counter user on a shop that
+    /// has no PINs yet, which is the owner's own machine.
+    #[must_use]
+    pub fn is_owner(&self) -> bool {
+        self.is_stand_in || self.actor.role_id.as_deref() == Some(mb_auth::RolePreset::Owner.id())
+    }
+}
+
 /// The session, and the two questions everything else asks it.
 #[derive(Debug, Default)]
 pub struct Sessions {

@@ -521,6 +521,64 @@ textarea.mb-input {
   cursor: pointer;
 }
 
+/*
+ * A switch: one decision that decides whether the rest of a section is even drawn. The track is
+ * the box itself, so there is nothing to keep in step with it.
+ */
+.mb-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-md);
+  cursor: pointer;
+}
+
+.mb-switch input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: var(--switch-width);
+  height: var(--switch-height);
+  margin: 0;
+  background: var(--border-strong);
+  border-radius: var(--switch-height);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease);
+}
+
+.mb-switch input::after {
+  content: '';
+  position: absolute;
+  top: calc((var(--switch-height) - var(--switch-knob)) / 2);
+  left: calc((var(--switch-height) - var(--switch-knob)) / 2);
+  width: var(--switch-knob);
+  height: var(--switch-knob);
+  background: var(--surface);
+  border-radius: 50%;
+  transition: transform var(--motion-fast) var(--ease);
+}
+
+.mb-switch input:checked {
+  background: var(--accent);
+}
+
+.mb-switch input:checked::after {
+  background: var(--accent-ink);
+  transform: translateX(calc(var(--switch-width) - var(--switch-height)));
+}
+
+.mb-switch input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Which way it is, in a word — colour is never the only signal. */
+.mb-switch__state {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
 /* A field with a mark in it: ₹, +91. */
 
 .mb-adorned {

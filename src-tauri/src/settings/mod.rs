@@ -313,9 +313,9 @@ pub struct Day {
 impl Default for Day {
     fn default() -> Self {
         Day {
-            // On, because it is what every shop that already runs Magic Bill does today, and a
-            // setting whose default changes under a shop on upgrade is not a setting.
-            must_close: true,
+            // Off: most counters never want a day locked, and the ones that do turn it on in
+            // one press on Reports › Day open/close.
+            must_close: false,
             starts_at_minutes: u32::from(mb_core::DayRule::DEFAULT.starts_at_minutes()),
             // ₹20. Small enough that a real shortage is caught, large enough that a rounded-off
             // bill does not make a cashier fill in a form.

@@ -337,11 +337,11 @@ somebody says the money arrived.
       sentence, which is the point.
 - [ ] Press **Open today again**, give a reason, and bill. The reason is in
       History against your name.
-- [ ] **Settings → The day → Close the day every day.** Switch it off. The Day
-      close screen keeps every figure and the drawer count, and has nothing to
-      press. Nothing is refused anywhere. Switch it back on and the same days
-      lock again.
-- [ ] **Your day starts at** on the same page. Set it to 06:00, print a bill at
+- [ ] **Reports → Day open/close → Rules.** A new shop starts with the switch
+      **Disabled**, and the panel is nothing but the switch. Turn it on, press
+      Save, and the day's business appears. Turn it off again: every figure is
+      still in the reports, nothing is refused anywhere, and no day is locked.
+- [ ] **New day starts at**, in the same panel. Set it to 06:00, print a bill at
       05:30 the next morning, and check it lands on the night before.
 
 ---

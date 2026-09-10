@@ -520,6 +520,27 @@ export function Checkbox({ label, hint, ...rest }: CheckboxProps) {
   );
 }
 
+export interface SwitchProps
+  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'role'> {
+  /** The words the two states wear, beside the switch. */
+  onWord?: string;
+  offWord?: string;
+}
+
+/**
+ * On or off, where the answer decides whether the rest of a section exists at all. A tick box
+ * is one choice among several; a switch is the only one on its line, and it says which way it
+ * is in a word.
+ */
+export function Switch({ onWord = 'Enabled', offWord = 'Disabled', ...rest }: SwitchProps) {
+  return (
+    <label className="mb-switch">
+      <input type="checkbox" role="switch" {...rest} />
+      <span className="mb-switch__state">{rest.checked ? onWord : offWord}</span>
+    </label>
+  );
+}
+
 export function Radio({ label, hint: _hint, ...rest }: CheckboxProps) {
   return (
     <label className="mb-radio">

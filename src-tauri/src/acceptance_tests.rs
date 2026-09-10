@@ -719,6 +719,10 @@ fn a_corrupted_shop_file_is_refused_rather_than_half_opened() {
 fn a_locked_day_refuses_the_corrections_that_would_change_it() {
     let scratch = Scratch::new("acceptance_locked");
     let app = a_shop(&scratch, "locked");
+    // A shop only locks its days if the owner asked it to; this one did.
+    let mut config = app.shop_config();
+    config.day.must_close = true;
+    app.publish_shop_config(config);
     let (number, _total) = bill(&app, &[("itm_dosa", "1")], "Cash");
 
     // No count needed: the day is a thing of its own.

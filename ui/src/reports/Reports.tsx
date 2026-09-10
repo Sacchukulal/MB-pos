@@ -33,12 +33,27 @@ interface Line {
   cells: readonly string[];
 }
 
-export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
+/** `initial` opens a part straight away — the alert for a closed day lands on Day open/close. */
+export function Reports({
+  onGoTo,
+  initial,
+}: {
+  onGoTo?: (screen: string) => void;
+  initial?: string | null;
+}) {
   const [list, setList] = useState<ReportListView | null>(null);
   /** The licence saying no, held rather than flashed. */
   const [locked, setLocked] = useState<string>('');
+  /**
+   * Whether this person reads reports at all. A cashier who may close the day but not read
+   * reports comes here for Day open/close and sees nothing else.
+   */
+  const [mayReport, setMayReport] = useState(true);
   // The dashboard is what this screen opens on.
-  const [chosen, setChosen] = useState<string>(TODAY);
+  const [chosen, setChosen] = useState<string>(initial === DAYS ? DAYS : TODAY);
+  useEffect(() => {
+    if (initial === DAYS) setChosen(DAYS);
+  }, [initial]);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [report, setReport] = useState<ReportView | null>(null);
@@ -70,7 +85,15 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           setTo(today.to);
         }
       })
-      .catch(complain);
+      .catch((cause) => {
+        // No permission is an answer too: the rail keeps the one entry this person may open.
+        if (isUiError(cause) && cause.code === 'auth.denied') {
+          setMayReport(false);
+          setChosen(DAYS);
+          return;
+        }
+        complain(cause);
+      });
   }, [complain]);
 
   // One effect, one call: whenever the report or the period changes, ask again.
@@ -105,7 +128,7 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
   // A licence refusal closes the reports, never the bills or the days: voiding, reprinting
   // and closing the day are billing, and billing is never behind the plan.
-  if (!list && !locked) return <Spinner label="Opening the reports" />;
+  if (!list && !locked && mayReport) return <Spinner label="Opening the reports" />;
 
   const columns: readonly Column<Line>[] =
     report?.columns.map((spec, index) => ({
@@ -122,24 +145,26 @@ export function Reports({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         {/* At the top and on their own: the dashboard, the bills, and the day itself. */}
         <div className="mb-reports__group">
           {[
-            { id: TODAY, label: 'Dashboard' },
-            { id: BILLS, label: 'Bills' },
-            { id: DAYS, label: 'Day open/close' },
-          ].map((entry) => (
-            <button
-              type="button"
-              key={entry.id}
-              className={
-                chosen === entry.id
-                  ? 'mb-reports__pick mb-reports__pick--on'
-                  : 'mb-reports__pick'
-              }
-              aria-current={chosen === entry.id}
-              onClick={() => setChosen(entry.id)}
-            >
-              {entry.label}
-            </button>
-          ))}
+            { id: TODAY, label: 'Dashboard', shown: mayReport },
+            { id: BILLS, label: 'Bills', shown: mayReport },
+            { id: DAYS, label: 'Day open/close', shown: true },
+          ]
+            .filter((entry) => entry.shown)
+            .map((entry) => (
+              <button
+                type="button"
+                key={entry.id}
+                className={
+                  chosen === entry.id
+                    ? 'mb-reports__pick mb-reports__pick--on'
+                    : 'mb-reports__pick'
+                }
+                aria-current={chosen === entry.id}
+                onClick={() => setChosen(entry.id)}
+              >
+                {entry.label}
+              </button>
+            ))}
         </div>
         {groups(list?.reports ?? []).map(([group, entries]) => (
           <div className="mb-reports__group" key={group}>

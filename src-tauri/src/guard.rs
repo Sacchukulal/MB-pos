@@ -556,6 +556,25 @@ pub fn require(app: &App, need: Permission) -> UiResult<Actor> {
     Ok(session.actor)
 }
 
+/// Refuse unless the owner is at the counter. A permission can be given to anybody; this
+/// cannot.
+pub fn require_owner(app: &App) -> UiResult<Actor> {
+    let Some(session) = app.sessions().current() else {
+        return Err(UiError::new(
+            "auth.locked",
+            "The screen is locked. Sign in to carry on.",
+        ));
+    };
+    if !session.is_owner() {
+        return Err(
+            UiError::new("auth.denied", "Only the owner can change this.")
+                .with_detail("needs the owner"),
+        );
+    }
+    app.sessions().touch(crate::flows::now());
+    Ok(session.actor)
+}
+
 /// The four permissions the settings screen is built out of.
 pub const SETTINGS_PERMISSIONS: &[Permission] = &[
     Permission::SettingsStore,

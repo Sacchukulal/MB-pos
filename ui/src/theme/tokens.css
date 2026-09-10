@@ -193,6 +193,10 @@
   --modal-width: 28rem;
   --modal-width-wide: 52rem;
   --panel-width: 22rem;
+  /* The switch that turns a whole section on: the track, and the knob inside it. */
+  --switch-width: 2.25rem;
+  --switch-height: 1.25rem;
+  --switch-knob: 1rem;
   --toast-width-min: 14rem;
   --toast-width-max: 20rem;
 

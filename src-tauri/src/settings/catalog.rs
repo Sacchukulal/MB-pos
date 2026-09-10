@@ -19,6 +19,7 @@ pub enum Group {
     Printers,
     Numbering,
     Billing,
+    /// Set on the Day open/close screen, by the owner only.
     Day,
     /// The stock book has exactly one scalar setting: the threshold a count variance has to
     /// pass before the screen asks why.
@@ -57,7 +58,7 @@ impl Group {
             Group::Printers => "Printers",
             Group::Numbering => "Bill and token numbers",
             Group::Billing => "Billing",
-            Group::Day => "Closing the day",
+            Group::Day => "Day open/close",
             Group::Stock => "Stock",
             Group::Backup => "Backup",
             Group::Appearance => "How it looks",
@@ -89,12 +90,18 @@ impl Group {
         Group::ALL.iter().copied().find(|g| g.code() == code)
     }
 
-    /// Whether the Settings screen lists this group. Backup is set on the Account screen and
-    /// the stock count rule on the Stock screen's Count tab; both are stored and searched
-    /// like any other setting.
+    /// Whether the Settings screen lists this group. Backup is set on the Account screen, the
+    /// stock count rule on the Stock screen's Count tab and the day rules on Day open/close;
+    /// all are stored like any other setting.
     #[must_use]
     pub const fn on_settings_screen(self) -> bool {
-        !matches!(self, Group::Backup | Group::Stock)
+        !matches!(self, Group::Backup | Group::Stock | Group::Day)
+    }
+
+    /// Whether only the owner may change this group, whatever permissions a role holds.
+    #[must_use]
+    pub const fn owner_only(self) -> bool {
+        matches!(self, Group::Day)
     }
 }
 
@@ -1863,11 +1870,10 @@ pub const CATALOG: &[Entry] = &[
         "day.must_close",
         Day,
         Row,
-        "Close the day every day",
-        "Whoever signs in is asked about a day that was left open, and a day that has been \
-         closed takes no more money until somebody opens it again. Switch this off and no \
-         day is ever locked: every figure is still there and the drawer can still be \
-         counted, but nothing is refused and nobody is asked.",
+        "Day open/close",
+        "On, a day that was left open is asked about at sign-in and a closed day takes no more \
+         money until somebody opens it again. Off, nothing is locked and nobody is asked; the \
+         figures are in the reports either way.",
         [
             "day",
             "close",
@@ -1885,9 +1891,9 @@ pub const CATALOG: &[Entry] = &[
         key: "day.starts_at_minutes",
         group: Group::Day,
         storage: Storage::Row,
-        label: "A new day starts at",
-        help: "Midnight makes the day the calendar date. At 05:00 a bill printed at 1 a.m. \
-               counts as yesterday's. Set once; it changes which day every bill lands in.",
+        label: "New day starts at",
+        help: "Bills printed before this time belong to the day before. Set once: it decides \
+               which day every bill lands in.",
         synonyms: &[
             "day",
             "business day",
@@ -1921,9 +1927,9 @@ pub const CATALOG: &[Entry] = &[
         "day.variance_reason_above",
         Day,
         Row,
-        "Ask for a reason if the drawer is out by more than",
-        "When the counted cash differs from the expected cash by more than \
-         this, closing the day asks why. Zero asks every time.",
+        "Ask for a reason above",
+        "Closing asks why when the counted cash is out by more than this. Zero asks every \
+         time.",
         [
             "variance",
             "short",
@@ -1939,9 +1945,8 @@ pub const CATALOG: &[Entry] = &[
         "day.carry_float",
         Day,
         Row,
-        "Leave a float in the drawer overnight",
-        "Tomorrow starts with the amount below already counted, instead of an \
-         empty drawer.",
+        "Carry a float overnight",
+        "Tomorrow opens with the amount below already in the drawer.",
         ["float", "opening", "carry", "tomorrow", "change"],
         day.carry_float
     ),
@@ -1949,8 +1954,8 @@ pub const CATALOG: &[Entry] = &[
         "day.float_amount",
         Day,
         Row,
-        "How much to leave",
-        "Only used when the float is carried forward.",
+        "Float amount",
+        "Used only when a float is carried overnight.",
         ["float", "opening", "how much", "change", "tomorrow"],
         0..=10_000_000,
         day.float_amount

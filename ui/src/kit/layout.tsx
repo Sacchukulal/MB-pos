@@ -167,6 +167,7 @@ export function Foot({ children }: { children: ReactNode }) {
 export function Panel({
   title,
   note,
+  beside,
   actions,
   children,
   flush = false,
@@ -175,6 +176,9 @@ export function Panel({
   title?: string;
   /** The explanation, as something you can ask for. */
   note?: ReactNode;
+  /** A control that belongs to the panel's NAME rather than its contents: the switch that
+      decides whether there are any contents. It sits beside the title, not with the actions. */
+  beside?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
   flush?: boolean;
@@ -184,11 +188,12 @@ export function Panel({
     <section
       className={cx('mb-panel', flush && 'mb-panel--flush', className)}
     >
-      {title || actions ? (
+      {title || actions || beside ? (
         <div className="mb-panel__head">
           <div className="mb-panel__what">
             {title ? <h2 className="mb-panel__title">{title}</h2> : null}
             {note ? <InfoTip label={title ? `About ${title}` : undefined}>{note}</InfoTip> : null}
+            {beside}
           </div>
           {actions ? <div className="mb-panel__actions">{actions}</div> : null}
         </div>

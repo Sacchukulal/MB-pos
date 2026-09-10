@@ -136,6 +136,14 @@ pub const fn permission_for(group: Group) -> Permission {
     }
 }
 
+/// The door to change a section: its permission, or the owner alone.
+pub fn require_for(app: &App, group: Group) -> UiResult<mb_auth::Actor> {
+    if group.owner_only() {
+        return guard::require_owner(app);
+    }
+    guard::require(app, permission_for(group))
+}
+
 fn control_for(kind: Kind) -> &'static str {
     match kind {
         Kind::Bool => "tick",
@@ -233,58 +241,63 @@ fn off_the_wire(entry: &Entry, raw: &str) -> UiResult<Value> {
     Ok(value)
 }
 
-fn view_of(app: &App, config: &ShopConfig, allowed: &[Permission]) -> SettingsView {
+/// One section, with whether the person at the counter may change it.
+pub fn group_view(app: &App, config: &ShopConfig, group: Group) -> GroupView {
+    GroupView {
+        code: group.code().to_owned(),
+        label: group.label().to_owned(),
+        can_edit: require_for(app, group).is_ok(),
+        settings: catalog::CATALOG
+            .iter()
+            .filter(|entry| entry.group == group)
+            .map(|entry| SettingView {
+                key: entry.key.to_owned(),
+                topic: catalog::topic_for(entry).to_owned(),
+                row: catalog::row_for(entry).to_owned(),
+                short: catalog::short_for(entry).to_owned(),
+                label: entry.label.to_owned(),
+                help: entry.help.to_owned(),
+                control: control_for(entry.kind).to_owned(),
+                value: on_the_wire(entry.kind, &(entry.read)(config)),
+                choices: match entry.kind {
+                    Kind::Choice(options) => options
+                        .iter()
+                        .map(|o| ChoiceView {
+                            value: o.value.to_owned(),
+                            label: o.label.to_owned(),
+                        })
+                        .collect(),
+                    Kind::TaxClass => slab_choices(config, &(entry.read)(config)),
+                    _ => Vec::new(),
+                },
+                // `i32`, not `i64`.
+                min: match entry.kind {
+                    Kind::Int { min, .. } => i32::try_from(min).ok(),
+                    _ => None,
+                },
+                max: match entry.kind {
+                    Kind::Int { max, .. } => i32::try_from(max).ok(),
+                    _ => None,
+                },
+                unit: match entry.kind {
+                    Kind::Int { unit, .. } => unit.to_owned(),
+                    _ => String::new(),
+                },
+                max_len: match entry.kind {
+                    Kind::Text { max_len, .. } => u32::try_from(max_len).unwrap_or(u32::MAX),
+                    _ => 0,
+                },
+            })
+            .collect(),
+    }
+}
+
+fn view_of(app: &App, config: &ShopConfig) -> SettingsView {
     let trouble = app.with_shop(|_| Ok(())).err().map(|e| e.message);
     let groups = Group::ALL
         .iter()
         .filter(|group| group.on_settings_screen())
-        .map(|group| GroupView {
-            code: group.code().to_owned(),
-            label: group.label().to_owned(),
-            can_edit: allowed.contains(&permission_for(*group)),
-            settings: catalog::CATALOG
-                .iter()
-                .filter(|entry| entry.group == *group)
-                .map(|entry| SettingView {
-                    key: entry.key.to_owned(),
-                    topic: catalog::topic_for(entry).to_owned(),
-                    row: catalog::row_for(entry).to_owned(),
-                    short: catalog::short_for(entry).to_owned(),
-                    label: entry.label.to_owned(),
-                    help: entry.help.to_owned(),
-                    control: control_for(entry.kind).to_owned(),
-                    value: on_the_wire(entry.kind, &(entry.read)(config)),
-                    choices: match entry.kind {
-                        Kind::Choice(options) => options
-                            .iter()
-                            .map(|o| ChoiceView {
-                                value: o.value.to_owned(),
-                                label: o.label.to_owned(),
-                            })
-                            .collect(),
-                        Kind::TaxClass => slab_choices(config, &(entry.read)(config)),
-                        _ => Vec::new(),
-                    },
-                    // `i32`, not `i64`.
-                    min: match entry.kind {
-                        Kind::Int { min, .. } => i32::try_from(min).ok(),
-                        _ => None,
-                    },
-                    max: match entry.kind {
-                        Kind::Int { max, .. } => i32::try_from(max).ok(),
-                        _ => None,
-                    },
-                    unit: match entry.kind {
-                        Kind::Int { unit, .. } => unit.to_owned(),
-                        _ => String::new(),
-                    },
-                    max_len: match entry.kind {
-                        Kind::Text { max_len, .. } => u32::try_from(max_len).unwrap_or(u32::MAX),
-                        _ => 0,
-                    },
-                })
-                .collect(),
-        })
+        .map(|group| group_view(app, config, *group))
         .collect();
     SettingsView {
         groups,
@@ -295,13 +308,8 @@ fn view_of(app: &App, config: &ShopConfig, allowed: &[Permission]) -> SettingsVi
 
 /// Everything a person may look at, with what they may change marked.
 pub fn all_on(app: &App) -> UiResult<SettingsView> {
-    let who = guard::require_any(app, guard::SETTINGS_PERMISSIONS)?;
-    let allowed: Vec<Permission> = guard::SETTINGS_PERMISSIONS
-        .iter()
-        .copied()
-        .filter(|p| who.must(*p).is_ok())
-        .collect();
-    Ok(view_of(app, &app.shop_config(), &allowed))
+    guard::require_any(app, guard::SETTINGS_PERMISSIONS)?;
+    Ok(view_of(app, &app.shop_config()))
 }
 
 /// The keys that match, for the screen to jump to.
@@ -403,7 +411,7 @@ pub fn save_on(app: &App, edits: Vec<SettingEdit>) -> UiResult<SavedView> {
             )
             .with_detail(format!("setting {}", edit.key)));
         };
-        guard::require(app, permission_for(entry.group))?;
+        require_for(app, entry.group)?;
         let value = off_the_wire(entry, &edit.value)?;
         (entry.write)(&mut wanted, &value).map_err(|e| UiError::from(e.about(entry.key)))?;
     }
@@ -455,14 +463,9 @@ pub fn save_on(app: &App, edits: Vec<SettingEdit>) -> UiResult<SavedView> {
         log_info!("{} changed {} setting(s)", who.name, changed.len());
     }
 
-    let allowed: Vec<Permission> = guard::SETTINGS_PERMISSIONS
-        .iter()
-        .copied()
-        .filter(|p| who.must(*p).is_ok())
-        .collect();
     Ok(SavedView {
         changed: changed.iter().map(ChangeView::from).collect(),
-        settings: view_of(app, &app.shop_config(), &allowed),
+        settings: view_of(app, &app.shop_config()),
     })
 }
 
@@ -536,7 +539,7 @@ pub fn defaults_for_on(app: &App, group: String) -> UiResult<Vec<SettingEdit>> {
                 .with_detail(group),
         );
     };
-    guard::require(app, permission_for(group))?;
+    require_for(app, group)?;
 
     let defaults = ShopConfig::default();
     Ok(catalog::CATALOG

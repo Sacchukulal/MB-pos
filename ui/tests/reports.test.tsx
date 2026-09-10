@@ -7,7 +7,9 @@ const call = vi.fn();
 vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
   inApp: () => true,
-  isUiError: () => false,
+  // The real shape: an answer with a code is a refusal, and two tests are about which.
+  isUiError: (cause: unknown) =>
+    typeof cause === 'object' && cause !== null && 'code' in cause && 'message' in cause,
   // The real one, because the test below is about the difference it makes.
   isLicenceRefusal: (cause: unknown) =>
     typeof cause === 'object' &&
@@ -86,6 +88,7 @@ function answer(command: string) {
       days: [],
       upcoming: [],
       mayPlanHoliday: true,
+      rules: null,
     });
   }
   if (command === 'report_csv' || command === 'report_pdf') {
@@ -210,6 +213,36 @@ it('says why, on the screen, when the licence does not cover reports', async () 
   // And the way out is on the same screen, not somewhere they have to find.
   fireEvent.click(screen.getByRole('button', { name: 'Open Account' }));
   expect(go).toHaveBeenCalledWith('account');
+});
+
+/** A cashier may close the day without reading a single report. */
+it('opens on Day open/close, and nothing else, for somebody who may not read reports', async () => {
+  const denied = {
+    code: 'auth.denied',
+    message: 'You do not have permission to see reports, Priya. Ask somebody who can.',
+    detail: 'needs reports.view',
+  };
+  call.mockImplementation((command: string) =>
+    command === 'report_list' ? Promise.reject(denied) : answer(command),
+  );
+  open();
+  await waitFor(() => expect(call).toHaveBeenCalledWith('days'));
+  expect(screen.getByRole('button', { name: 'Day open/close' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Dashboard' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Bills' })).toBeNull();
+  expect(screen.queryByText('This part needs a licence')).toBeNull();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Close today' })).toBeTruthy());
+});
+
+/** An alert about a closed day lands here directly. */
+it('opens on Day open/close when asked for it', async () => {
+  render(
+    <ToastProvider>
+      <Reports initial="days" />
+    </ToastProvider>,
+  );
+  await waitFor(() => expect(call).toHaveBeenCalledWith('days'));
+  expect(call).toHaveBeenCalledWith('report_list');
 });
 
 it('puts the days beside the dashboard, and opens them without asking for a report', async () => {

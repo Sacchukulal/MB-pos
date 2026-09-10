@@ -58,7 +58,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
   gap: var(--space-4);
-  align-items: start;
+  /* Stretched, so the two rules under it can line the boxes up. */
+  align-items: stretch;
 }
 
 /* A run of nothing but tick boxes. */
@@ -88,6 +89,18 @@
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
+  /* A tick box has no label above it, so it drops to where the boxes beside it are. */
+  justify-content: flex-end;
+}
+
+/*
+ * The boxes in a run line up whatever the labels above them do: the field fills the row, the
+ * label stays at the top of it and the box sits at the bottom. A two-line label no longer
+ * pushes its own box below its neighbour's.
+ */
+.mb-settings__field > .mb-field {
+  flex: 1;
+  justify-content: space-between;
 }
 
 /* A row of buttons takes the whole line, whatever the grid is doing. */

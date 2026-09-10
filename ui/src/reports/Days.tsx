@@ -1,7 +1,7 @@
 /**
- * Day open/close: today's state, the drawer count that goes with closing,
- * the days since the shop opened and the holidays ahead. One screen, reached from the bar and
- * from Reports.
+ * Day open/close: today's state, the drawer count that goes with closing, the days since the
+ * shop opened, the holidays ahead — and, for the owner, the rules, the switch that turns the
+ * whole thing off first among them. One screen, under Reports.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -20,6 +20,7 @@ import {
   Scroller,
   Sections,
   Spinner,
+  Switch,
   Table,
   useToast,
   type BadgeTone,
@@ -31,6 +32,7 @@ import type { DayRowView } from '../ipc/generated/DayRowView';
 import type { DaysView } from '../ipc/generated/DaysView';
 import type { DrawerView } from '../ipc/generated/DrawerView';
 import type { UnconfirmedView } from '../ipc/generated/UnconfirmedView';
+import { Section, editsList, withEdit, type Edits } from '../settings/Form';
 
 /** The chip for a day's state, in a colour that is never the only signal. */
 const TONES: Record<string, BadgeTone> = {
@@ -62,6 +64,9 @@ export function Days() {
   /** Every electronic payment nobody has said arrived yet. */
   const [unconfirmed, setUnconfirmed] = useState<readonly UnconfirmedView[]>([]);
   const [waiting, setWaiting] = useState('');
+  /** The owner's unsaved changes to the rules. */
+  const [edits, setEdits] = useState<Edits>({});
+  const [saving, setSaving] = useState(false);
   const toast = useToast();
 
   const complain = useCallback(
@@ -84,24 +89,66 @@ export function Days() {
 
   const daysArrived = useCallback((fresh: DaysView) => setView(fresh), []);
 
-  useEffect(() => {
-    call('days').then(daysArrived).catch(complain);
-    // The drawer is optional: a shop that never counts still closes its days.
-    call('count_cash', { counts: null })
+  /** The whole screen. With the switch off there is no drawer and nothing waiting. */
+  const load = useCallback(() => {
+    call('days')
       .then((fresh) => {
-        if (fresh) drawerArrived(fresh);
-      })
-      .catch(() => setDrawer(null));
-    // Silent on failure: a person who may not read payments still closes the day.
-    call('payments')
-      .then((fresh) => {
-        if (fresh && Array.isArray(fresh.unconfirmed)) {
-          setUnconfirmed(fresh.unconfirmed);
-          setWaiting(fresh.says);
+        daysArrived(fresh);
+        if (!fresh.closesDays) {
+          setDrawer(null);
+          setUnconfirmed([]);
+          return;
         }
+        // The drawer is optional: a shop that never counts still closes its days.
+        call('count_cash', { counts: null })
+          .then((drawerNow) => {
+            if (drawerNow) drawerArrived(drawerNow);
+          })
+          .catch(() => setDrawer(null));
+        // Silent on failure: a person who may not read payments still closes the day.
+        call('payments')
+          .then((payments) => {
+            if (payments && Array.isArray(payments.unconfirmed)) {
+              setUnconfirmed(payments.unconfirmed);
+              setWaiting(payments.says);
+            }
+          })
+          .catch(() => setUnconfirmed([]));
       })
-      .catch(() => setUnconfirmed([]));
+      .catch(complain);
   }, [complain, daysArrived, drawerArrived]);
+
+  useEffect(load, [load]);
+
+  /** The rules go through the one door every setting goes through, then the screen is read again. */
+  const saveRules = () => {
+    setSaving(true);
+    call('save_settings', { edits: editsList(edits) })
+      .then(() => {
+        setEdits({});
+        toast.show('ok', 'Saved.');
+        load();
+      })
+      .catch(complain)
+      .finally(() => setSaving(false));
+  };
+
+  /**
+   * The switch is one press, not a form: it saves itself and the screen answers. A save that
+   * fails changes nothing, so the switch snaps back to what the shop still says.
+   */
+  const flip = (key: string, on: boolean) => {
+    setSaving(true);
+    call('save_settings', { edits: [{ key, value: on ? '1' : '0' }] })
+      .then(() => {
+        // Off takes the rest of the rules off the screen, so nothing half-typed is left behind.
+        if (!on) setEdits({});
+        toast.show('ok', on ? 'Day open/close is on.' : 'Day open/close is off.');
+        load();
+      })
+      .catch(complain)
+      .finally(() => setSaving(false));
+  };
 
   /** Every write answers with the whole screen. */
   const act = (promise: Promise<DaysView>, said: string) => {
@@ -212,6 +259,18 @@ export function Days() {
     );
   };
 
+  const rules = view.rules;
+  const dirty = Object.keys(edits).length > 0;
+  /** The switch itself, and the rules it turns on — the first setting of the section. */
+  const master = rules?.settings.find((setting) => setting.key === 'day.must_close');
+  const closes = master ? master.value === '1' : view.closesDays;
+  const rest = rules
+    ? {
+        ...rules,
+        settings: rules.settings.filter((setting) => setting.key !== master?.key),
+      }
+    : null;
+
   const todayActions = view.mayAct ? (
     view.todayState === 'open' ? (
       <>
@@ -249,7 +308,7 @@ export function Days() {
         {drawer ? (
           <Panel
             title="Count the drawer"
-            note="Optional. What is in the box under this till. Whatever is typed here goes with the day when you press Close today — or write it on its own at a shift handover, which records the drawer without closing anything."
+            note="Optional. What is in the drawer under this till: it goes with the day when you press Close today, or on its own at a shift handover."
             actions={drawer.countedSays ? <span className="mb-muted">{drawer.countedSays}</span> : null}
           >
             {drawer.tillsSay ? <p className="mb-muted">{drawer.tillsSay}</p> : null}
@@ -359,9 +418,11 @@ export function Days() {
           </Panel>
         ) : null}
 
-        <Panel title="Days" flush>
-          <Table columns={columns} rows={view.days} rowKey={(row) => row.day} />
-        </Panel>
+        {view.closesDays ? (
+          <Panel title="Days" flush>
+            <Table columns={columns} rows={view.days} rowKey={(row) => row.day} />
+          </Panel>
+        ) : null}
 
         {view.mayPlanHoliday ? (
           <Panel
@@ -415,6 +476,54 @@ export function Days() {
           </Panel>
         ) : null}
 
+        {/* The owner's rules: the switch, and — only when it is on — what it turns on. With the
+            switch off this panel is the whole screen. */}
+        {rules ? (
+          <Panel
+            className="mb-settings__form"
+            title="Rules"
+            note={master?.help ? master.help : undefined}
+            /* The switch belongs to the panel's name: off, the head IS the panel. */
+            beside={
+              master ? (
+                <Switch
+                  aria-label={master.label}
+                  checked={closes}
+                  disabled={!rules.canEdit || saving}
+                  onChange={(event) => flip(master.key, event.currentTarget.checked)}
+                />
+              ) : null
+            }
+            /* Nothing typed, nothing to save: the buttons come with the change. */
+            actions={
+              dirty ? (
+                <Row gap="inline" wrap={false}>
+                  <Button variant="quiet" onClick={() => setEdits({})}>
+                    Discard
+                  </Button>
+                  <Button variant="primary" disabled={saving} onClick={saveRules}>
+                    {saving ? 'Saving…' : 'Save'}
+                  </Button>
+                </Row>
+              ) : null
+            }
+            flush={!closes}
+          >
+            {closes && rest ? (
+              <div className="mb-sections">
+                <Section
+                  section={rest}
+                  edits={edits}
+                  onChange={(key, value) =>
+                    setEdits((was) =>
+                      withEdit(was, key, value, rest.settings.find((s) => s.key === key)?.value),
+                    )
+                  }
+                />
+              </div>
+            ) : null}
+          </Panel>
+        ) : null}
       </Sections>
 
       {/*

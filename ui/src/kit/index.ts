@@ -49,6 +49,7 @@ export {
   SearchField,
   Select,
   Stepper,
+  Switch,
 } from './controls';
 export type {
   ButtonProps,
@@ -57,6 +58,7 @@ export type {
   PhoneInputProps,
   SelectProps,
   StepperProps,
+  SwitchProps,
 } from './controls';
 
 export { useAction, type Action } from './action';

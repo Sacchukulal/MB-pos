@@ -82,6 +82,7 @@ const days: DaysView = {
   todayState: 'open',
   todayClosedSays: '',
   mayAct: true,
+  closesDays: true,
   closingSays: '',
   dayRunsSays: 'The day is the calendar date: a bill after midnight belongs to the new day.',
   carrySays: '',
@@ -125,6 +126,46 @@ const days: DaysView = {
   ],
   upcoming: [],
   mayPlanHoliday: true,
+  rules: null,
+};
+
+/** The rules, as the owner is handed them: the switch first. */
+const rules: DaysView['rules'] = {
+  code: 'day',
+  label: 'Day open/close',
+  canEdit: true,
+  settings: [
+    {
+      key: 'day.must_close',
+      topic: 'Day open/close',
+      row: '',
+      short: '',
+      label: 'Day open/close',
+      help: 'On, a day that was left open is asked about at sign-in.',
+      control: 'tick',
+      value: '1',
+      choices: [],
+      min: null,
+      max: null,
+      unit: '',
+      maxLen: 0,
+    },
+    {
+      key: 'day.starts_at_minutes',
+      topic: 'Day open/close',
+      row: '',
+      short: '',
+      label: 'New day starts at',
+      help: '',
+      control: 'time',
+      value: '00:00',
+      choices: [],
+      min: null,
+      max: null,
+      unit: '',
+      maxLen: 0,
+    },
+  ],
 };
 
 const drawer: DrawerView = {
@@ -333,28 +374,101 @@ it('sends the drawer count with the day when there is one', async () => {
   );
 });
 
-/// The whole thing is the owner's to switch off.
-it('says why there is nothing to press when the shop does not close its days', async () => {
+/// The whole thing is the owner's to switch off, and the switch is on this screen.
+it('shows the owner only the rules when the switch is off, and turns it back on from there', async () => {
+  const off: DaysView = {
+    ...days,
+    mayAct: false,
+    mayPlanHoliday: false,
+    closesDays: false,
+    days: [],
+    closingSays: '',
+    rules: {
+      ...rules,
+      settings: rules.settings.map((s) => (s.key === 'day.must_close' ? { ...s, value: '0' } : s)),
+    },
+  };
   call.mockImplementation((command: string) => {
-    if (command === 'days') {
-      return Promise.resolve({
-        ...days,
-        mayAct: false,
-        mayPlanHoliday: false,
-        closingSays:
-          'This shop does not close its days: nothing is locked and nobody is asked.',
-      });
-    }
+    if (command === 'days') return Promise.resolve(off);
     if (command === 'count_cash') return Promise.resolve(drawer);
     return Promise.resolve(null);
   });
 
   openDays();
-  await waitFor(() => expect(screen.getByText(/does not close its days/)).toBeTruthy());
+  // The switch says which way it is; nothing else on the screen explains it.
+  await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy());
   expect(screen.queryByRole('button', { name: 'Close today' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Mark today a holiday' })).toBeNull();
-  // The drawer can still be counted: that is a record, not a lock.
+  // Off means off: no drawer, no days, and the drawer was never even asked for.
+  expect(screen.queryByLabelText('How many 500 notes')).toBeNull();
+  expect(screen.queryByText('Days')).toBeNull();
+  expect(call).not.toHaveBeenCalledWith('count_cash', expect.anything());
+
+  // Off, the switch in the panel's head is the whole panel: nothing under it, and no Save,
+  // because Save belongs to the rules it hides.
+  expect(screen.getByText('Rules')).toBeTruthy();
+  expect(screen.queryByLabelText('New day starts at')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+
+  // One press: the switch saves itself, with nothing else riding along.
+  fireEvent.click(screen.getByLabelText('Day open/close'));
+  await waitFor(() =>
+    expect(call).toHaveBeenCalledWith('save_settings', {
+      edits: [{ key: 'day.must_close', value: '1' }],
+    }),
+  );
+  // And the screen is read again, so what came on shows.
+  await waitFor(() => expect(call.mock.calls.filter(([c]) => c === 'days').length).toBe(2));
+});
+
+/// Turning it off does not leave a half-typed rule behind to be saved later.
+it('drops the unsaved rules when the switch goes off', async () => {
+  call.mockImplementation((command: string) => {
+    if (command === 'days') return Promise.resolve({ ...days, rules });
+    if (command === 'count_cash') return Promise.resolve(drawer);
+    if (command === 'save_settings') return Promise.resolve(null);
+    return Promise.resolve(null);
+  });
+  openDays();
+  await waitFor(() => expect(screen.getByText('Rules')).toBeTruthy());
+
+  // The buttons arrive with the change and leave with it.
+  expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+  fireEvent.change(screen.getByLabelText('New day starts at'), { target: { value: '05:00' } });
+  expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
+
+  fireEvent.click(screen.getByLabelText('Day open/close'));
+  await waitFor(() =>
+    expect(call).toHaveBeenCalledWith('save_settings', {
+      edits: [{ key: 'day.must_close', value: '0' }],
+    }),
+  );
+  // The switch went on its own: the typed time did not go with it, and is not waiting either.
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).toBeNull());
+});
+
+/// Nobody but the owner is handed the rules.
+it('draws no rules for somebody who is not the owner', async () => {
+  openDays();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Close today' })).toBeTruthy());
+  expect(screen.queryByText('Rules')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+});
+
+/// The owner has the rules under the day's business, not in place of it.
+it('draws the rules after the days for the owner while the switch is on', async () => {
+  call.mockImplementation((command: string) => {
+    if (command === 'days') return Promise.resolve({ ...days, rules });
+    if (command === 'count_cash') return Promise.resolve(drawer);
+    return Promise.resolve(null);
+  });
+  openDays();
+  await waitFor(() => expect(screen.getByText('Rules')).toBeTruthy());
   expect(screen.getByLabelText('How many 500 notes')).toBeTruthy();
+  expect(screen.getByLabelText('New day starts at')).toBeTruthy();
+  // Off, once saved, is a press away.
+  expect(screen.getByLabelText('Day open/close')).toBeTruthy();
+  expect(screen.getByText('Enabled')).toBeTruthy();
 });
 
 it('opens a closed day again only with a reason', async () => {
@@ -379,7 +493,9 @@ it('counts the drawer through Rust and writes it without locking anything', asyn
 
   fireEvent.change(screen.getByLabelText('How many 500 notes'), { target: { value: '4' } });
   await waitFor(() =>
-    expect(call).toHaveBeenCalledWith('count_cash', { counts: [{ value: 50_000, count: 4 }] }),
+    expect(call).toHaveBeenCalledWith('count_cash', {
+      counts: [{ value: 50_000, count: 4 }],
+    }),
   );
 
   fireEvent.change(screen.getByLabelText('Why is the drawer out?'), {

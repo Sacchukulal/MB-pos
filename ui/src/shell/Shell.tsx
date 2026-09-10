@@ -33,7 +33,6 @@ import { Floor } from '../floor/Floor';
 import { Delivery } from '../delivery/Delivery';
 import { Menu } from '../menu/Menu';
 import { Phones } from '../phones/Phones';
-import { Days } from '../reports/Days';
 import { Reports } from '../reports/Reports';
 import { Settings } from '../settings/Settings';
 
@@ -93,15 +92,6 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'devices.pair',
   },
   {
-    // First in the More sheet: it is done every night, and a cashier who may close a day
-    // cannot open Reports, so this is their only door to it.
-    id: 'dayclose',
-    label: 'Day open/close',
-    icon: 'calendar',
-    render: () => <Days />,
-    needsAny: ['day.close', 'reports.view'],
-  },
-  {
     id: 'credit',
     label: 'Credit',
     icon: 'wallet',
@@ -144,16 +134,17 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     render: () => <Delivery />,
   },
   {
-    // Bills live inside Reports: "what did that customer pay?" and "how did the month go?" are
-    // the same person's questions.
+    // Bills and Day open/close live inside Reports: "what did that customer pay?", "how did
+    // the month go?" and "is today closed?" are the same person's questions. A cashier who
+    // may close the day but not read reports opens it for Day open/close alone.
     id: 'reports',
     daily: true,
     label: 'Reports',
     icon: 'chart',
     // `go` so a licence refusal can hand somebody straight to the Account screen instead of
-    // leaving them to find it.
-    render: (go) => <Reports onGoTo={go} />,
-    needs: 'reports.view',
+    // leaving them to find it; `sub` so an alert can land on Day open/close.
+    render: (go, sub) => <Reports onGoTo={go} initial={sub} />,
+    needsAny: ['reports.view', 'day.close'],
   },
   {
     // In the bar, after Reports: the owner opens it to check the plan, take a backup, or
@@ -544,7 +535,7 @@ export function Shell() {
       icon: 'calendar',
       title: dayState.todayState === 'holiday' ? 'Today is a holiday' : 'Today is closed',
       says: `${dayState.todayClosedSays} Nothing more can be billed into it until somebody opens it again.`,
-      goTo: dayState.mayAct ? 'dayclose' : undefined,
+      goTo: dayState.mayAct ? 'reports/days' : undefined,
       goLabel: dayState.mayAct ? 'Day open/close' : undefined,
     });
   }

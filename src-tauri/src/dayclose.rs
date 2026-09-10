@@ -14,6 +14,8 @@ use ts_rs::TS;
 use crate::flows::{now, today};
 use crate::guard;
 use crate::ipc::MoneyView;
+use crate::settings::catalog::Group;
+use crate::settings::ipc::GroupView;
 use crate::state::{App, OUTLET};
 use crate::words::{self, UiError, UiResult};
 
@@ -98,7 +100,7 @@ pub struct DayRowView {
     pub may_be_holiday: bool,
 }
 
-/// The Day open/close screen — reached from the bar, and from Reports.
+/// The Day open/close screen, under Reports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -108,8 +110,10 @@ pub struct DaysView {
     pub today_state: String,
     pub today_closed_says: String,
     pub may_act: bool,
-    /// Why nothing on this screen can be pressed, when this shop does not close its days — or
-    /// empty.
+    /// Whether this shop opens and closes its days at all. Off, and the screen is the switch.
+    pub closes_days: bool,
+    /// Why nothing on this screen can be pressed, for somebody who cannot turn it on — the
+    /// owner is handed the switch itself instead.
     pub closing_says: String,
     /// The shop's day rule as a sentence: "A new day starts at 5:00 am…".
     pub day_runs_says: String,
@@ -122,6 +126,9 @@ pub struct DaysView {
     pub upcoming: Vec<DayRowView>,
     /// Whether a day that has not come yet may be marked a holiday.
     pub may_plan_holiday: bool,
+    /// The day rules, handed to the owner and nobody else. The switch that turns the whole
+    /// screen on and off is the first of them.
+    pub rules: Option<GroupView>,
 }
 
 /// `YYYY-MM-DD` from the screen, or the refusal.
@@ -308,8 +315,7 @@ pub fn day_state_on(app: &App, holidays: Option<Vec<String>>) -> UiResult<DaySta
                     });
                 }
 
-                let (today_state, today_closed_says) =
-                    state_words(&repos, repos.days().find(OUTLET, today)?.as_ref())?;
+                let (today_state, today_closed_says) = today_words(&repos, today, closes_days)?;
                 Ok(DayStateView {
                     today: today.to_string(),
                     today_says: format!("Today, {}", words::day_with_weekday(today, today)),
@@ -372,6 +378,19 @@ fn action_words(closes: &[BusinessDay], holidays: &[BusinessDay]) -> String {
     }
 }
 
+/// Today's state and sentence. With the switch off no day is closed, whatever a row from
+/// before the switch says.
+fn today_words(
+    repos: &mb_db::Repos<'_>,
+    today: BusinessDay,
+    closes_days: bool,
+) -> Result<(String, String), mb_db::DbError> {
+    if !closes_days {
+        return Ok(("open".to_owned(), String::new()));
+    }
+    state_words(repos, repos.days().find(OUTLET, today)?.as_ref())
+}
+
 /// The shop's day rule as a sentence: which bills land on which day.
 fn day_runs_words(starts_at_minutes: u32) -> String {
     if starts_at_minutes == 0 {
@@ -386,8 +405,9 @@ fn day_runs_words(starts_at_minutes: u32) -> String {
 pub fn days_on(app: &App) -> UiResult<DaysView> {
     let who = guard::require_any(app, &[Permission::ReportsView, Permission::DayClose])?;
     let closes_days = app.closes_days();
-    // A shop that does not close its days has nothing here to press, whoever is looking.
+    // With the switch off there is nothing here to press, whoever is looking.
     let may_act = closes_days && who.must(Permission::DayClose).is_ok();
+    let is_owner = guard::require_owner(app).is_ok();
     let today = today(now());
     let config = app.shop_config();
     let window = BusinessDay::from_days_since_epoch(
@@ -400,48 +420,52 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
         shop.db
             .read_transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                let tables = repos.floor().list_tables(OUTLET)?;
-                let open = repos.orders().list_open(OUTLET)?;
-                // The list starts where the shop did: a day before its first bill, expense or
-                // close is not a day it left open. A shop opened today lists today.
-                let first = repos
-                    .days()
-                    .first_activity(OUTLET)?
-                    .map_or(today, |first| first.min(today));
-                let from = window.max(first);
-
                 let mut days = Vec::new();
-                let mut day = today;
-                while day >= from {
-                    let look = look_at(&repos, &tables, &open, day)?;
-                    days.push(row_view(&repos, &look, today, may_act)?);
-                    day = day.previous();
-                }
                 let mut upcoming = Vec::new();
-                for row in repos.days().locked_after(OUTLET, today)? {
-                    let look = Look {
-                        day: row.day,
-                        figures: DayFigures::default(),
-                        open_orders: Vec::new(),
-                        row: Some(row),
-                        opened_at: None,
-                    };
-                    upcoming.push(row_view(&repos, &look, today, may_act)?);
+                // With the switch off no day is listed: the figures are in the reports, and a
+                // row saying "Never closed" would be a question nobody is being asked.
+                if closes_days {
+                    let tables = repos.floor().list_tables(OUTLET)?;
+                    let open = repos.orders().list_open(OUTLET)?;
+                    // The list starts where the shop did: a day before its first bill,
+                    // expense or close is not a day it left open. A shop opened today lists
+                    // today.
+                    let first = repos
+                        .days()
+                        .first_activity(OUTLET)?
+                        .map_or(today, |first| first.min(today));
+                    let from = window.max(first);
+
+                    let mut day = today;
+                    while day >= from {
+                        let look = look_at(&repos, &tables, &open, day)?;
+                        days.push(row_view(&repos, &look, today, may_act)?);
+                        day = day.previous();
+                    }
+                    for row in repos.days().locked_after(OUTLET, today)? {
+                        let look = Look {
+                            day: row.day,
+                            figures: DayFigures::default(),
+                            open_orders: Vec::new(),
+                            row: Some(row),
+                            opened_at: None,
+                        };
+                        upcoming.push(row_view(&repos, &look, today, may_act)?);
+                    }
                 }
 
-                let (today_state, today_closed_says) =
-                    state_words(&repos, repos.days().find(OUTLET, today)?.as_ref())?;
+                let (today_state, today_closed_says) = today_words(&repos, today, closes_days)?;
                 Ok(DaysView {
                     today: today.to_string(),
                     today_says: format!("Today, {}", words::day_with_weekday(today, today)),
                     today_state,
                     today_closed_says,
                     may_act,
-                    closing_says: if closes_days {
+                    closes_days,
+                    closing_says: if closes_days || is_owner {
                         String::new()
                     } else {
-                        "This shop does not close its days. Turn it on under Settings › Closing the day."
-                            .to_owned()
+                        "Day open/close is off. Only the owner can turn it on.".to_owned()
                     },
                     day_runs_says: day_runs_words(config.day.starts_at_minutes),
                     carry_says: if closes_days
@@ -459,6 +483,8 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                     days,
                     upcoming,
                     may_plan_holiday: may_act,
+                    rules: is_owner
+                        .then(|| crate::settings::ipc::group_view(app, &config, Group::Day)),
                 })
             })
             .map_err(|e| words::from_db(&e))
@@ -554,16 +580,15 @@ fn locked_refusal(code: &str, since: Timestamp, then: &str) -> UiError {
     )
 }
 
-/// Closing days is something this shop does. The refusal when it is not — so a screen left open
-/// across the switch cannot lock a day in a shop that has stopped closing them.
+/// The switch is on. The refusal when it is not — so a screen left open across the switch
+/// cannot lock or count a day in a shop that has stopped closing them.
 fn closing_must_be_on(app: &App) -> UiResult<()> {
     if app.closes_days() {
         return Ok(());
     }
     Err(UiError::new(
         "day.closing_off",
-        "This shop does not close its days. Turn on \"Close the day every day\" under \
-         Settings › Closing the day first.",
+        "Day open/close is off. The owner turns it on under Reports › Day open/close.",
     ))
 }
 
@@ -1229,6 +1254,7 @@ pub fn count_drawer_on(
     print: bool,
 ) -> UiResult<DrawerView> {
     let who = guard::require(app, Permission::DayClose)?;
+    closing_must_be_on(app)?;
     let at = now();
     let day = today(at);
 

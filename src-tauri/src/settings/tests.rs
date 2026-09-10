@@ -163,7 +163,6 @@ fn search_finds_a_setting_by_the_word_a_person_would_type() {
         ("roundoff", "billing.rounding"),
         ("round off", "billing.rounding"),
         ("logo", "receipt.logo"),
-        ("5 am", "day.starts_at_minutes"),
         ("utgst", "store.state_code"),
         ("composition", "store.registration"),
         ("hsn", "receipt.show.hsn"),
