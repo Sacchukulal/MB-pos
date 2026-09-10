@@ -388,7 +388,7 @@ function Categories({
         <div className="mb-menu__categories">
           <button
             type="button"
-            className="mb-menu__category"
+            className="mb-pick mb-menu__category"
             aria-current={chosen === null ? 'page' : undefined}
             onClick={() => onChoose(null)}
           >
@@ -428,13 +428,12 @@ function Categories({
             ) : (
               <div
                 key={category.id}
-                className="mb-menu__catrow"
+                className="mb-pick mb-menu__catrow"
                 aria-current={chosen === category.id ? 'page' : undefined}
               >
                 <button
                   type="button"
                   className="mb-menu__category"
-                  aria-current={chosen === category.id ? 'page' : undefined}
                   onClick={() => onChoose(category.id)}
                 >
                   <span className="mb-menu__catname">{category.name}</span>

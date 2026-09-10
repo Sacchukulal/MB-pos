@@ -560,7 +560,7 @@ pub fn change_licence_on(
             .unwrap_or(named)
     });
     let owner = crate::firstrun::owner_row_named(app, &owner_name, true)?;
-    crate::ipc::write_pin(app, owner.id.as_str(), Some(&hashed), &owner.id, at)?;
+    crate::ipc::write_pin(app, owner.id.as_str(), &hashed, &owner.id, at)?;
     log_info!("{} took over this counter on another licence", owner.name);
     crate::ipc::admit(app, &owner, at)?;
     app.with_owner_sign_in(|held| *held = None);

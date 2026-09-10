@@ -339,7 +339,7 @@ export function RailItem({
   return (
     <button
       type="button"
-      className="mb-rail__item"
+      className="mb-pick mb-rail__item"
       aria-current={current ? 'page' : undefined}
       onClick={onClick}
     >

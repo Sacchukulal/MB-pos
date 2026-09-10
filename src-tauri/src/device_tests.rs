@@ -56,12 +56,7 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
     );
     save_staff_member_on(
         &app,
-        StaffEdit {
-            id: "staff_boss".to_owned(),
-            name: "Meena".to_owned(),
-            role_id: Some(RolePreset::Cashier.id().to_owned()),
-            status: "active".to_owned(),
-        },
+        StaffEdit::new("staff_boss", "Meena", RolePreset::Cashier.id(), "2468"),
     )
     .expect("hired");
     app

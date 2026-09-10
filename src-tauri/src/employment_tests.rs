@@ -11,10 +11,10 @@ use mb_core::{Money, StaffId};
 use mb_db::{Db, DbConfig};
 
 use crate::employment::{
-    EmployeeEdit, SalaryEdit, adjust_leave_on, approve_payroll_on, attendance_on, clock_in_on,
+    SalaryEdit, adjust_leave_on, approve_payroll_on, attendance_on, clock_in_on,
     compute_payroll_on, correct_attendance_on, decide_leave_on, give_advance_on, leave_on,
-    payroll_on, people_on, request_leave_on, reverse_payroll_on, salary_on, save_employee_on,
-    save_salary_on, staff_cost_on,
+    payroll_on, people_on, request_leave_on, reverse_payroll_on, salary_on, save_salary_on,
+    staff_cost_on,
 };
 use crate::ipc::{StaffEdit, audit_trail_on, save_staff_member_on};
 use crate::signin_tests::Scratch;
@@ -60,16 +60,12 @@ fn only(permissions: &[Permission]) -> PermissionSet {
 
 /// Put somebody on the staff list the way the Staff screen does.
 fn hire(app: &App, id: &str, name: &str) {
-    save_staff_member_on(
-        app,
-        StaffEdit {
-            id: id.to_owned(),
-            name: name.to_owned(),
-            role_id: Some(RolePreset::Cashier.id().to_owned()),
-            status: "active".to_owned(),
-        },
-    )
-    .expect("hired");
+    save_staff_member_on(app, cashier(id, name)).expect("hired");
+}
+
+/// A cashier's record, to be edited before it is saved.
+fn cashier(id: &str, name: &str) -> StaffEdit {
+    StaffEdit::new(id, name, RolePreset::Cashier.id(), "2468")
 }
 
 fn today() -> BusinessDay {
@@ -436,22 +432,8 @@ fn every_employment_command_refuses_somebody_without_the_permission() {
 
     assert!(people_on(&app).is_err(), "employees");
     assert!(
-        save_employee_on(
-            &app,
-            EmployeeEdit {
-                id: "staff_priya".to_owned(),
-                designation: "Cook".to_owned(),
-                department: String::new(),
-                address: String::new(),
-                emergency_name: String::new(),
-                emergency_phone: String::new(),
-                id_proof: String::new(),
-                employment_type: "full_time".to_owned(),
-                left_on: String::new(),
-            }
-        )
-        .is_err(),
-        "save_employee"
+        save_staff_member_on(&app, cashier("staff_priya", "Priya")).is_err(),
+        "save_staff_member"
     );
     assert!(
         correct_attendance_on(
@@ -868,47 +850,51 @@ fn somebody_who_leaves_keeps_their_record() {
     as_owner(&app, "staff_boss", "Meena");
 
     let day = today();
-    save_employee_on(
-        &app,
-        EmployeeEdit {
-            id: "staff_ravi".to_owned(),
-            designation: "Cook".to_owned(),
-            department: "Kitchen".to_owned(),
-            address: String::new(),
-            emergency_name: "Lakshmi".to_owned(),
-            emergency_phone: "9845000000".to_owned(),
-            id_proof: "Aadhaar ...4321".to_owned(),
-            employment_type: "full_time".to_owned(),
-            left_on: day_text(day),
-        },
-    )
-    .expect("saved");
+    let mut ravi = cashier("staff_ravi", "Ravi");
+    ravi.pin = String::new();
+    ravi.designation = "Cook".to_owned();
+    ravi.department = "Kitchen".to_owned();
+    ravi.emergency_name = "Lakshmi".to_owned();
+    ravi.emergency_phone = "9845000000".to_owned();
+    ravi.id_proof = "Aadhaar ...4321".to_owned();
+
+    // A leaving day on somebody still working is a contradiction, and it is refused before
+    // anything is written.
+    let mut still_here = ravi.clone();
+    still_here.left_on = day_text(day);
+    assert_eq!(
+        save_staff_member_on(&app, still_here)
+            .expect_err("a leaving day was accepted on somebody who works here")
+            .code,
+        "staff.left_on"
+    );
+
+    ravi.status = "left".to_owned();
+    ravi.left_on = day_text(day);
+    save_staff_member_on(&app, ravi.clone()).expect("saved");
 
     let people = people_on(&app).expect("read");
-    let ravi = people
+    let gone = people
         .iter()
         .find(|p| p.id == "staff_ravi")
         .expect("still on the list — nobody is ever deleted");
-    assert_eq!(ravi.status, "left");
-    assert_eq!(ravi.left, day_text(day));
-    assert_eq!(ravi.designation.as_deref(), Some("Cook"));
+    assert_eq!(gone.status, "left");
+    assert_eq!(gone.left, day_text(day));
+    assert_eq!(gone.designation.as_deref(), Some("Cook"));
+    let detail = crate::ipc::staff_details_on(&app, "staff_ravi".to_owned()).expect("the card");
+    assert_eq!(detail.emergency_name, "Lakshmi");
+    assert_eq!(detail.emergency_phone, "9845000000");
+    assert_eq!(detail.id_proof, "Aadhaar ...4321");
+    assert!(
+        detail.has_pin,
+        "the PIN was lost on the way through the edit"
+    );
 
-    // And coming back sets them active again without losing anything.
-    save_employee_on(
-        &app,
-        EmployeeEdit {
-            id: "staff_ravi".to_owned(),
-            designation: "Cook".to_owned(),
-            department: "Kitchen".to_owned(),
-            address: String::new(),
-            emergency_name: "Lakshmi".to_owned(),
-            emergency_phone: "9845000000".to_owned(),
-            id_proof: "Aadhaar ...4321".to_owned(),
-            employment_type: "full_time".to_owned(),
-            left_on: String::new(),
-        },
-    )
-    .expect("saved");
+    // And coming back sets them active again without losing anything — the leaving day goes
+    // with the status, so the pair never disagrees.
+    ravi.status = "active".to_owned();
+    ravi.left_on = String::new();
+    save_staff_member_on(&app, ravi).expect("saved");
     let people = people_on(&app).expect("read");
     let ravi = people.iter().find(|p| p.id == "staff_ravi").expect("there");
     assert_eq!(ravi.status, "active");

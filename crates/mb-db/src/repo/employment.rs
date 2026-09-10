@@ -32,6 +32,32 @@ pub struct Employee {
     pub joined_on: Option<BusinessDay>,
     /// Set when they have left.
     pub left_on: Option<BusinessDay>,
+    pub address: Option<String>,
+    pub emergency_name: Option<String>,
+    pub emergency_phone: Option<String>,
+    /// A reference to what is in the file, never the document itself.
+    pub id_proof: Option<String>,
+}
+
+/// The columns `Employee` is read from, in its field order.
+const EMPLOYEE_COLUMNS: &str = "SELECT id, name, designation, department, phone, employment_type,
+                                      status, joined_on, left_on, address, emergency_name,
+                                      emergency_phone, id_proof";
+
+/// The employment side of one person, as the Staff screen saves it. The identity — name, role,
+/// status, PIN — is `PeopleRepo::save_staff`'s; this is everything else on the same row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EmploymentRecord<'a> {
+    pub phone: Option<&'a str>,
+    pub designation: Option<&'a str>,
+    pub department: Option<&'a str>,
+    pub address: Option<&'a str>,
+    pub emergency_name: Option<&'a str>,
+    pub emergency_phone: Option<&'a str>,
+    pub id_proof: Option<&'a str>,
+    pub employment_type: &'a str,
+    /// Only on somebody whose status is already `left` — the schema refuses it otherwise.
+    pub left_on: Option<BusinessDay>,
 }
 
 /// A stored day, when there is one.
@@ -261,27 +287,42 @@ impl<'a> EmploymentRepo<'a> {
 
     /// Everybody, with the employment side filled in.
     pub fn list_employees(&self, outlet: &str) -> Result<Vec<Employee>, DbError> {
-        let mut stmt = self.tx.prepare_cached(
-            "SELECT id, name, designation, department, phone, employment_type,
-                    status, joined_on, left_on
-               FROM staff WHERE outlet_id = ?1 ORDER BY status, name",
-        )?;
+        let mut stmt = self.tx.prepare_cached(&format!(
+            "{EMPLOYEE_COLUMNS} FROM staff WHERE outlet_id = ?1 ORDER BY status, name"
+        ))?;
         let mut rows = stmt.query(params![outlet])?;
         let mut out = Vec::new();
         while let Some(row) = rows.next()? {
-            out.push(Employee {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                designation: row.get(2)?,
-                department: row.get(3)?,
-                phone: row.get(4)?,
-                employment_type: row.get(5)?,
-                status: row.get(6)?,
-                joined_on: day_opt(row.get(7)?),
-                left_on: day_opt(row.get(8)?),
-            });
+            out.push(Self::employee(row)?);
         }
         Ok(out)
+    }
+
+    /// One person, with the employment side filled in.
+    pub fn find_employee(&self, outlet: &str, id: &str) -> Result<Option<Employee>, DbError> {
+        let mut stmt = self.tx.prepare_cached(&format!(
+            "{EMPLOYEE_COLUMNS} FROM staff WHERE outlet_id = ?1 AND id = ?2"
+        ))?;
+        let mut rows = stmt.query(params![outlet, id])?;
+        rows.next()?.map(Self::employee).transpose()
+    }
+
+    fn employee(row: &rusqlite::Row<'_>) -> Result<Employee, DbError> {
+        Ok(Employee {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            designation: row.get(2)?,
+            department: row.get(3)?,
+            phone: row.get(4)?,
+            employment_type: row.get(5)?,
+            status: row.get(6)?,
+            joined_on: day_opt(row.get(7)?),
+            left_on: day_opt(row.get(8)?),
+            address: row.get(9)?,
+            emergency_name: row.get(10)?,
+            emergency_phone: row.get(11)?,
+            id_proof: row.get(12)?,
+        })
     }
 
     /// Name by id, for a screen that shows whose row this is.
@@ -317,53 +358,41 @@ impl<'a> EmploymentRepo<'a> {
         Ok(out)
     }
 
-    /// The employment side of one person's record.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "an employment record IS this many facts"
-    )]
+    /// The employment side of one person's record. The status is not touched here — it is the
+    /// identity's, written by `PeopleRepo::save_staff` in the same transaction — so a leaving
+    /// day may only be given to somebody already marked as having left.
     pub fn save_employment(
         &self,
         outlet: &str,
         id: &str,
-        designation: Option<&str>,
-        department: Option<&str>,
-        address: Option<&str>,
-        emergency_name: Option<&str>,
-        emergency_phone: Option<&str>,
-        id_proof: Option<&str>,
-        employment_type: &str,
-        left_on: Option<BusinessDay>,
+        record: &EmploymentRecord<'_>,
         at: Timestamp,
     ) -> Result<(), DbError> {
         let changed = self.tx.execute(
             "UPDATE staff
-                SET designation     = ?3,
-                    department      = ?4,
-                    address         = ?5,
-                    emergency_name  = ?6,
-                    emergency_phone = ?7,
-                    id_proof        = ?8,
-                    employment_type = ?9,
-                    left_on         = ?10,
-                    status          = CASE
-                                        WHEN ?10 IS NOT NULL THEN 'left'
-                                        WHEN status = 'left'  THEN 'active'
-                                        ELSE status
-                                      END,
-                    updated_at      = ?11
+                SET phone           = ?3,
+                    designation     = ?4,
+                    department      = ?5,
+                    address         = ?6,
+                    emergency_name  = ?7,
+                    emergency_phone = ?8,
+                    id_proof        = ?9,
+                    employment_type = ?10,
+                    left_on         = ?11,
+                    updated_at      = ?12
               WHERE outlet_id = ?1 AND id = ?2",
             params![
                 outlet,
                 id,
-                designation,
-                department,
-                address,
-                emergency_name,
-                emergency_phone,
-                id_proof,
-                employment_type,
-                left_on.map(encode::business_day_to_sql),
+                record.phone,
+                record.designation,
+                record.department,
+                record.address,
+                record.emergency_name,
+                record.emergency_phone,
+                record.id_proof,
+                record.employment_type,
+                record.left_on.map(encode::business_day_to_sql),
                 encode::timestamp_to_sql(at),
             ],
         )?;

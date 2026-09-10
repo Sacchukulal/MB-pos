@@ -54,6 +54,22 @@ function themes(): Map<string, Map<string, string>> {
   return found;
 }
 
+/**
+ * A token's value, following `var(--other)` as far as it goes. A theme is allowed to say
+ * `--pick-ink: var(--text)` — that is the point of a palette — and the pair it makes is still
+ * a pair somebody has to read.
+ */
+function value(tokens: Map<string, string>, name: string): string | undefined {
+  let found = tokens.get(name);
+  // Six hops is far more than any chain in the file; it is here so a loop cannot hang the run.
+  for (let hop = 0; hop < 6; hop += 1) {
+    const points = found?.match(/^var\(\s*(--[a-z0-9-]+)\s*\)$/);
+    if (!points) return found;
+    found = tokens.get(points[1] ?? '');
+  }
+  return found;
+}
+
 /** The pairs somebody has to read, and the minimum each one needs. */
 const PAIRS: readonly { ink: string; ground: string; least: number }[] = [
   { ink: '--text', ground: '--bg', least: 4.5 },
@@ -69,11 +85,29 @@ const PAIRS: readonly { ink: string; ground: string; least: number }[] = [
   { ink: '--text', ground: '--warn-soft', least: 4.5 },
   { ink: '--text', ground: '--danger-soft', least: 4.5 },
   { ink: '--text', ground: '--accent-soft', least: 4.5 },
+  // The chosen row of a list, and the row under the hand on the way to it.
+  { ink: '--pick-ink', ground: '--pick-bg', least: 4.5 },
+  { ink: '--pick-ink', ground: '--pick-bg-hover', least: 4.5 },
+  { ink: '--text', ground: '--pick-hover', least: 4.5 },
+  // The marker down its left edge, on the fill it is drawn over.
+  { ink: '--pick-line', ground: '--pick-bg', least: 3 },
 
   { ink: '--border-strong', ground: '--surface', least: 3 },
   { ink: '--border-strong', ground: '--bg', least: 3 },
   { ink: '--border', ground: '--surface', least: 1.5 },
   { ink: '--border', ground: '--bg', least: 1.5 },
+];
+
+/**
+ * The other half of readable, and the half a contrast table misses: a state has to be SEEN.
+ * The chosen row of a list used to wear `--surface-2`, which passed every pair above and was
+ * still invisible on a white sheet — being 4.5:1 against your own ink says nothing about
+ * whether anybody can find you.
+ */
+const SEEN: readonly { state: string; on: string; least: number }[] = [
+  { state: '--pick-bg', on: '--surface', least: 1.25 },
+  { state: '--pick-bg', on: '--pick-hover', least: 1.1 },
+  { state: '--pick-hover', on: '--surface', least: 1.1 },
 ];
 
 describe('every theme is readable (T6, UI_GUIDELINES §2)', () => {
@@ -90,8 +124,8 @@ describe('every theme is readable (T6, UI_GUIDELINES §2)', () => {
     it(`"${name}" passes every pair a person has to read`, () => {
       const failures: string[] = [];
       for (const pair of PAIRS) {
-        const ink = tokens.get(pair.ink);
-        const ground = tokens.get(pair.ground);
+        const ink = value(tokens, pair.ink);
+        const ground = value(tokens, pair.ground);
         // A theme that does not define a token is a different failure, and the test below is
         // the one that reports it.
         if (!ink || !ground) continue;
@@ -100,6 +134,24 @@ describe('every theme is readable (T6, UI_GUIDELINES §2)', () => {
         if (got < pair.least) {
           failures.push(
             `${pair.ink} on ${pair.ground} is ${got.toFixed(2)}:1, needs ${pair.least}:1`,
+          );
+        }
+      }
+      expect(failures, `${name}: ${failures.join('; ')}`).toEqual([]);
+    });
+
+    it(`"${name}" shows a chosen row against the sheet it sits on`, () => {
+      const failures: string[] = [];
+      for (const pair of SEEN) {
+        const state = value(tokens, pair.state);
+        const on = value(tokens, pair.on);
+        expect(state, `${name} has no ${pair.state}`).toBeTruthy();
+        expect(on, `${name} has no ${pair.on}`).toBeTruthy();
+        const got = ratio(state ?? '', on ?? '');
+        if (got === null) continue;
+        if (got < pair.least) {
+          failures.push(
+            `${pair.state} on ${pair.on} is ${got.toFixed(2)}:1, needs ${pair.least}:1`,
           );
         }
       }

@@ -64,8 +64,10 @@ pub fn look_on(app: &App) -> UiResult<FirstRunView> {
     // A shop is open.
     let config = app.shop_config();
     let has_details = !config.store.name.trim().is_empty();
-    // One read for the two facts the first run turns on: a PIN, and who owns the shop. The menu,
-    // the tables and the printer are the counter's own screens, not questions asked here.
+    // One read for the two facts the first run turns on: a PIN, and who owns the shop. ANY
+    // PIN: once one exists the counter locks, and an owner without one takes the lock screen's
+    // own door — proving the account or the licence key — not this one. The menu, the tables
+    // and the printer are the counter's own screens, not questions asked here.
     let (has_pin, owner) = app
         .with_shop(|shop| {
             shop.db

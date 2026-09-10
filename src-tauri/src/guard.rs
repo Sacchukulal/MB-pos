@@ -104,7 +104,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ),
     ("list_staff", Access::Needs(Permission::StaffManage)),
     ("save_staff_member", Access::Needs(Permission::StaffManage)),
-    ("set_staff_pin", Access::Needs(Permission::StaffManage)),
+    ("staff_details", Access::Needs(Permission::StaffManage)),
     ("list_roles", Access::Needs(Permission::StaffManage)),
     ("save_role", Access::Needs(Permission::StaffManage)),
     ("list_permissions", Access::Needs(Permission::StaffManage)),
@@ -242,7 +242,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("export_expenses", Access::Needs(Permission::ExpensesManage)),
     // The employment side.
     ("employees", Access::Needs(Permission::StaffManage)),
-    ("save_employee", Access::Needs(Permission::StaffManage)),
     // Reading attendance: your own needs nothing beyond being signed in, and anybody ELSE's
     // needs the permission.
     ("attendance", Access::SignedIn),

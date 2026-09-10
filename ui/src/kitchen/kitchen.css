@@ -49,9 +49,9 @@
 }
 
 .mb-kds__tab--on {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent-line);
+  background: var(--pick-bg);
+  color: var(--pick-ink);
+  border-color: var(--pick-line);
 }
 
 /* Firing a course. */

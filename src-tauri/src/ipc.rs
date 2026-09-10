@@ -455,7 +455,7 @@ macro_rules! commands {
             $crate::ipc::reset_owner_pin,
             $crate::ipc::list_staff,
             $crate::ipc::save_staff_member,
-            $crate::ipc::set_staff_pin,
+            $crate::ipc::staff_details,
             $crate::ipc::list_roles,
             $crate::ipc::save_role,
             $crate::ipc::list_permissions,
@@ -526,7 +526,6 @@ macro_rules! commands {
             $crate::expenses::export_expenses,
             // The employment side: shifts, attendance, leave, salary and payroll.
             $crate::employment::employees,
-            $crate::employment::save_employee,
             $crate::employment::attendance,
             $crate::employment::clock_in,
             $crate::employment::clock_out,
@@ -1873,8 +1872,55 @@ pub struct StaffEdit {
     pub role_id: Option<String>,
     /// "active", "suspended" or "left".
     pub status: String,
+    /// A new PIN. Empty leaves the one they have; somebody new must be given one.
+    pub pin: String,
+    pub phone: String,
+    pub designation: String,
+    pub department: String,
+    /// "full_time", "part_time" or "casual".
+    pub employment_type: String,
+    pub address: String,
+    pub emergency_name: String,
+    pub emergency_phone: String,
+    pub id_proof: String,
+    /// Typed by a person, parsed in Rust. Only on somebody who has left.
+    pub left_on: String,
 }
 
+impl StaffEdit {
+    /// Somebody new: working here, full time, with nothing else known about them yet. The
+    /// screen builds its own; this is for the tests and the demo seed.
+    #[cfg(test)]
+    #[must_use]
+    pub fn new(id: &str, name: &str, role_id: &str, pin: &str) -> Self {
+        StaffEdit {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            role_id: Some(role_id.to_owned()),
+            status: "active".to_owned(),
+            pin: pin.to_owned(),
+            phone: String::new(),
+            designation: String::new(),
+            department: String::new(),
+            employment_type: "full_time".to_owned(),
+            address: String::new(),
+            emergency_name: String::new(),
+            emergency_phone: String::new(),
+            id_proof: String::new(),
+            left_on: String::new(),
+        }
+    }
+}
+
+/// Trimmed, or nothing.
+fn given(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
+/// The whole person in one go — who they are at the sign-in screen and what they do in the
+/// shop — because the owner adding somebody fills in one form, not three. Nobody is ever
+/// deleted: `left` is the only ending.
 pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonView>> {
     let who = guard::require(app, Permission::StaffManage)?;
     let at = crate::flows::now();
@@ -1892,31 +1938,97 @@ pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonV
         }
     };
 
-    if staff.name.trim().is_empty() {
+    let Some(name) = given(&staff.name) else {
         return Err(UiError::new("staff.name", "A staff member needs a name."));
+    };
+    // A person with no role can sign in and do nothing, which looks like a broken app rather
+    // than a locked one.
+    let Some(role_id) = staff.role_id.as_deref().and_then(given) else {
+        return Err(UiError::new("staff.role", "Give this person a role."));
+    };
+    if !matches!(
+        staff.employment_type.as_str(),
+        "full_time" | "part_time" | "casual"
+    ) {
+        return Err(UiError::new(
+            "staff.type",
+            "Full-time, part-time or casual.",
+        ));
     }
+    let left_on = match given(&staff.left_on) {
+        Some(text) => Some(crate::employment::parse_day(text, "staff.left_on")?),
+        None => None,
+    };
+    if left_on.is_some() && status != mb_db::repo::people::StaffStatus::Left {
+        return Err(UiError::new(
+            "staff.left_on",
+            "Only somebody who has left has a leaving day.",
+        ));
+    }
+    let phone = mb_core::Phone::parse_optional(&staff.phone)
+        .map_err(|e| UiError::new("staff.phone", format!("{e}.")))?
+        .map(|p| p.as_str().to_owned());
+    // The number somebody rings when there is an accident, so it is worth the same rule as
+    // every other phone in the product.
+    let emergency_phone = mb_core::Phone::parse_optional(&staff.emergency_phone)
+        .map_err(|e| UiError::new("staff.emergency_phone", format!("{e}.")))?
+        .map(|p| p.as_str().to_owned());
+    // The shape of a new PIN is checked before anything is written.
+    let hashed = hashed_pin(Some(&staff.pin))?;
 
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let existing = repos.people().find_staff(OUTLET, &staff.id)?;
-                let before = existing.as_ref().map(staff_json);
+                if existing.is_none() && hashed.is_none() {
+                    return Err(mb_db::DbError::invariant(
+                        "somebody new needs a PIN, or they cannot sign in",
+                    ));
+                }
+                let before = match &existing {
+                    Some(member) => person_json(
+                        member,
+                        repos
+                            .employment()
+                            .find_employee(OUTLET, &staff.id)?
+                            .as_ref(),
+                    ),
+                    None => serde_json::Value::Null,
+                };
                 // Whether there WAS one, not only whether there is one.
                 let had_one = !repos.people().active_administrators(OUTLET)?.is_empty();
                 let member = mb_db::repo::people::StaffMember {
                     id: mb_core::StaffId::new(staff.id.clone()),
-                    name: staff.name.trim().to_owned(),
-                    role_id: staff.role_id.clone(),
+                    name: name.to_owned(),
+                    role_id: Some(role_id.to_owned()),
                     role_name: None,
-                    // A PIN is set by its own command.
-                    pin_hash: existing.as_ref().and_then(|m| m.pin_hash.clone()),
+                    pin_hash: hashed
+                        .as_ref()
+                        .map(|h| h.as_str().to_owned())
+                        .or_else(|| existing.as_ref().and_then(|m| m.pin_hash.clone())),
                     status,
                     permissions: mb_auth::PermissionSet::new(),
                     max_discount_bp: None,
                     max_discount: None,
                 };
                 repos.people().save_staff(OUTLET, &member, at)?;
+                repos.employment().save_employment(
+                    OUTLET,
+                    &staff.id,
+                    &mb_db::repo::employment::EmploymentRecord {
+                        phone: phone.as_deref(),
+                        designation: given(&staff.designation),
+                        department: given(&staff.department),
+                        address: given(&staff.address),
+                        emergency_name: given(&staff.emergency_name),
+                        emergency_phone: emergency_phone.as_deref(),
+                        id_proof: given(&staff.id_proof),
+                        employment_type: &staff.employment_type,
+                        left_on,
+                    },
+                    at,
+                )?;
 
                 if had_one && repos.people().active_administrators(OUTLET)?.is_empty() {
                     return Err(mb_db::DbError::invariant(
@@ -1925,11 +2037,16 @@ pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonV
                     ));
                 }
 
-                let after = repos
-                    .people()
-                    .find_staff(OUTLET, &staff.id)?
-                    .as_ref()
-                    .map_or(serde_json::Value::Null, staff_json);
+                let after = match repos.people().find_staff(OUTLET, &staff.id)? {
+                    Some(member) => person_json(
+                        &member,
+                        repos
+                            .employment()
+                            .find_employee(OUTLET, &staff.id)?
+                            .as_ref(),
+                    ),
+                    None => serde_json::Value::Null,
+                };
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(
@@ -1940,8 +2057,23 @@ pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonV
                         "staff",
                     )
                     .about(&staff.id)
-                    .changed(before.unwrap_or(serde_json::Value::Null), after),
+                    .changed(before, after),
                 )?;
+                // A PIN is its own line in the history, the same line the first run writes.
+                if hashed.is_some() {
+                    repos.audit().append(
+                        OUTLET,
+                        &AuditEntry::new(
+                            at,
+                            day,
+                            Some(who.staff_id.clone()),
+                            action::PIN_SET,
+                            "staff",
+                        )
+                        .about(&staff.id)
+                        .with_after(serde_json::json!({ "has_pin": true })),
+                    )?;
+                }
                 Ok(())
             })
             .map_err(|e| words::from_db(&e))
@@ -1950,17 +2082,107 @@ pub fn save_staff_member_on(app: &App, staff: StaffEdit) -> UiResult<Vec<PersonV
     list_staff_on(app)
 }
 
-/// Never the PIN itself.
-fn staff_json(member: &mb_db::repo::people::StaffMember) -> serde_json::Value {
+/// What the history keeps of a person: never the PIN itself, and not their address or ID
+/// reference either — a change to those is a change, and the row's own updated time says so.
+fn person_json(
+    member: &mb_db::repo::people::StaffMember,
+    record: Option<&mb_db::repo::employment::Employee>,
+) -> serde_json::Value {
     serde_json::json!({
         "name": member.name,
         "role_id": member.role_id,
         "status": status_word(member.status),
         "has_pin": member.pin_hash.is_some(),
+        "phone": record.and_then(|r| r.phone.clone()),
+        "designation": record.and_then(|r| r.designation.clone()),
+        "department": record.and_then(|r| r.department.clone()),
+        "employment_type": record.map(|r| r.employment_type.clone()),
+        "left_on": record.and_then(|r| r.left_on).map(crate::employment::day_words),
     })
 }
 
-/// A typed PIN, hashed; `None` when the PIN is being cleared.
+/// One person, both sides: what the card shows and what the edit dialog starts from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct StaffDetailView {
+    pub id: String,
+    pub name: String,
+    pub role_id: Option<String>,
+    pub role: Option<String>,
+    /// "active", "suspended" or "left".
+    pub status: String,
+    pub has_pin: bool,
+    pub phone: String,
+    pub designation: String,
+    pub department: String,
+    /// "full_time", "part_time" or "casual".
+    pub employment_type: String,
+    pub address: String,
+    pub emergency_name: String,
+    pub emergency_phone: String,
+    pub id_proof: String,
+    /// "2025-03-12", or empty.
+    pub joined: String,
+    /// "2026-08-31", or empty.
+    pub left_on: String,
+    /// What they are on right now, in words — empty for anybody who may not see pay.
+    pub salary_says: String,
+}
+
+pub fn staff_details_on(app: &App, staff_id: String) -> UiResult<StaffDetailView> {
+    guard::require(app, Permission::StaffManage)?;
+    // The salary is behind its own permission, so a manager who may edit staff does not
+    // thereby learn what everybody earns.
+    let may_see_pay = guard::require(app, Permission::SalaryView).is_ok();
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let (Some(member), Some(record)) = (
+                    repos.people().find_staff(OUTLET, &staff_id)?,
+                    repos.employment().find_employee(OUTLET, &staff_id)?,
+                ) else {
+                    return Err(mb_db::DbError::invariant(
+                        "that person is not on the staff list",
+                    ));
+                };
+                let salary_says = if may_see_pay {
+                    crate::employment::salary_says(&repos, &staff_id)?
+                } else {
+                    String::new()
+                };
+                Ok(StaffDetailView {
+                    id: record.id,
+                    name: record.name,
+                    role_id: member.role_id,
+                    role: member.role_name,
+                    status: record.status,
+                    has_pin: member.pin_hash.is_some(),
+                    phone: record.phone.unwrap_or_default(),
+                    designation: record.designation.unwrap_or_default(),
+                    department: record.department.unwrap_or_default(),
+                    employment_type: record.employment_type,
+                    address: record.address.unwrap_or_default(),
+                    emergency_name: record.emergency_name.unwrap_or_default(),
+                    emergency_phone: record.emergency_phone.unwrap_or_default(),
+                    id_proof: record.id_proof.unwrap_or_default(),
+                    joined: record
+                        .joined_on
+                        .map(crate::employment::day_words)
+                        .unwrap_or_default(),
+                    left_on: record
+                        .left_on
+                        .map(crate::employment::day_words)
+                        .unwrap_or_default(),
+                    salary_says,
+                })
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
+
+/// A typed PIN, hashed; `None` when nothing was typed.
 pub(crate) fn hashed_pin(pin: Option<&str>) -> UiResult<Option<PinHash>> {
     match pin.map(str::trim).filter(|p| !p.is_empty()) {
         Some(typed) => {
@@ -1976,11 +2198,12 @@ pub(crate) fn hashed_pin(pin: Option<&str>) -> UiResult<Option<PinHash>> {
     }
 }
 
-/// Write a person's PIN, or clear it, and say so in the history. `by` is whoever did it.
+/// Write a person's PIN and say so in the history. `by` is whoever did it. A PIN is never
+/// cleared: somebody who must not sign in is suspended.
 pub(crate) fn write_pin(
     app: &App,
     staff_id: &str,
-    hashed: Option<&PinHash>,
+    hashed: &PinHash,
     by: &mb_core::StaffId,
     at: Timestamp,
 ) -> UiResult<()> {
@@ -1996,36 +2219,23 @@ pub(crate) fn write_pin(
                 };
                 // A PIN with no role is somebody who can sign in and do nothing, which looks
                 // like a broken app rather than a locked one.
-                if hashed.is_some() && member.role_id.is_none() {
+                if member.role_id.is_none() {
                     return Err(mb_db::DbError::invariant(
                         "give this person a role before setting their PIN",
                     ));
                 }
-                member.pin_hash = hashed.map(|h| h.as_str().to_owned());
+                member.pin_hash = Some(hashed.as_str().to_owned());
                 repos.people().save_staff(OUTLET, &member, at)?;
                 repos.audit().append(
                     OUTLET,
                     &AuditEntry::new(at, day, Some(by.clone()), action::PIN_SET, "staff")
                         .about(staff_id)
-                        .with_after(serde_json::json!({ "has_pin": hashed.is_some() })),
+                        .with_after(serde_json::json!({ "has_pin": true })),
                 )?;
                 Ok(())
             })
             .map_err(|e| words::from_db(&e))
     })
-}
-
-/// Set or clear a PIN.
-pub fn set_staff_pin_on(app: &App, staff_id: String, pin: Option<String>) -> UiResult<()> {
-    let who = guard::require(app, Permission::StaffManage)?;
-    let at = crate::flows::now();
-    // What the shop looked like BEFORE.
-    let had_a_pin = app.shop_has_a_pin();
-    let hashed = hashed_pin(pin.as_deref())?;
-    write_pin(app, &staff_id, hashed.as_ref(), &who.staff_id, at)?;
-    // Setting the first PIN locks the app, here and now.
-    app.relock_if_this_was_the_first_pin(had_a_pin);
-    Ok(())
 }
 
 /// The way back in when the owner's PIN is gone: the account's email and password, or the
@@ -2053,7 +2263,7 @@ pub fn reset_owner_pin_on(
         ));
     };
     crate::firstrun::prove_owner(app, &proof)?;
-    write_pin(app, owner.id.as_str(), Some(&hashed), &owner.id, at)?;
+    write_pin(app, owner.id.as_str(), &hashed, &owner.id, at)?;
     log_warn!("{} reset their PIN by proving the account", owner.name);
     // Straight in: the cloud has just vouched for them, so a lockout from guessed PINs does not
     // stand in the way.
@@ -2266,12 +2476,8 @@ pub fn save_staff_member(
 }
 
 #[tauri::command]
-pub fn set_staff_pin(
-    app: tauri::State<'_, App>,
-    staff_id: String,
-    pin: Option<String>,
-) -> UiResult<()> {
-    set_staff_pin_on(&app, staff_id, pin)
+pub fn staff_details(app: tauri::State<'_, App>, staff_id: String) -> UiResult<StaffDetailView> {
+    staff_details_on(&app, staff_id)
 }
 
 #[tauri::command]

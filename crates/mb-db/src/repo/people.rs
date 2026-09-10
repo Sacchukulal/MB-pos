@@ -167,6 +167,8 @@ impl<'a> PeopleRepo<'a> {
         OutboxRepo::new(self.tx).enqueue(outlet, "roles", id, Op::Upsert, at)
     }
 
+    /// The identity: name, role, status, PIN. Somebody coming back loses their leaving day here,
+    /// because the schema refuses a leaving day on anybody who has not left.
     pub fn save_staff(
         &self,
         outlet: &str,
@@ -181,6 +183,8 @@ impl<'a> PeopleRepo<'a> {
                                             name       = excluded.name,
                                             pin_hash   = excluded.pin_hash,
                                             status     = excluded.status,
+                                            left_on    = CASE WHEN excluded.status = 'left'
+                                                              THEN staff.left_on END,
                                             updated_at = excluded.updated_at",
             rusqlite::params![
                 staff.id.as_str(),

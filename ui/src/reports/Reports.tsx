@@ -154,12 +154,8 @@ export function Reports({
               <button
                 type="button"
                 key={entry.id}
-                className={
-                  chosen === entry.id
-                    ? 'mb-reports__pick mb-reports__pick--on'
-                    : 'mb-reports__pick'
-                }
-                aria-current={chosen === entry.id}
+                className="mb-pick mb-reports__pick"
+                aria-current={chosen === entry.id ? 'true' : undefined}
                 onClick={() => setChosen(entry.id)}
               >
                 {entry.label}
@@ -173,12 +169,8 @@ export function Reports({
               <button
                 type="button"
                 key={entry.id}
-                className={
-                  entry.id === chosen
-                    ? 'mb-reports__pick mb-reports__pick--on'
-                    : 'mb-reports__pick'
-                }
-                aria-current={entry.id === chosen}
+                className="mb-pick mb-reports__pick"
+                aria-current={entry.id === chosen ? 'true' : undefined}
                 onClick={() => setChosen(entry.id)}
               >
                 {entry.title}

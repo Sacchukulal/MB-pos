@@ -250,8 +250,8 @@
 
 /* SELECTED: the tile the cashier is on. */
 .mb-tile--selected {
-  border-color: var(--accent);
-  outline: var(--focus-ring-width) solid var(--accent);
+  border-color: var(--pick-line);
+  outline: var(--focus-ring-width) solid var(--pick-line);
   outline-offset: var(--focus-ring-inset);
 }
 
@@ -260,8 +260,8 @@
  * selected occupied tile setting `box-shadow` here would erase the stripe it is drawn over.
  */
 .mb-tile--free.mb-tile--selected {
-  background: var(--accent-soft);
-  color: var(--text);
+  background: var(--pick-bg);
+  color: var(--pick-ink);
 }
 
 /*
@@ -393,9 +393,9 @@
 
 /* PICKED: ticked for a bulk action. */
 .mb-tile--picked {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--text);
+  background: var(--pick-bg);
+  border-color: var(--pick-line);
+  color: var(--pick-ink);
 }
 
 /* The tick, so "ticked" is a shape and not only a colour. */
@@ -600,8 +600,8 @@
 
 /* The highlighted one — the one Enter settles. */
 .mb-settle__row--on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--pick-line);
+  background: var(--pick-bg);
 }
 
 .mb-settle__head {
@@ -797,13 +797,13 @@
 /* The one the cart is on. */
 .mb-processing__order--on,
 .mb-processing__order--on:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--pick-bg);
+  border-color: var(--pick-line);
 }
 
 /* The one the arrow keys are on: a ring on the edge, the same ring focus draws. */
 .mb-processing__order--highlighted {
-  outline: var(--focus-ring-width) solid var(--accent);
+  outline: var(--focus-ring-width) solid var(--pick-line);
   outline-offset: var(--focus-ring-inset);
 }
 

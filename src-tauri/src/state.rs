@@ -724,19 +724,6 @@ impl App {
         self.with_shop(|shop| Ok(anybody_has_a_pin(&shop.db).unwrap_or(false)))
             .unwrap_or(false)
     }
-
-    /// Setting the FIRST PIN locks the app immediately — proving it works while that person is
-    /// still standing there is worth four seconds.
-    pub fn relock_if_this_was_the_first_pin(&self, had_a_pin: bool) {
-        if had_a_pin || !self.shop_has_a_pin() {
-            return;
-        }
-        let _ = self.with_shop(|shop| {
-            let db = Arc::clone(&shop.db);
-            self.open_or_lock(&db);
-            Ok(())
-        });
-    }
 }
 
 impl App {

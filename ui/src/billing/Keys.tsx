@@ -26,7 +26,7 @@ export function Suggestions({
             type="button"
             role="option"
             aria-selected={index === highlighted}
-            className={cx('mb-sheet__item', 'mb-suggestion')}
+            className={cx('mb-pick', 'mb-sheet__item', 'mb-suggestion')}
             // Touch reaches the same place Enter does.
             onClick={() => onPick(index)}
           >

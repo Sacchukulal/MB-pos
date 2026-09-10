@@ -60,12 +60,7 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
 fn as_owner(app: &App, id: &str, name: &str) {
     save_staff_member_on(
         app,
-        StaffEdit {
-            id: id.to_owned(),
-            name: name.to_owned(),
-            role_id: Some(RolePreset::Cashier.id().to_owned()),
-            status: "active".to_owned(),
-        },
+        StaffEdit::new(id, name, RolePreset::Cashier.id(), "2468"),
     )
     .expect("hired");
     app.sessions().begin(

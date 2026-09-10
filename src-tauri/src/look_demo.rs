@@ -1337,6 +1337,9 @@ fn demo_printer() {
 }
 
 /// The people, and their employment.
+/// Every seeded person signs in with this.
+const DEMO_PIN: &str = "1111";
+
 const PEOPLE: &[(&str, &str, &str, &str, &str, i64)] = &[
     // Id, name, designation, department, basis, amount in rupees.
     (
@@ -1392,43 +1395,25 @@ fn seed_people(app: &App) {
     let today = crate::flows::today(at);
 
     for (id, name, designation, department, basis, amount) in PEOPLE {
-        crate::ipc::save_staff_member_on(
-            app,
-            crate::ipc::StaffEdit {
-                id: (*id).to_owned(),
-                name: (*name).to_owned(),
-                role_id: Some(
-                    match *department {
-                        "Counter" => "role_manager",
-                        _ => "role_waiter",
-                    }
-                    .to_owned(),
-                ),
-                status: "active".to_owned(),
+        // Everybody's PIN is 1111 — the demo is for looking at, not for signing in as Deepa.
+        let mut person = crate::ipc::StaffEdit::new(
+            id,
+            name,
+            match *department {
+                "Counter" => "role_manager",
+                _ => "role_waiter",
             },
-        )
-        .expect("hired");
-
-        crate::employment::save_employee_on(
-            app,
-            crate::employment::EmployeeEdit {
-                id: (*id).to_owned(),
-                designation: (*designation).to_owned(),
-                department: (*department).to_owned(),
-                address: String::new(),
-                emergency_name: String::new(),
-                emergency_phone: String::new(),
-                id_proof: String::new(),
-                employment_type: if *basis == "monthly" {
-                    "full_time"
-                } else {
-                    "part_time"
-                }
-                .to_owned(),
-                left_on: String::new(),
-            },
-        )
-        .expect("employment record");
+            DEMO_PIN,
+        );
+        person.designation = (*designation).to_owned();
+        person.department = (*department).to_owned();
+        person.employment_type = if *basis == "monthly" {
+            "full_time"
+        } else {
+            "part_time"
+        }
+        .to_owned();
+        crate::ipc::save_staff_member_on(app, person).expect("hired");
 
         crate::employment::save_salary_on(
             app,
@@ -1459,33 +1444,25 @@ fn seed_people(app: &App) {
     }
 
     // Somebody who left. The record stays.
-    crate::ipc::save_staff_member_on(
-        app,
-        crate::ipc::StaffEdit {
-            id: "staff_prakash".to_owned(),
-            name: "Prakash".to_owned(),
-            role_id: Some("role_waiter".to_owned()),
-            status: "active".to_owned(),
-        },
-    )
-    .expect("hired");
-    crate::employment::save_employee_on(
-        app,
-        crate::employment::EmployeeEdit {
-            id: "staff_prakash".to_owned(),
-            designation: "Waiter".to_owned(),
-            department: "Service".to_owned(),
-            address: String::new(),
-            emergency_name: String::new(),
-            emergency_phone: String::new(),
-            id_proof: String::new(),
-            employment_type: "part_time".to_owned(),
-            left_on: ymd(BusinessDay::from_days_since_epoch(
-                today.days_since_epoch() - 6,
-            )),
-        },
-    )
-    .expect("left");
+    let mut prakash =
+        crate::ipc::StaffEdit::new("staff_prakash", "Prakash", "role_waiter", DEMO_PIN);
+    prakash.designation = "Waiter".to_owned();
+    prakash.department = "Service".to_owned();
+    prakash.employment_type = "part_time".to_owned();
+    crate::ipc::save_staff_member_on(app, prakash.clone()).expect("hired");
+    prakash.pin = String::new();
+    prakash.status = "left".to_owned();
+    prakash.left_on = ymd(BusinessDay::from_days_since_epoch(
+        today.days_since_epoch() - 6,
+    ));
+    crate::ipc::save_staff_member_on(app, prakash).expect("left");
+
+    // The owner, with the same PIN, so the demo opens onto the lock screen and they walk in.
+    let owner = crate::firstrun::owner_row_named(app, "Sanath", true).expect("the owner row");
+    let hashed = crate::ipc::hashed_pin(Some(DEMO_PIN))
+        .expect("a PIN")
+        .expect("typed");
+    crate::ipc::write_pin(app, owner.id.as_str(), &hashed, &owner.id, at).expect("the owner's PIN");
 
     // A fortnight of attendance: everybody in, everybody out, with two people late on two of
     // the days so the verdict column has something in it.

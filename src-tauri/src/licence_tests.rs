@@ -583,9 +583,13 @@ fn l1_the_gate_is_cheap_enough_to_put_anywhere() {
 fn a_lapsed_plan_does_not_keep_anybody_out() {
     let scratch = Scratch::new("no_door");
     let app = a_trading_shop(&scratch, "no_door");
-    crate::signin_tests::hire(&app, "staff_boss", "Meena", mb_auth::RolePreset::Owner);
-    crate::ipc::set_staff_pin_on(&app, "staff_boss".to_owned(), Some("2468".to_owned()))
-        .expect("pin");
+    crate::signin_tests::hire(
+        &app,
+        "staff_boss",
+        "Meena",
+        mb_auth::RolePreset::Owner,
+        "2468",
+    );
     app.use_licensing(licence_in(&scratch, "no_door", Status::Active, -100));
     assert!(!app.entitlement().operating());
     crate::ipc::login_on(&app, "staff_boss".to_owned(), "2468".to_owned()).expect("signed in");

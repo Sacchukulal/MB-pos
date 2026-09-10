@@ -31,32 +31,13 @@
   color: var(--text-faint);
 }
 
+/*
+ * A report is a pick (kit.css). The rail holds a long list of them, so its rows are set in the
+ * cell size and read quiet until one is chosen.
+ */
 .mb-reports__pick {
-  width: 100%;
-  min-height: var(--control-md);
-  padding: var(--space-2) var(--space-3);
-  border: var(--border-width) solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
   color: var(--text-muted);
-  font: inherit;
   font-size: var(--text-sm);
-  text-align: left;
-  cursor: pointer;
-}
-
-.mb-reports__pick:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-/* The report you are on. */
-.mb-reports__pick--on {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--text);
-  font-weight: var(--weight-medium);
-  box-shadow: inset var(--tile-stripe) 0 0 0 var(--accent);
 }
 
 /* Three rows: the period picker and the heading stay, the sheet scrolls. */

@@ -62,6 +62,25 @@
   --type-cell: var(--text-sm);
   --type-caption: var(--text-xs);
 
+  /*
+   * THE PICK CONTRACT — what "this is the one" looks like in a LIST.
+   *
+   * A filled button already says it where two or three stand side by side (a segment, the top
+   * bar). A row in a list somebody scrolls cannot be filled with the accent without shouting,
+   * so it gets a language of its own: a fill, its own ink, bold words and a marker down its
+   * left edge. The colours are a palette and live with each theme; the geometry is the same in
+   * both and lives here.
+   *
+   * The marker is a pill the row draws, not an inset shadow. An inset shadow is clipped by the
+   * row's corner radius, so what a rounded row actually showed was a bracket curling round its
+   * two left corners rather than a straight line.
+   */
+  --pick-mark: 3px;
+  /* How far the marker stands off the row's left edge. */
+  --pick-mark-inset: var(--space-1);
+  /* How far short of the row's ends it stops, so it reads as a mark and not as an edge. */
+  --pick-mark-short: var(--space-2);
+
   /* THE ELEVATION CONTRACT — three levels, and no fourth. */
 
   --level-flat: none;
@@ -396,6 +415,20 @@
   --brand-soft: #dbe7fd;
 
   /*
+   * The pick — the chosen row of a list, and the row under the hand on the way to it. The
+   * chosen row used to be the panel's own grey and could not be told from the panel it sat in;
+   * this is a blue tint, deep enough to see from a step back and light enough to read dark ink
+   * on. It is the SAME blue in both themes — nobody should have to learn selection twice on
+   * the way from day to night — and the marker is the brand blue itself, the one colour in
+   * this product whose whole job is to point.
+   */
+  --pick-hover: #e6edf8;
+  --pick-bg: #cfe0fb;
+  --pick-bg-hover: #bcd4f8;
+  --pick-ink: var(--text);
+  --pick-line: var(--brand);
+
+  /*
    * The charts. One hue for every chart that ranks or runs over time; four fixed identities
    * for the slices of a whole (a payment mode, an order type), checked for colour blindness
    * against this surface.
@@ -466,6 +499,13 @@
 
   --brand: #60a5fa;
   --brand-soft: #172a4a;
+
+  /* The pick — the same argument, and the same blue, chosen again for navy paper. */
+  --pick-hover: #202e4a;
+  --pick-bg: #1e3a63;
+  --pick-bg-hover: #27497b;
+  --pick-ink: var(--text);
+  --pick-line: var(--brand);
 
   --chart-mono: var(--brand);
   --chart-track: var(--surface-sunk);

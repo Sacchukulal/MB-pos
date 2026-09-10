@@ -6,12 +6,18 @@ import {
   Badge,
   Button,
   Checkbox,
+  Fact,
+  Facts,
+  Fields,
   freshId,
   Input,
   Modal,
   Page,
   PageHeader,
+  PhoneInput,
+  SectionHeader,
   Select,
+  Stack,
   Table,
   Tabs,
   useToast,
@@ -20,9 +26,12 @@ import {
 import { call, isUiError } from '../ipc/call';
 import type { PersonView } from '../ipc/generated/PersonView';
 import type { RoleView } from '../ipc/generated/RoleView';
+import type { StaffDetailView } from '../ipc/generated/StaffDetailView';
+import type { StaffEdit } from '../ipc/generated/StaffEdit';
 
 import { PIN_DIGITS } from './keyboard';
-import { Attendance, EmploymentDetails, Leave, Payroll, Salary } from './Employment';
+import { Attendance, Leave, Payroll, Salary } from './Employment';
+import { blankPerson, editOf } from './person';
 import type { EmployeeView } from '../ipc/generated/EmployeeView';
 
 import './auth.css';
@@ -71,23 +80,42 @@ export function Staff() {
   );
 }
 
+const STATUS_WORDS: Record<string, string> = {
+  active: 'Works here',
+  suspended: 'Suspended',
+  left: 'Left',
+};
+
+const WORKING_WORDS: Record<string, string> = {
+  full_time: 'Full time',
+  part_time: 'Part time',
+  casual: 'Casual — as needed',
+};
+
 function People() {
   const [people, setPeople] = useState<readonly PersonView[]>([]);
   const [roles, setRoles] = useState<readonly RoleView[]>([]);
-  const [editing, setEditing] = useState<PersonView | null>(null);
-  const [pinFor, setPinFor] = useState<PersonView | null>(null);
-  /** The employment record behind a person: what they do, and when they left. */
-  const [atWork, setAtWork] = useState<PersonView | null>(null);
+  /** The card: who is being looked at. */
+  const [viewing, setViewing] = useState<string | null>(null);
+  /** The one dialog: somebody new, or somebody's record as it is. */
+  const [editing, setEditing] = useState<StaffEdit | null>(null);
   const toast = useToast();
+
+  const report = useCallback(
+    (cause: unknown) => {
+      if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
+    },
+    [toast],
+  );
 
   const load = useCallback(async () => {
     try {
       setPeople(await call('list_staff'));
       setRoles(await call('list_roles'));
     } catch (cause) {
-      if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
+      report(cause);
     }
-  }, [toast]);
+  }, [report]);
 
   useEffect(() => {
     void load();
@@ -97,6 +125,16 @@ function People() {
       .then(() => load())
       .catch(() => undefined);
   }, [load]);
+
+  /** Everything about them comes from Rust, so the dialog starts from what is really there. */
+  const edit = (id: string) => {
+    call('staff_details', { staffId: id })
+      .then((person) => {
+        setViewing(null);
+        setEditing(editOf(person));
+      })
+      .catch(report);
+  };
 
   const columns: Column<PersonView>[] = [
     { key: 'name', header: 'Name', render: (p) => p.name },
@@ -114,11 +152,7 @@ function People() {
       // emphasis.
       render: (p) => (
         <Badge tone={p.status === 'active' ? 'ok' : 'neutral'}>
-          {p.status === 'active'
-            ? 'Works here'
-            : p.status === 'suspended'
-              ? 'Suspended'
-              : 'Left'}
+          {STATUS_WORDS[p.status] ?? p.status}
         </Badge>
       ),
     },
@@ -126,19 +160,10 @@ function People() {
       key: 'do',
       header: '',
       render: (p) => (
-        <div className="mb-row">
-          <Button size="sm" onClick={() => setEditing(p)}>
+        // The row opens the card; the button is its own press.
+        <div className="mb-row mb-row--end" onClick={(event) => event.stopPropagation()}>
+          <Button size="sm" onClick={() => edit(p.id)}>
             Edit
-          </Button>
-          <Button size="sm" variant="quiet" onClick={() => setPinFor(p)}>
-            PIN
-          </Button>
-          {/*
-            What they do, who to call, and the day they left — `save_employee`, which had no
-            button at all.
-          */}
-          <Button size="sm" variant="quiet" onClick={() => setAtWork(p)}>
-            At work
           </Button>
         </div>
       ),
@@ -148,55 +173,37 @@ function People() {
   return (
     <>
       <div className="mb-row mb-row--end">
-        <Button
-          variant="primary"
-          onClick={() =>
-            setEditing({
-              id: freshId('staff'),
-              name: '',
-              role: null,
-              status: 'active',
-              hasPin: false,
-              lockedOut: null,
-              permissions: [],
-              maxDiscountBp: null,
-              maxDiscount: null,
-            })
-          }
-        >
+        <Button variant="primary" onClick={() => setEditing(blankPerson(freshId('staff')))}>
           Add somebody
         </Button>
       </div>
 
-      <Table rows={people} columns={columns} rowKey={(p) => p.id} />
+      <Table
+        rows={people}
+        columns={columns}
+        rowKey={(p) => p.id}
+        onRow={(p) => setViewing(p.id)}
+      />
+
+      {viewing ? (
+        <PersonCard
+          staffId={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => edit(viewing)}
+          onFailed={report}
+        />
+      ) : null}
 
       {editing ? (
         <EditPerson
           person={editing}
+          isNew={!people.some((p) => p.id === editing.id)}
           roles={roles}
           onClose={() => setEditing(null)}
           onSaved={(saved) => {
             setPeople(saved);
             setEditing(null);
-          }}
-        />
-      ) : null}
-
-      {pinFor ? (
-        <SetPin person={pinFor} onClose={() => setPinFor(null)} onDone={load} />
-      ) : null}
-
-      {atWork ? (
-        <EmploymentDetails
-          person={atWork}
-          onClose={() => setAtWork(null)}
-          onDone={() => {
-            setAtWork(null);
             toast.show('ok', 'Saved.');
-            void load();
-          }}
-          onFailed={(cause) => {
-            if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
           }}
         />
       ) : null}
@@ -204,158 +211,250 @@ function People() {
   );
 }
 
-function EditPerson({
-  person,
-  roles,
+/** Everything about one person, to read. */
+function PersonCard({
+  staffId,
   onClose,
-  onSaved,
+  onEdit,
+  onFailed,
 }: {
-  person: PersonView;
-  roles: readonly RoleView[];
+  staffId: string;
   onClose: () => void;
-  onSaved: (people: readonly PersonView[]) => void;
+  onEdit: () => void;
+  onFailed: (cause: unknown) => void;
 }) {
-  const [name, setName] = useState(person.name);
-  const [roleId, setRoleId] = useState(
-    roles.find((r) => r.name === person.role)?.id ?? '',
-  );
-  const [status, setStatus] = useState(person.status);
-  const toast = useToast();
+  const [person, setPerson] = useState<StaffDetailView | null>(null);
 
-  const save = async () => {
-    try {
-      const people = await call('save_staff_member', {
-        staff: {
-          id: person.id,
-          name,
-          roleId: roleId === '' ? null : roleId,
-          status,
-        },
-      });
-      onSaved(people);
-    } catch (cause) {
-      if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
-    }
-  };
+  useEffect(() => {
+    call('staff_details', { staffId }).then(setPerson).catch(onFailed);
+  }, [staffId, onFailed]);
+
+  if (!person) return null;
+
+  const emergency =
+    person.emergencyName === '' && person.emergencyPhone === ''
+      ? '—'
+      : [person.emergencyName, person.emergencyPhone].filter((w) => w !== '').join(' · ');
 
   return (
-    <Modal open title={person.name === '' ? 'Add somebody' : person.name} onClose={onClose}>
-      <Input label="Name" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
-      <Select
-        label="Role"
-        value={roleId}
-        onChange={(e) => setRoleId(e.target.value)}
-        options={[
-          { value: '', label: 'No role — cannot do anything yet' },
-          ...roles.map((r) => ({ value: r.id, label: r.name })),
-        ]}
-      />
-      <Select
-        label="Status"
-        value={status}
-        onChange={(e) => setStatus(e.target.value)}
-        options={[
-          { value: 'active', label: 'Works here' },
-          { value: 'suspended', label: 'Suspended — cannot sign in' },
-          { value: 'left', label: 'Has left' },
-        ]}
-      />
-      <div className="mb-row mb-row--end">
-        <Button variant="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button variant="primary" onClick={() => void save()}>
-          Save
-        </Button>
-      </div>
+    <Modal
+      open
+      title={person.name}
+      onClose={onClose}
+      wide
+      actions={
+        <>
+          <Button variant="quiet" onClick={onClose}>
+            Close
+          </Button>
+          <Button variant="primary" onClick={onEdit}>
+            Edit
+          </Button>
+        </>
+      }
+    >
+      <Facts>
+        <Fact label="Role">{person.role ?? 'No role yet'}</Fact>
+        <Fact label="Status">
+          {STATUS_WORDS[person.status] ?? person.status}
+          {person.leftOn !== '' ? ` on ${person.leftOn}` : ''}
+        </Fact>
+        <Fact label="PIN">{person.hasPin ? 'Set' : 'None'}</Fact>
+        <Fact label="Mobile">{person.phone === '' ? '—' : `+91 ${person.phone}`}</Fact>
+        <Fact label="What they do">{person.designation || '—'}</Fact>
+        <Fact label="Which part of the shop">{person.department || '—'}</Fact>
+        <Fact label="Working">{WORKING_WORDS[person.employmentType] ?? person.employmentType}</Fact>
+        <Fact label="Joined">{person.joined || '—'}</Fact>
+        <Fact label="Where they live">{person.address || '—'}</Fact>
+        <Fact label="In an emergency">{emergency}</Fact>
+        <Fact label="ID they gave you">{person.idProof || '—'}</Fact>
+        {person.salarySays !== '' ? <Fact label="Salary">{person.salarySays}</Fact> : null}
+      </Facts>
     </Modal>
   );
 }
 
-/** Setting somebody else's PIN. */
-function SetPin({
+/** One dialog for the whole person: who they are at the sign-in screen, and what they do. */
+function EditPerson({
   person,
+  isNew,
+  roles,
   onClose,
-  onDone,
+  onSaved,
 }: {
-  person: PersonView;
+  person: StaffEdit;
+  isNew: boolean;
+  roles: readonly RoleView[];
   onClose: () => void;
-  onDone: () => void;
+  onSaved: (people: readonly PersonView[]) => void;
 }) {
-  const [pin, setPin] = useState('');
-  const [again, setAgain] = useState('');
+  const [edit, setEdit] = useState(person);
+  const [pinAgain, setPinAgain] = useState('');
   const [problem, setProblem] = useState('');
+  const [busy, setBusy] = useState(false);
   const toast = useToast();
 
-  const setIt = () => {
-    // The same rule Rust holds — `mb_auth::pin::PIN_DIGITS`.
-    if (pin.length !== PIN_DIGITS) {
-      setProblem(`A PIN is ${PIN_DIGITS} digits.`);
-      return;
-    }
-    if (pin !== again) {
-      setProblem('The two PINs are not the same. Type it again.');
-      return;
+  const set = <K extends keyof StaffEdit>(key: K, value: StaffEdit[K]) =>
+    setEdit((e) => ({ ...e, [key]: value }));
+  const digits = (typed: string) => typed.replace(/[^0-9]/g, '');
+
+  const save = () => {
+    // The same rules Rust holds — `mb_auth::pin::PIN_DIGITS`, and a new person needs one.
+    if (edit.pin !== '' || isNew) {
+      if (edit.pin.length !== PIN_DIGITS) {
+        setProblem(`A PIN is ${PIN_DIGITS} digits.`);
+        return;
+      }
+      if (edit.pin !== pinAgain) {
+        setProblem('The two PINs are not the same. Type it again.');
+        return;
+      }
     }
     setProblem('');
-    void save(pin);
-  };
-
-  const save = async (value: string | null) => {
-    try {
-      await call('set_staff_pin', { staffId: person.id, pin: value });
-      onDone();
-      onClose();
-    } catch (cause) {
-      if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
-    }
+    setBusy(true);
+    call('save_staff_member', { staff: edit })
+      .then(onSaved)
+      .catch((cause: unknown) => {
+        if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
+      })
+      .finally(() => setBusy(false));
   };
 
   return (
-    <Modal open title={`${person.name}'s PIN`} onClose={onClose}>
-      <Input
-        label="New PIN"
-        hint={`${PIN_DIGITS} digits. It is stored scrambled and cannot be read back.`}
-        maxLength={PIN_DIGITS}
-        value={pin}
-        autoFocus
-        type="password"
-        inputMode="numeric"
-        onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ''))}
-      />
-      <Input
-        label="The same PIN again"
-        maxLength={PIN_DIGITS}
-        value={again}
-        type="password"
-        inputMode="numeric"
-        onChange={(e) => setAgain(e.target.value.replace(/[^0-9]/g, ''))}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') setIt();
-        }}
-      />
-      {problem ? (
-        <p className="mb-lock__problem" role="alert">
-          {problem}
-        </p>
-      ) : null}
-      <p className="mb-muted">
-        Setting the first PIN in this shop locks the screen straight away, so
-        the person it belongs to can prove it works before they walk off.
-      </p>
-      <div className="mb-row mb-row--end">
-        {person.hasPin ? (
-          <Button variant="danger" onClick={() => void save(null)}>
-            Remove the PIN
+    <Modal
+      open
+      title={isNew ? 'Add somebody' : person.name}
+      onClose={onClose}
+      wide
+      actions={
+        <>
+          <Button variant="quiet" onClick={onClose}>
+            Cancel
           </Button>
+          <Button variant="primary" disabled={busy} onClick={save}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <Stack gap="group">
+        <Fields columns>
+          <Input
+            label="Name"
+            value={edit.name}
+            autoFocus
+            onChange={(e) => set('name', e.target.value)}
+          />
+          <Select
+            label="Role"
+            value={edit.roleId ?? ''}
+            onChange={(e) => set('roleId', e.target.value === '' ? null : e.target.value)}
+            options={[
+              { value: '', label: 'Choose a role' },
+              ...roles.map((r) => ({ value: r.id, label: r.name })),
+            ]}
+          />
+          <Input
+            label={isNew ? 'PIN' : 'New PIN'}
+            hint={
+              isNew
+                ? `${PIN_DIGITS} digits. It is stored scrambled and cannot be read back.`
+                : 'Leave it empty to keep the one they have.'
+            }
+            maxLength={PIN_DIGITS}
+            value={edit.pin}
+            type="password"
+            inputMode="numeric"
+            onChange={(e) => set('pin', digits(e.target.value))}
+          />
+          <Input
+            label="The same PIN again"
+            maxLength={PIN_DIGITS}
+            value={pinAgain}
+            type="password"
+            inputMode="numeric"
+            onChange={(e) => setPinAgain(digits(e.target.value))}
+          />
+          <PhoneInput
+            label="Mobile"
+            value={edit.phone}
+            onChange={(phone) => set('phone', phone)}
+          />
+          {/* A new person works here; only somebody already on the list can be anything else. */}
+          {isNew ? null : (
+            <Select
+              label="Status"
+              value={edit.status}
+              onChange={(e) => {
+                set('status', e.target.value);
+                if (e.target.value !== 'left') set('leftOn', '');
+              }}
+              options={[
+                { value: 'active', label: 'Works here' },
+                { value: 'suspended', label: 'Suspended — cannot sign in' },
+                { value: 'left', label: 'Has left' },
+              ]}
+            />
+          )}
+          {edit.status === 'left' ? (
+            <Input
+              label="The day they left"
+              hint="It takes them off the payroll and off the roster — nothing about their past is deleted."
+              value={edit.leftOn}
+              placeholder="2026-08-31"
+              onChange={(e) => set('leftOn', e.target.value)}
+            />
+          ) : null}
+        </Fields>
+        {problem ? (
+          <p className="mb-lock__problem" role="alert">
+            {problem}
+          </p>
         ) : null}
-        <Button variant="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button variant="primary" onClick={setIt}>
-          Set the PIN
-        </Button>
-      </div>
+
+        <SectionHeader title="At work" />
+        <Fields columns>
+          <Input
+            label="What they do"
+            hint="Cook, cashier, cleaner. It goes on the payslip."
+            value={edit.designation}
+            onChange={(e) => set('designation', e.target.value)}
+          />
+          <Input
+            label="Which part of the shop"
+            hint="Kitchen, counter, delivery. Leave it blank if you have only one."
+            value={edit.department}
+            onChange={(e) => set('department', e.target.value)}
+          />
+          <Select
+            label="Working"
+            value={edit.employmentType}
+            onChange={(e) => set('employmentType', e.target.value)}
+            options={Object.entries(WORKING_WORDS).map(([value, label]) => ({ value, label }))}
+          />
+          <Input
+            label="Where they live"
+            value={edit.address}
+            onChange={(e) => set('address', e.target.value)}
+          />
+          <Input
+            label="Who to call in an emergency"
+            value={edit.emergencyName}
+            onChange={(e) => set('emergencyName', e.target.value)}
+          />
+          <PhoneInput
+            label="On this number"
+            value={edit.emergencyPhone}
+            onChange={(phone) => set('emergencyPhone', phone)}
+          />
+          <Input
+            label="ID they gave you"
+            hint="Aadhaar number, licence number — whatever you keep on file."
+            value={edit.idProof}
+            onChange={(e) => set('idProof', e.target.value)}
+          />
+        </Fields>
+      </Stack>
     </Modal>
   );
 }

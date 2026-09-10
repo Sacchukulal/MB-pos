@@ -656,7 +656,7 @@ twice.
 | command | needs | what it does |
 |---|---|---|
 | `employees` | `staff.manage` | the people, with the employment record |
-| `save_employee` | `staff.manage` | designation, department, ID reference, and the leaving date |
+| `save_staff_member` / `staff_details` | `staff.manage` | the whole person in one go: name, role, status, PIN, phone, designation, department, address, emergency contact, ID reference and the leaving date (see `src-tauri/src/ipc.rs`) |
 | `attendance` | *signed in* | your own hours; **anybody else's needs `attendance.mark`** |
 | `clock_in` / `clock_out` | *signed in* | your own row, and only ever your own |
 | `correct_attendance` | `attendance.correct` | change a clock-in or clock-out. **Never your own row** — a rule no permission can express, enforced in the command |

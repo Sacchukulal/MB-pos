@@ -16,6 +16,7 @@ import {
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
+import { blankPerson, editOf } from '../auth/person';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
 import type { OwnerOpenedView } from '../ipc/generated/OwnerOpenedView';
 import type { OwnerShopView } from '../ipc/generated/OwnerShopView';
@@ -298,15 +299,18 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
     clear();
     const id = personId === '' ? freshId('staff') : personId;
     setPersonId(id);
-    call('save_staff_member', {
-      staff: {
-        id,
-        name: person.trim(),
-        roleId: 'role_owner',
-        status: 'active',
-      },
-    })
-      .then(() => call('set_staff_pin', { staffId: id, pin }))
+    // The owner's row may already be here from the account step, with what the cloud knows
+    // about them; the PIN goes on top of that rather than over it.
+    const base =
+      personId === ''
+        ? Promise.resolve(blankPerson(id))
+        : call('staff_details', { staffId: id }).then(editOf);
+    base
+      .then((staff) =>
+        call('save_staff_member', {
+          staff: { ...staff, name: person.trim(), roleId: 'role_owner', status: 'active', pin },
+        }),
+      )
       // Signed in with the PIN they just chose, and the counter is theirs.
       .then(() => call('login', { staffId: id, pin }).catch(() => undefined))
       .then(() => onDone())

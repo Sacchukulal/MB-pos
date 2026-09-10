@@ -69,14 +69,8 @@ fn exercise_everything_that_touches_a_secret(app: &App, scratch: &Scratch) {
     // A PIN, set and used.
     let _ = crate::ipc::save_staff_member_on(
         app,
-        crate::ipc::StaffEdit {
-            id: "staff_owner".to_owned(),
-            name: "Sachin".to_owned(),
-            role_id: Some("role_owner".to_owned()),
-            status: "active".to_owned(),
-        },
+        crate::ipc::StaffEdit::new("staff_owner", "Sachin", "role_owner", "4839"),
     );
-    let _ = crate::ipc::set_staff_pin_on(app, "staff_owner".to_owned(), Some("4839".to_owned()));
     let _ = crate::ipc::login_on(app, "staff_owner".to_owned(), "4839".to_owned());
     // And a wrong one, which is the path that logs a failure.
     let _ = crate::ipc::login_on(app, "staff_owner".to_owned(), "1111".to_owned());

@@ -15,7 +15,7 @@ use mb_db::{Db, DbConfig, Repos};
 use crate::firstrun::OwnerProof;
 use crate::ipc::{
     StaffEdit, audit_trail_on, list_staff_on, lock_now_on, lock_state_on, login_on,
-    reset_owner_pin_on, save_role_on, save_staff_member_on, set_staff_pin_on,
+    reset_owner_pin_on, save_role_on, save_staff_member_on,
 };
 use crate::state::{App, OUTLET};
 
@@ -88,43 +88,63 @@ fn a_shop(scratch: &Scratch) -> App {
     app
 }
 
-/// Add somebody with a role, the way the Staff screen does.
-pub(crate) fn hire(app: &App, id: &str, name: &str, role: RolePreset) {
-    save_staff_member_on(
-        app,
-        StaffEdit {
-            id: id.to_owned(),
-            name: name.to_owned(),
-            role_id: Some(role.id().to_owned()),
-            status: "active".to_owned(),
-        },
-    )
-    .expect("hired");
+/// Add somebody with a role and a PIN, the way the Staff screen does.
+pub(crate) fn hire(app: &App, id: &str, name: &str, role: RolePreset, pin: &str) {
+    save_staff_member_on(app, StaffEdit::new(id, name, role.id(), pin)).expect("hired");
+}
+
+/// The same person, edited: what the Staff screen sends when only the status changes.
+fn with_status(id: &str, name: &str, role: RolePreset, status: &str) -> StaffEdit {
+    let mut edit = StaffEdit::new(id, name, role.id(), "");
+    edit.status = status.to_owned();
+    edit
 }
 
 /// The whole first day of a shop, in order.
 #[test]
-fn a_shop_starts_open_locks_when_it_gets_a_pin_and_lets_the_right_person_in() {
+fn a_shop_starts_open_can_be_locked_once_somebody_has_a_pin_and_lets_the_right_person_in() {
     let scratch = Scratch::new("first_day");
     let app = a_shop(&scratch);
 
-    // Nobody has a PIN.
+    // Nobody has a PIN, so there is nothing to lock with.
     let state = lock_state_on(&app).expect("state");
     assert!(state.nobody_has_a_pin, "a new shop should not be locked");
     assert_eq!(state.signed_in_as.as_deref(), Some("Counter"));
     assert!(state.people.is_empty(), "nobody can sign in yet");
     assert_eq!(state.owner, None, "no owner row yet, so nothing to reset");
+    assert_eq!(
+        lock_now_on(&app)
+            .expect_err("locked with no way back in")
+            .code,
+        "auth.nothing_to_unlock_with"
+    );
 
-    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin set");
+    // Nobody joins without a PIN: a name on the list who cannot sign in is a name on the
+    // list for nothing.
+    let refused = save_staff_member_on(
+        &app,
+        StaffEdit::new("staff_owner", "Sachin", RolePreset::Owner.id(), ""),
+    )
+    .expect_err("somebody was added with no PIN");
+    assert!(
+        refused.detail.unwrap_or_default().contains("PIN"),
+        "the refusal should say so"
+    );
+    assert!(
+        lock_state_on(&app).expect("state").people.is_empty(),
+        "the refusal wrote a row"
+    );
 
-    // Setting the first PIN locks the app then and there — proving it works while that person
-    // is still standing at the counter.
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
+
+    // The first PIN does not throw whoever is at the counter out; it makes the lock possible.
     let state = lock_state_on(&app).expect("state");
     assert!(!state.nobody_has_a_pin);
-    assert_eq!(state.signed_in_as, None, "the counter did not lock itself");
+    assert_eq!(state.signed_in_as.as_deref(), Some("Counter"));
     assert_eq!(state.people.len(), 1, "the owner can now sign in");
     assert_eq!(state.owner.as_deref(), Some("Sachin"));
+    lock_now_on(&app).expect("locked");
+    assert_eq!(lock_state_on(&app).expect("state").signed_in_as, None);
 
     // The wrong PIN is refused, in Rust, in words.
     let refused = login_on(&app, "staff_owner".to_owned(), "1111".to_owned())
@@ -162,8 +182,7 @@ fn the_lockout_is_real_and_outlives_the_process() {
     let scratch = Scratch::new("lockout");
     {
         let app = a_shop(&scratch);
-        hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-        set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin set");
+        hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
 
         for attempt in 1..=5 {
             let refused = login_on(&app, "staff_owner".to_owned(), "1111".to_owned())
@@ -207,25 +226,28 @@ fn the_lockout_is_real_and_outlives_the_process() {
 fn a_pin_longer_than_four_digits_is_refused_by_every_command_that_takes_one() {
     let scratch = Scratch::new("pin_length");
     let app = a_shop(&scratch);
-    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-
     // Setting one. Five digits and eight, because eight was the old ceiling and is the number
     // that would come back if anybody restored it.
     for too_long in ["12345", "12345678"] {
-        let refused = set_staff_pin_on(&app, "staff_owner".to_owned(), Some(too_long.to_owned()))
-            .expect_err("a long PIN was accepted");
+        let refused = save_staff_member_on(
+            &app,
+            StaffEdit::new("staff_owner", "Sachin", RolePreset::Owner.id(), too_long),
+        )
+        .expect_err("a long PIN was accepted");
         assert_eq!(refused.code, "auth.pin_shape", "{too_long}");
         // And the sentence is the rule that is actually in force — this said "6 to 8 digits"
         // for five days after the rule became four.
         assert!(refused.message.contains("4 digits"), "{}", refused.message);
     }
     assert!(
-        set_staff_pin_on(&app, "staff_owner".to_owned(), Some("123".to_owned())).is_err(),
+        save_staff_member_on(
+            &app,
+            StaffEdit::new("staff_owner", "Sachin", RolePreset::Owner.id(), "123"),
+        )
+        .is_err(),
         "three digits is not a PIN either"
     );
-
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
-        .expect("four digits is a PIN");
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
 
     // Signing in. A long PIN cannot even be offered for checking, so it never reaches Argon2
     // and never costs a lockout attempt.
@@ -334,9 +356,9 @@ impl crate::cloud::Link for OwnerCloud {
 fn the_owner_resets_a_forgotten_pin_with_the_licence_key_and_is_signed_in() {
     let scratch = Scratch::new("reset_by_key");
     let app = a_shop(&scratch);
-    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-    hire(&app, "staff_waiter", "Priya", RolePreset::Waiter);
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin");
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
+    hire(&app, "staff_waiter", "Priya", RolePreset::Waiter, "1111");
+    lock_now_on(&app).expect("locked");
 
     // The wrong key, and a blank one, open nothing.
     let refused = reset_owner_pin_on(&app, by_key("MB-XXXX-9999"), "9999".to_owned())
@@ -370,8 +392,7 @@ fn the_owner_resets_a_forgotten_pin_with_the_licence_key_and_is_signed_in() {
 fn the_owner_resets_a_forgotten_pin_with_the_account_password() {
     let scratch = Scratch::new("reset_by_password");
     let app = a_shop(&scratch);
-    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin");
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
 
     // An account that owns some other shop.
     app.use_link(std::sync::Arc::new(OwnerCloud {
@@ -414,8 +435,7 @@ fn the_owner_resets_a_forgotten_pin_with_the_account_password() {
 fn a_lockout_does_not_stand_between_the_owner_and_the_reset() {
     let scratch = Scratch::new("reset_past_lockout");
     let app = a_shop(&scratch);
-    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin");
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
     for _ in 0..5 {
         let _ = login_on(&app, "staff_owner".to_owned(), "1111".to_owned());
     }
@@ -435,8 +455,7 @@ fn a_lockout_does_not_stand_between_the_owner_and_the_reset() {
 fn a_shop_with_no_owner_row_has_no_pin_to_reset() {
     let scratch = Scratch::new("reset_no_owner");
     let app = a_shop(&scratch);
-    hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
-    set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("1357".to_owned())).expect("pin");
+    hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier, "1357");
     let refused = reset_owner_pin_on(&app, by_key(STUB_KEY), "9999".to_owned())
         .expect_err("a PIN was reset with no owner");
     assert_eq!(refused.code, "auth.no_owner");
@@ -447,18 +466,13 @@ fn a_shop_with_no_owner_row_has_no_pin_to_reset() {
 fn the_last_person_who_can_manage_staff_cannot_be_removed() {
     let scratch = Scratch::new("last_admin");
     let app = a_shop(&scratch);
-    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-    hire(&app, "staff_waiter", "Priya", RolePreset::Waiter);
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
+    hire(&app, "staff_waiter", "Priya", RolePreset::Waiter, "1111");
 
     // Suspending the only owner.
     let refused = save_staff_member_on(
         &app,
-        StaffEdit {
-            id: "staff_owner".to_owned(),
-            name: "Sachin".to_owned(),
-            role_id: Some(RolePreset::Owner.id().to_owned()),
-            status: "suspended".to_owned(),
-        },
+        with_status("staff_owner", "Sachin", RolePreset::Owner, "suspended"),
     )
     .expect_err("the last administrator was suspended");
     assert!(
@@ -496,16 +510,11 @@ fn the_last_person_who_can_manage_staff_cannot_be_removed() {
         .permissions
         .push(Permission::StaffManage.code().to_owned());
     save_role_on(&app, manager).expect("the manager may now manage staff");
-    hire(&app, "staff_manager", "Anil", RolePreset::Manager);
+    hire(&app, "staff_manager", "Anil", RolePreset::Manager, "3579");
 
     save_staff_member_on(
         &app,
-        StaffEdit {
-            id: "staff_owner".to_owned(),
-            name: "Sachin".to_owned(),
-            role_id: Some(RolePreset::Owner.id().to_owned()),
-            status: "left".to_owned(),
-        },
+        with_status("staff_owner", "Sachin", RolePreset::Owner, "left"),
     )
     .expect("with somebody else able to manage staff, the owner may leave");
 }
@@ -516,11 +525,9 @@ fn the_last_person_who_can_manage_staff_cannot_be_removed() {
 fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
     let scratch = Scratch::new("left");
     let app = a_shop(&scratch);
-    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-    hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin");
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
+    hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier, "1357");
     login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner proves it");
-    set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("1357".to_owned())).expect("pin");
     lock_now_on(&app).expect("locked");
 
     login_on(&app, "staff_cashier".to_owned(), "1357".to_owned()).expect("Rekha signs in");
@@ -529,12 +536,7 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
     login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner signs in");
     save_staff_member_on(
         &app,
-        StaffEdit {
-            id: "staff_cashier".to_owned(),
-            name: "Rekha".to_owned(),
-            role_id: Some(RolePreset::Cashier.id().to_owned()),
-            status: "left".to_owned(),
-        },
+        with_status("staff_cashier", "Rekha", RolePreset::Cashier, "left"),
     )
     .expect("Rekha leaves");
     lock_now_on(&app).expect("locked");
@@ -570,11 +572,9 @@ fn somebody_who_has_left_cannot_sign_in_but_keeps_their_history() {
 fn locking_and_switching_user_do_not_touch_the_cart() {
     let scratch = Scratch::new("switch");
     let app = a_shop(&scratch);
-    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
-    hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned())).expect("pin");
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
+    hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier, "1357");
     login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("the owner proves it");
-    set_staff_pin_on(&app, "staff_cashier".to_owned(), Some("1357".to_owned())).expect("pin");
     lock_now_on(&app).expect("locked");
 
     login_on(&app, "staff_cashier".to_owned(), "1357".to_owned()).expect("Rekha signs in");
@@ -635,28 +635,23 @@ fn the_starting_roles_are_seeded_once_and_never_put_back() {
     assert_eq!(steward.max_discount_percent.as_deref(), Some("2.5%"));
 }
 
-/// A PIN with no role is somebody who can sign in and do nothing, which looks like a broken app
-/// rather than a locked one.
+/// A person with no role is somebody who can sign in and do nothing, which looks like a broken
+/// app rather than a locked one.
 #[test]
-fn a_pin_needs_a_role_behind_it() {
+fn everybody_needs_a_role() {
     let scratch = Scratch::new("pin_no_role");
     let app = a_shop(&scratch);
-    save_staff_member_on(
-        &app,
-        StaffEdit {
-            id: "staff_nobody".to_owned(),
-            name: "Nobody".to_owned(),
-            role_id: None,
-            status: "active".to_owned(),
-        },
-    )
-    .expect("hired with no role");
-
-    let refused = set_staff_pin_on(&app, "staff_nobody".to_owned(), Some("2468".to_owned()))
-        .expect_err("a PIN with no role was allowed");
+    let mut nobody = StaffEdit::new("staff_nobody", "Nobody", "", "2468");
+    nobody.role_id = None;
+    let refused = save_staff_member_on(&app, nobody).expect_err("hired with no role");
+    assert_eq!(refused.code, "staff.role");
     assert!(
-        refused.detail.unwrap_or_default().contains("role"),
+        refused.message.contains("role"),
         "the refusal should say what to do first"
+    );
+    assert!(
+        list_staff_on(&app).expect("staff").is_empty(),
+        "the refusal wrote a row"
     );
 }
 
@@ -688,7 +683,7 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
 
     let scratch = Scratch::new("real_bill");
     let app = a_shop(&scratch);
-    hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier);
+    hire(&app, "staff_cashier", "Rekha", RolePreset::Cashier, "1357");
 
     // A line points at a menu row, so there has to be one.
     app.with_shop(|shop| {
@@ -815,7 +810,7 @@ use crate::corrections::{
 /// A shop with a menu and an owner, ready to trade.
 fn a_trading_shop(scratch: &Scratch) -> App {
     let app = a_shop(scratch);
-    hire(&app, "staff_owner", "Sachin", RolePreset::Owner);
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
@@ -1108,7 +1103,7 @@ fn a_wrong_bill_is_reverted_fixed_and_billed_again_under_the_same_number() {
 fn a_big_void_needs_a_second_person() {
     let scratch = Scratch::new("void_approval");
     let app = a_trading_shop(&scratch);
-    hire(&app, "staff_waiter", "Priya", RolePreset::Waiter);
+    hire(&app, "staff_waiter", "Priya", RolePreset::Waiter, "1111");
 
     // Every void in this shop needs approval.
     app.with_shop(|shop| {
@@ -1138,11 +1133,7 @@ fn a_big_void_needs_a_second_person() {
     assert!(refused.message.contains("manager"), "{}", refused.message);
 
     // (b) an approver who may not void.
-    set_staff_pin_on(&app, "staff_owner".to_owned(), Some("2468".to_owned()))
-        .expect("a PIN for the owner");
     login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("signed back in");
-    set_staff_pin_on(&app, "staff_waiter".to_owned(), Some("1111".to_owned()))
-        .expect("a PIN for Priya");
     let refused = void_bill_on(
         &app,
         target.clone(),

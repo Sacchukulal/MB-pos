@@ -789,16 +789,12 @@ fn a_bulk_hide_takes_them_off_the_floor_and_keeps_their_history() {
 fn arranging_the_room_needs_the_permission_and_says_so_before_the_press() {
     let scratch = Scratch::new("can_arrange");
     let app = a_shop_with_a_room(&scratch);
-    crate::signin_tests::hire(&app, "staff_boss", "Meena", RolePreset::Owner);
-    crate::signin_tests::hire(&app, "staff_waiter", "Priya", RolePreset::Waiter);
+    crate::signin_tests::hire(&app, "staff_boss", "Meena", RolePreset::Owner, "2468");
+    crate::signin_tests::hire(&app, "staff_waiter", "Priya", RolePreset::Waiter, "1357");
 
-    crate::ipc::set_staff_pin_on(&app, "staff_boss".to_owned(), Some("2468".to_owned()))
-        .expect("pin");
     crate::ipc::login_on(&app, "staff_boss".to_owned(), "2468".to_owned()).expect("signed in");
     assert!(floor_on(&app).expect("the floor").can_arrange);
 
-    crate::ipc::set_staff_pin_on(&app, "staff_waiter".to_owned(), Some("1357".to_owned()))
-        .expect("pin");
     crate::ipc::lock_now_on(&app).expect("locked");
     crate::ipc::login_on(&app, "staff_waiter".to_owned(), "1357".to_owned()).expect("Priya");
 

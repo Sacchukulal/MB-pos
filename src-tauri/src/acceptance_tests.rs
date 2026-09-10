@@ -90,16 +90,8 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
         90,
     ));
 
-    save_staff_member_on(
-        &app,
-        StaffEdit {
-            id: "staff_boss".to_owned(),
-            name: "Meena".to_owned(),
-            role_id: Some(RolePreset::Cashier.id().to_owned()),
-            status: "active".to_owned(),
-        },
-    )
-    .expect("hired");
+    // Meena first, then her row: a reopened shop whose people have PINs comes up locked, and a
+    // locked counter hires nobody.
     app.sessions().begin(
         Actor {
             staff_id: StaffId::new("staff_boss"),
@@ -113,6 +105,11 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
         crate::flows::now(),
         false,
     );
+    save_staff_member_on(
+        &app,
+        StaffEdit::new("staff_boss", "Meena", RolePreset::Cashier.id(), "2468"),
+    )
+    .expect("hired");
     app
 }
 

@@ -4,4 +4,16 @@ export type StaffEdit = { id: string, name: string, roleId: string | null,
 /**
  * "active", "suspended" or "left".
  */
-status: string, };
+status: string, 
+/**
+ * A new PIN. Empty leaves the one they have; somebody new must be given one.
+ */
+pin: string, phone: string, designation: string, department: string, 
+/**
+ * "full_time", "part_time" or "casual".
+ */
+employmentType: string, address: string, emergencyName: string, emergencyPhone: string, idProof: string, 
+/**
+ * Typed by a person, parsed in Rust. Only on somebody who has left.
+ */
+leftOn: string, };

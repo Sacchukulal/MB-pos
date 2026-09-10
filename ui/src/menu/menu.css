@@ -66,16 +66,15 @@
   gap: var(--space-1);
 }
 
+/*
+ * A category is a pick, and the WHOLE row is it — the rename and delete marks sit beside the
+ * name inside the same fill, so a chosen category reads as one band and not as a button with
+ * two loose buttons after it. The name is what is pressed, so the padding stays on the name and
+ * the row itself has none.
+ */
 .mb-menu__catrow {
-  display: flex;
-  align-items: center;
   gap: var(--space-1);
-  border-radius: var(--radius-md);
-}
-
-.mb-menu__catrow:hover,
-.mb-menu__catrow[aria-current='page'] {
-  background: var(--surface-2);
+  padding: 0;
 }
 
 /* The rename and delete marks show for the row under the hand, and for the row you are on. */
@@ -92,6 +91,11 @@
   opacity: 1;
 }
 
+/*
+ * The name itself, which is what is pressed. Inside a row it takes the width and paints
+ * nothing — the row around it is the pick and carries the fill. On its own ("Everything") it IS
+ * the pick, and the pick's own recipe is what dresses it.
+ */
 .mb-menu__category {
   display: flex;
   align-items: center;
@@ -103,20 +107,11 @@
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--text);
+  color: inherit;
   font: inherit;
   font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
-}
-
-.mb-menu__category:hover {
-  background: var(--surface-2);
-}
-
-.mb-menu__category[aria-current='page'] {
-  font-weight: var(--weight-bold);
-  box-shadow: inset var(--tile-stripe) 0 0 0 var(--accent);
 }
 
 .mb-menu__catname {

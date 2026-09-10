@@ -65,22 +65,6 @@ pub struct EmployeeView {
     pub is_in: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
-#[ts(export, export_to = "../../ui/src/ipc/generated/")]
-#[serde(rename_all = "camelCase")]
-pub struct EmployeeEdit {
-    pub id: String,
-    pub designation: String,
-    pub department: String,
-    pub address: String,
-    pub emergency_name: String,
-    pub emergency_phone: String,
-    pub id_proof: String,
-    pub employment_type: String,
-    /// Typed by a person, parsed in Rust.
-    pub left_on: String,
-}
-
 /// One shift on the attendance screen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -289,12 +273,12 @@ pub struct StaffCostView {
     pub says: String,
 }
 
-fn day_words(day: BusinessDay) -> String {
+pub(crate) fn day_words(day: BusinessDay) -> String {
     let (y, m, d) = day.to_ymd();
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-fn parse_day(text: &str, field: &'static str) -> UiResult<BusinessDay> {
+pub(crate) fn parse_day(text: &str, field: &'static str) -> UiResult<BusinessDay> {
     let parts: Vec<&str> = text.trim().split('-').collect();
     let bad = || {
         UiError::new(
@@ -330,6 +314,18 @@ fn minutes_words(minutes: i64) -> String {
         (h, 0) => format!("{h}h"),
         (h, m) => format!("{h}h {m}m"),
     }
+}
+
+/// What somebody is on today, in words — or empty when no structure covers today. The caller
+/// decides whether the person asking may see pay.
+pub(crate) fn salary_says(
+    repos: &mb_db::Repos<'_>,
+    staff_id: &str,
+) -> Result<String, mb_db::DbError> {
+    let structures = repos.employment().structures_for(OUTLET, staff_id)?;
+    Ok(employment::structure_on(&structures, today(now()))
+        .map(|s| basis_words(s.basis, s.amount))
+        .unwrap_or_default())
 }
 
 /// "₹18,000.00 a month".
@@ -392,10 +388,7 @@ pub fn people_on(app: &App) -> UiResult<Vec<EmployeeView>> {
                     // The salary is behind its own permission, so a manager who may edit staff
                     // does not thereby learn what everybody earns.
                     let salary_says = if may_see_pay {
-                        let structures = repos.employment().structures_for(OUTLET, &person.id)?;
-                        employment::structure_on(&structures, today(now()))
-                            .map(|s| basis_words(s.basis, s.amount))
-                            .unwrap_or_default()
+                        salary_says(&repos, &person.id)?
                     } else {
                         String::new()
                     };
@@ -1299,85 +1292,6 @@ pub fn adjust_leave_on(
     })?;
 
     leave_on(app, Some(staff_id))
-}
-
-// The employment record.
-
-/// Nobody is ever deleted — `left` with a date is the only ending there is, because this
-/// person's name is on last year's bills.
-pub fn save_employee_on(app: &App, edit: EmployeeEdit) -> UiResult<Vec<EmployeeView>> {
-    let who = guard::require(app, Permission::StaffManage)?;
-    let at = now();
-    let day = today(at);
-
-    if !matches!(
-        edit.employment_type.as_str(),
-        "full_time" | "part_time" | "casual"
-    ) {
-        return Err(UiError::new(
-            "staff.type",
-            "Full-time, part-time or casual.",
-        ));
-    }
-
-    let left_on = if edit.left_on.trim().is_empty() {
-        None
-    } else {
-        Some(parse_day(&edit.left_on, "staff.left_on")?)
-    };
-
-    // The number somebody rings when there is an accident, so it is worth the same rule as
-    // every other phone in the product.
-    let emergency_phone = mb_core::Phone::parse_optional(&edit.emergency_phone)
-        .map_err(|e| UiError::new("staff.emergency_phone", e.to_string()))?
-        .map(|p| p.as_str().to_owned());
-
-    app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                // The status and the leaving date travel together — the schema refuses a date
-                // on somebody still working, and this is what sets the status so the pair is
-                // always consistent.
-                let status = if left_on.is_some() { "left" } else { "active" };
-                let repos = mb_db::Repos::new(tx);
-                repos.employment().save_employment(
-                    OUTLET,
-                    &edit.id,
-                    blank_to_none(&edit.designation).as_deref(),
-                    blank_to_none(&edit.department).as_deref(),
-                    blank_to_none(&edit.address).as_deref(),
-                    blank_to_none(&edit.emergency_name).as_deref(),
-                    emergency_phone.as_deref(),
-                    blank_to_none(&edit.id_proof).as_deref(),
-                    &edit.employment_type,
-                    left_on,
-                    at,
-                )?;
-
-                repos.audit().append(
-                    OUTLET,
-                    &AuditEntry::new(
-                        at,
-                        day,
-                        Some(who.staff_id.clone()),
-                        action::STAFF_SAVED,
-                        "staff",
-                    )
-                    .about(edit.id.clone())
-                    .with_after(serde_json::json!({
-                        "designation": edit.designation,
-                        "department": edit.department,
-                        "employment_type": edit.employment_type,
-                        "left_on": edit.left_on,
-                        "status": status,
-                    })),
-                )?;
-                Ok(())
-            })
-            .map_err(|e| words::from_db(&e))
-    })?;
-
-    people_on(app)
 }
 
 fn blank_to_none(text: &str) -> Option<String> {
@@ -2345,14 +2259,6 @@ pub fn staff_cost_on(app: &App, from: String, to: String) -> UiResult<StaffCostV
 #[tauri::command]
 pub fn employees(app: tauri::State<'_, App>) -> UiResult<Vec<EmployeeView>> {
     people_on(&app)
-}
-
-#[tauri::command]
-pub fn save_employee(
-    app: tauri::State<'_, App>,
-    edit: EmployeeEdit,
-) -> UiResult<Vec<EmployeeView>> {
-    save_employee_on(&app, edit)
 }
 
 #[tauri::command]

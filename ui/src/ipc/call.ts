@@ -55,7 +55,7 @@ import type { StockCountView } from './generated/StockCountView';
 import type { TerminalEdit } from './generated/TerminalEdit';
 import type { TillsView } from './generated/TillsView';
 import type { EmployeeView } from './generated/EmployeeView';
-import type { EmployeeEdit } from './generated/EmployeeEdit';
+import type { StaffDetailView } from './generated/StaffDetailView';
 import type { AttendanceView } from './generated/AttendanceView';
 import type { LeaveView } from './generated/LeaveView';
 import type { SalaryView } from './generated/SalaryView';
@@ -209,11 +209,7 @@ export interface Commands {
   };
   list_staff: { args: void; returns: PersonView[] };
   save_staff_member: { args: { staff: StaffEdit }; returns: PersonView[] };
-  /** `null` clears the PIN. */
-  set_staff_pin: {
-    args: { staffId: string; pin: string | null };
-    returns: void;
-  };
+  staff_details: { args: { staffId: string }; returns: StaffDetailView };
   list_roles: { args: void; returns: RoleView[] };
   save_role: { args: { role: RoleView }; returns: RoleView[] };
   list_permissions: { args: void; returns: [string, string][] };
@@ -409,7 +405,6 @@ export interface Commands {
 
   // The employment side.
   employees: { args: void; returns: EmployeeView[] };
-  save_employee: { args: { edit: EmployeeEdit }; returns: EmployeeView[] };
   attendance: {
     args: { staffId: string | null; from: string; to: string };
     returns: AttendanceView;

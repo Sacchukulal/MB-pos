@@ -507,31 +507,12 @@
   min-height: 0;
 }
 
+/*
+ * A screen in the rail is a pick (kit.css) and says nothing about how it is chosen — only that
+ * it has no edge of its own to give away.
+ */
 .mb-rail__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: var(--control-md);
-  padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--text-md);
-  text-align: left;
-  cursor: pointer;
-}
-
-.mb-rail__item:hover {
-  background: var(--surface-2);
-}
-
-.mb-rail__item[aria-current='page'] {
-  background: var(--surface-2);
-  font-weight: var(--weight-bold);
-  box-shadow: inset var(--tile-stripe) 0 0 0 var(--accent);
 }
 
 .mb-rail__icon {
@@ -539,8 +520,9 @@
   color: var(--text-muted);
 }
 
+/* The icon goes with the words: on the screen you are on, it wears the mark's own colour. */
 .mb-rail__item[aria-current='page'] .mb-rail__icon {
-  color: var(--accent);
+  color: var(--pick-line);
 }
 
 .mb-rail__label {

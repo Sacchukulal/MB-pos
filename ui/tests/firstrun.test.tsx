@@ -16,6 +16,7 @@ import type { FirstRunView } from '../src/ipc/generated/FirstRunView';
 import type { OwnerOpenedView } from '../src/ipc/generated/OwnerOpenedView';
 import type { OwnerShopView } from '../src/ipc/generated/OwnerShopView';
 import type { OwnerSignInView } from '../src/ipc/generated/OwnerSignInView';
+import type { StaffDetailView } from '../src/ipc/generated/StaffDetailView';
 
 const fresh: FirstRunView = {
   needed: true,
@@ -39,6 +40,26 @@ const anand: OwnerShopView = {
 const saravana: OwnerShopView = { ...anand, id: 'rest_saravana', name: 'Saravana', address: '' };
 
 const meena: OwnerSignInView = { name: 'Meena', email: 'meena@example.in', shops: [anand] };
+/** The owner row Rust made from the account, before it has a PIN. */
+const meenaRow: StaffDetailView = {
+  id: 'staff_meena',
+  name: 'Meena',
+  roleId: 'role_owner',
+  role: 'Owner',
+  status: 'active',
+  hasPin: false,
+  phone: '9845012345',
+  designation: '',
+  department: '',
+  employmentType: 'full_time',
+  address: '',
+  emergencyName: '',
+  emergencyPhone: '',
+  idProof: '',
+  joined: '',
+  leftOn: '',
+  salarySays: '',
+};
 
 /** What opening a new shop answers: the shop is there, named after nobody yet, with Meena's row. */
 function opened(over: Partial<FirstRunView> = {}): OwnerOpenedView {
@@ -74,10 +95,10 @@ function wire(over: Partial<FirstRunView> = {}, answers: Record<string, unknown>
         return Promise.resolve(opened());
       case 'save_settings':
         return Promise.resolve([]);
+      case 'staff_details':
+        return Promise.resolve(meenaRow);
       case 'save_staff_member':
         return Promise.resolve([]);
-      case 'set_staff_pin':
-        return Promise.resolve(undefined);
       case 'login':
         return Promise.resolve({ signedIn: true });
       case 'open_magicbill':
@@ -407,8 +428,15 @@ it('gives the PIN to the owner row that already exists, signs in with it and ope
   await waitFor(() => expect(done).toHaveBeenCalled());
   const saved = call.mock.calls.filter((c) => c[0] === 'save_staff_member');
   expect(saved).toHaveLength(1);
-  expect((saved[0]?.[1] as { staff: { id: string } }).staff.id).toBe('staff_meena');
-  expect(call).toHaveBeenCalledWith('set_staff_pin', { staffId: 'staff_meena', pin: '4829' });
+  // One save carries the PIN, on top of what the row already holds — the phone the cloud knew
+  // is not wiped by the PIN step.
+  const staff = (saved[0]?.[1] as { staff: { id: string; pin: string; phone: string; roleId: string } })
+    .staff;
+  expect(staff.id).toBe('staff_meena');
+  expect(staff.pin).toBe('4829');
+  expect(staff.roleId).toBe('role_owner');
+  expect(staff.phone).toBe('9845012345');
+  expect(call).not.toHaveBeenCalledWith('set_staff_pin', expect.anything());
   expect(call).toHaveBeenCalledWith('login', expect.objectContaining({ pin: '4829' }));
   // No code to write down, and nothing after the PIN.
   expect(screen.queryByText(/Write this down/)).toBeNull();

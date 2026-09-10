@@ -468,8 +468,9 @@ export function Select({
                         tabIndex={-1}
                         aria-selected={option.value === box.current?.value}
                         className={cx(
+                          'mb-pick',
                           'mb-sheet__item',
-                          index === highlighted && 'mb-sheet__item--on',
+                          index === highlighted && 'mb-pick--on',
                         )}
                         // The box keeps the focus; a press here must not take it.
                         onMouseDown={(event) => event.preventDefault()}

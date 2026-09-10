@@ -102,9 +102,11 @@
 /*
  * A row in a list that happens to be pressable: the person on the lock screen, a section in a
  * rail. Two lines are allowed, so the height comes from the words — a fixed-height button was
- * how "Cashier" lost its bottom half.
+ * how "Cashier" lost its bottom half. Being chosen is the pick's job, further down; the marker
+ * it draws is why this is a positioned box.
  */
 .mb-button--list {
+  position: relative;
   height: auto;
   min-height: var(--control-md);
   flex-direction: column;
@@ -114,14 +116,6 @@
   padding: var(--space-2) var(--space-3);
   text-align: left;
   white-space: normal;
-}
-
-.mb-button--list[aria-current='true'],
-.mb-button--list[aria-current='page'] {
-  background: var(--surface-2);
-  color: var(--text);
-  font-weight: var(--weight-bold);
-  box-shadow: inset var(--tile-stripe) 0 0 var(--accent);
 }
 
 /* A hand on a touch screen. */
@@ -148,6 +142,82 @@
 }
 
 /*
+ * THE PICK — one row of a list somebody chooses from: an option in a dropdown, a screen in the
+ * More rail, a category on the Menu, a report, a person on the lock screen. ONE recipe, because
+ * "which one am I on" cannot be a different shape on every screen. A list is allowed to say how
+ * its row is laid out and nothing else; being chosen is decided here.
+ *
+ * The state is read off ARIA rather than off a class of its own: the attribute a screen reader
+ * announces and the fill a cashier sees are then the same fact, and they cannot drift apart.
+ */
+.mb-pick {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-field);
+  width: 100%;
+  min-height: var(--control-md);
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  color: var(--text);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Under the hand, or under the arrow keys — the two are one state, on the way to a choice. */
+.mb-pick:hover,
+.mb-pick--on {
+  background: var(--pick-hover);
+  color: var(--text);
+}
+
+/*
+ * The one in force. A fill that is SEEN: the old chosen row wore the panel's own grey, which on
+ * a white sheet was no row at all.
+ */
+.mb-pick[aria-current='page'],
+.mb-pick[aria-current='true'],
+.mb-pick[aria-selected='true'],
+.mb-button--list[aria-current='page'],
+.mb-button--list[aria-current='true'] {
+  background: var(--pick-bg);
+  color: var(--pick-ink);
+  font-weight: var(--weight-bold);
+}
+
+.mb-pick[aria-current='page']:hover,
+.mb-pick[aria-current='true']:hover,
+.mb-pick[aria-selected='true']:hover,
+.mb-button--list[aria-current='page']:hover,
+.mb-button--list[aria-current='true']:hover {
+  background: var(--pick-bg-hover);
+  color: var(--pick-ink);
+}
+
+/*
+ * The marker. Colour is never the only signal, and a tint is easy to lose halfway down a long
+ * list — so the chosen row carries a shape as well.
+ */
+.mb-pick[aria-current='page']::before,
+.mb-pick[aria-current='true']::before,
+.mb-pick[aria-selected='true']::before,
+.mb-button--list[aria-current='page']::before,
+.mb-button--list[aria-current='true']::before {
+  content: '';
+  position: absolute;
+  left: var(--pick-mark-inset);
+  top: var(--pick-mark-short);
+  bottom: var(--pick-mark-short);
+  width: var(--pick-mark);
+  border-radius: var(--radius-pill);
+  background: var(--pick-line);
+}
+
+/*
  * The sheet: the floating list that opens under a menu button or a dropdown. ONE recipe —
  * the top bar's More, a row's ⋯ and every Select open the same sheet; each only says where
  * its own lies.
@@ -163,37 +233,15 @@
   box-shadow: var(--level-pop);
 }
 
-/* One row of a sheet. */
+/* One row of a sheet: a pick that stands to one line, at the sheet's own corner. */
 .mb-sheet__item {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-field);
   flex: none;
   height: var(--control-md);
   padding: 0 var(--space-3);
-  background: transparent;
-  color: var(--text);
   border: none;
   border-radius: var(--radius-sm);
-  font: inherit;
   font-size: var(--type-body);
-  text-align: left;
   white-space: nowrap;
-  cursor: pointer;
-}
-
-.mb-sheet__item:hover,
-.mb-sheet__item--on {
-  background: var(--surface-2);
-}
-
-/* The row that is in force: the current screen, the chosen option. */
-.mb-sheet__item[aria-current='page'],
-.mb-sheet__item[aria-selected='true'] {
-  background: var(--surface-2);
-  color: var(--text);
-  font-weight: var(--weight-bold);
-  box-shadow: inset var(--tile-stripe) 0 0 var(--accent);
 }
 
 /* The invisible cover that closes a sheet when anything else is pressed. */
@@ -517,7 +565,7 @@ textarea.mb-input {
   width: var(--icon-lg);
   height: var(--icon-lg);
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--pick-line);
   cursor: pointer;
 }
 
@@ -1090,7 +1138,7 @@ textarea.mb-input {
 .mb-tab[aria-selected='true'] {
   color: var(--text);
   font-weight: var(--weight-bold);
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--pick-line);
 }
 
 /* Empty and busy. */
@@ -1366,7 +1414,7 @@ textarea.mb-input {
 
 .mb-chart__step--on .mb-chart__hit,
 .mb-chart__step:focus-visible .mb-chart__hit {
-  fill: var(--surface-2);
+  fill: var(--pick-hover);
 }
 
 .mb-chart__step .mb-chart__mark {
