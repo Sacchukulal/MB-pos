@@ -467,12 +467,12 @@ pub async fn join_master(
     name: String,
     prefix: String,
 ) -> UiResult<TillsView> {
-    join_on(&app, address, fingerprint, token, name, prefix)
+    crate::ipc::blocking(|| join_on(&app, address, fingerprint, token, name, prefix)).await
 }
 
 #[tauri::command]
 pub async fn send_waiting_bills(app: tauri::State<'_, App>) -> UiResult<TillsView> {
-    send_now_on(&app)
+    crate::ipc::blocking(|| send_now_on(&app)).await
 }
 
 #[cfg(test)]

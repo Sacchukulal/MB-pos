@@ -10,6 +10,16 @@ use crate::state::{App, OUTLET, PrintJobView};
 use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
 
+// Slow work, off the window.
+
+/// The body of every `async` command: the work runs on this thread while the runtime hands
+/// the thread's other tasks to another worker, so a slow line — the cloud, a disk, a wait
+/// for a person on another till — stalls neither the window nor the commands behind it.
+/// The guard's test holds every `async` command to this shape.
+pub async fn blocking<T>(work: impl FnOnce() -> T) -> T {
+    tokio::task::block_in_place(work)
+}
+
 // Money, as it crosses.
 
 /// The only shape money takes on the wire.

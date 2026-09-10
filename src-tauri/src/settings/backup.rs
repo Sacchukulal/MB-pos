@@ -829,12 +829,12 @@ pub fn save_to_on(app: &App, folder: String) -> UiResult<BackupView> {
 
 #[tauri::command]
 pub async fn backup_status(app: tauri::State<'_, App>) -> UiResult<BackupView> {
-    status_on(&app)
+    crate::ipc::blocking(|| status_on(&app)).await
 }
 
 #[tauri::command]
 pub async fn back_up_now(app: tauri::State<'_, App>) -> UiResult<BackupView> {
-    back_up_now_on(&app)
+    crate::ipc::blocking(|| back_up_now_on(&app)).await
 }
 
 #[tauri::command]
@@ -857,12 +857,12 @@ pub async fn set_backup_folder(
     app: tauri::State<'_, App>,
     folder: Option<String>,
 ) -> UiResult<BackupView> {
-    set_folder_on(&app, folder)
+    crate::ipc::blocking(|| set_folder_on(&app, folder)).await
 }
 
 #[tauri::command]
 pub async fn add_backup_copy(app: tauri::State<'_, App>, folder: String) -> UiResult<BackupView> {
-    add_copy_on(&app, folder)
+    crate::ipc::blocking(|| add_copy_on(&app, folder)).await
 }
 
 #[tauri::command]
@@ -870,7 +870,7 @@ pub async fn remove_backup_copy(
     app: tauri::State<'_, App>,
     folder: String,
 ) -> UiResult<BackupView> {
-    remove_copy_on(&app, folder)
+    crate::ipc::blocking(|| remove_copy_on(&app, folder)).await
 }
 
 #[tauri::command]
@@ -884,5 +884,5 @@ pub fn set_backup_schedule(
 
 #[tauri::command]
 pub async fn save_backup_to(app: tauri::State<'_, App>, folder: String) -> UiResult<BackupView> {
-    save_to_on(&app, folder)
+    crate::ipc::blocking(|| save_to_on(&app, folder)).await
 }

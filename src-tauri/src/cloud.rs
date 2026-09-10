@@ -155,6 +155,24 @@ impl Link for NoLink {
 
 // The client.
 
+/// The one runtime every cloud call runs on, built the first time a call is made. The client
+/// owns it so that no caller's thread — the window's, an async command's, a background
+/// worker's — has to be a particular kind of thread.
+fn cloud_runtime() -> Option<&'static tokio::runtime::Runtime> {
+    static RUNTIME: std::sync::OnceLock<Option<tokio::runtime::Runtime>> =
+        std::sync::OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("mb-cloud")
+                .enable_all()
+                .build()
+                .ok()
+        })
+        .as_ref()
+}
+
 pub struct Http {
     client: reqwest::Client,
     base: String,
@@ -189,8 +207,30 @@ impl Http {
         })
     }
 
-    fn run<T>(future: impl std::future::Future<Output = T>) -> T {
-        tauri::async_runtime::block_on(future)
+    /// Start a call on the cloud's runtime. Only fails when there is no runtime to start it on.
+    fn start(future: impl std::future::Future<Output = ()> + Send + 'static) -> Result<(), String> {
+        let Some(runtime) = cloud_runtime() else {
+            return Err("this computer could not start networking".to_owned());
+        };
+        runtime.spawn(future);
+        Ok(())
+    }
+
+    /// One call, run on the cloud's runtime while this thread waits for its answer.
+    ///
+    /// Waiting on a channel rather than `block_on` is what makes this safe from every
+    /// thread: a `block_on` panics on a thread that already drives a runtime, and an async
+    /// Tauri command runs on exactly such a thread. A call the runtime lost — its task
+    /// panicked — comes back as an error, never as a wait that does not end.
+    fn run<T: Send + 'static>(
+        future: impl std::future::Future<Output = Result<T, String>> + Send + 'static,
+    ) -> Result<T, String> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        Http::start(async move {
+            let _ = tx.send(future.await);
+        })?;
+        rx.recv()
+            .unwrap_or_else(|_| Err("the call was lost before it answered".to_owned()))
     }
 
     /// This computer's name, so the owner's phone can tell two tills apart.
@@ -208,10 +248,10 @@ impl Http {
             .timeout(CALL_TIMEOUT)
             .json(body);
         let (status, text) = Http::run(async move {
-            let response = request.send().await?;
+            let response = request.send().await.map_err(|e| e.to_string())?;
             let status = response.status().as_u16();
             let text = response.text().await.unwrap_or_default();
-            Ok::<_, reqwest::Error>((status, text))
+            Ok((status, text))
         })
         .map_err(|e| {
             log_warn!("the licence office could not be reached for {op}: {e}");
@@ -300,7 +340,7 @@ impl Http {
             .bearer_auth(token)
             .timeout(CALL_TIMEOUT);
         Http::run(async move {
-            let response = request.send().await?;
+            let response = request.send().await.map_err(|e| e.to_string())?;
             let status = response.status().as_u16();
             let range = response
                 .headers()
@@ -308,7 +348,7 @@ impl Http {
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
             let text = response.text().await.unwrap_or_default();
-            Ok::<_, reqwest::Error>((status, text, range))
+            Ok((status, text, range))
         })
         .map_err(|e| {
             log_warn!("the cloud could not be reached: {e}");
@@ -404,10 +444,10 @@ impl Link for Http {
             .timeout(CALL_TIMEOUT)
             .json(&json!({ "email": email, "password": password }));
         let (status, text) = Http::run(async move {
-            let response = request.send().await?;
+            let response = request.send().await.map_err(|e| e.to_string())?;
             let status = response.status().as_u16();
             let text = response.text().await.unwrap_or_default();
-            Ok::<_, reqwest::Error>((status, text))
+            Ok((status, text))
         })
         .map_err(|e| {
             log_warn!("the sign-in could not reach our server: {e}");
@@ -518,10 +558,10 @@ impl Link for Http {
             .timeout(CALL_TIMEOUT)
             .json(&json!({ "refresh_token": refresh_token }));
         let (status, text) = Http::run(async move {
-            let response = request.send().await?;
+            let response = request.send().await.map_err(|e| e.to_string())?;
             let status = response.status().as_u16();
             let text = response.text().await.unwrap_or_default();
-            Ok::<_, reqwest::Error>((status, text))
+            Ok((status, text))
         })
         .map_err(|e| {
             log_warn!("the login could not be refreshed: {e}");
@@ -566,27 +606,44 @@ impl Link for Http {
             std::fs::create_dir_all(parent).map_err(|e| LinkError::Server(e.to_string()))?;
         }
         let request = self.client.get(url).timeout(DOWNLOAD_TIMEOUT);
+        let file_at = to.to_path_buf();
         // Chunk by chunk to the disk and the hash, so a 60 MB installer is never held whole
-        // and the screen can say how far it has got.
-        let outcome = Http::run(async move {
+        // and the screen can say how far it has got. The runtime downloads; this thread
+        // hears each step over a channel and tells `progress`, then takes the outcome.
+        let (heard, hear) = std::sync::mpsc::channel::<Heard>();
+        let say = heard.clone();
+        let fetch = async move {
             let mut response = request.send().await.map_err(|e| e.to_string())?;
             let status = response.status().as_u16();
             if status != 200 {
                 return Err(format!("the file answered {status}"));
             }
             let total = response.content_length();
-            let mut file = std::fs::File::create(to).map_err(|e| e.to_string())?;
+            let mut file = std::fs::File::create(&file_at).map_err(|e| e.to_string())?;
             let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
             let mut so_far = 0u64;
-            progress(0, total);
+            let _ = say.send(Heard::Bytes(0, total));
             while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
                 file.write_all(&chunk).map_err(|e| e.to_string())?;
                 digest.update(&chunk);
                 so_far = so_far.saturating_add(chunk.len() as u64);
-                progress(so_far, total);
+                let _ = say.send(Heard::Bytes(so_far, total));
             }
             file.flush().map_err(|e| e.to_string())?;
             Ok(hex_of(digest.finish().as_ref()))
+        };
+        let outcome = Http::start(async move {
+            let _ = heard.send(Heard::Done(fetch.await));
+        })
+        .and_then(|()| {
+            let mut done = Err("the download was lost before it finished".to_owned());
+            for word in hear {
+                match word {
+                    Heard::Bytes(bytes, total) => progress(bytes, total),
+                    Heard::Done(outcome) => done = outcome,
+                }
+            }
+            done
         });
         outcome.map_err(|why| {
             log_warn!("the download failed: {why}");
@@ -594,6 +651,12 @@ impl Link for Http {
             LinkError::Server(why)
         })
     }
+}
+
+/// What a download says as it comes down, on the channel between the runtime and the caller.
+enum Heard {
+    Bytes(u64, Option<u64>),
+    Done(Result<String, String>),
 }
 
 fn hex_of(bytes: &[u8]) -> String {
@@ -961,5 +1024,22 @@ mod tests {
         assert!(cloud_url().starts_with("https://"), "{}", cloud_url());
         assert!(!anon_key().is_empty());
         assert!(!cloud_url().ends_with('/'));
+    }
+
+    /// The window's runtime is where an `async` command runs, and a call made from there must
+    /// answer like any other. Before 1.6.14 it panicked inside the runtime and the screen
+    /// waited forever.
+    #[test]
+    fn a_call_from_inside_the_windows_runtime_answers() {
+        let (base, _seen) = serve(vec![(401, "", r#"{"code":"not_recognised"}"#.to_owned())]);
+        let http = Http::at(&base, "anon-key");
+        let (tx, rx) = std::sync::mpsc::channel();
+        tauri::async_runtime::spawn(async move {
+            let _ = tx.send(http.refresh(&an_ask(), false));
+        });
+        let answer = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the call answered rather than panicking inside the runtime");
+        assert_eq!(answer, Err(CloudError::NotRecognised));
     }
 }

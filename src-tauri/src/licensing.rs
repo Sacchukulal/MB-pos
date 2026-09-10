@@ -757,7 +757,7 @@ pub async fn licence_shops(
     email: String,
     password: String,
 ) -> UiResult<crate::firstrun::OwnerSignInView> {
-    licence_shops_on(&app, email, password)
+    crate::ipc::blocking(|| licence_shops_on(&app, email, password)).await
 }
 
 #[tauri::command]
@@ -767,17 +767,17 @@ pub async fn change_licence(
     move_here: bool,
     new_pin: String,
 ) -> UiResult<LicenceView> {
-    change_licence_on(&app, door, move_here, new_pin)
+    crate::ipc::blocking(|| change_licence_on(&app, door, move_here, new_pin)).await
 }
 
 #[tauri::command]
 pub async fn sign_out_licence(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
-    sign_out_on(&app)
+    crate::ipc::blocking(|| sign_out_on(&app)).await
 }
 
 #[tauri::command]
 pub async fn bring_licence_here(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
-    bring_here_on(&app)
+    crate::ipc::blocking(|| bring_here_on(&app)).await
 }
 
 #[tauri::command]
@@ -787,5 +787,5 @@ pub fn use_emergency_code(app: tauri::State<'_, App>, code: String) -> UiResult<
 
 #[tauri::command]
 pub async fn refresh_licence(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
-    refresh_on(&app)
+    crate::ipc::blocking(|| refresh_on(&app)).await
 }

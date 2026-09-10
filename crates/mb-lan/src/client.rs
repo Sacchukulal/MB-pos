@@ -271,41 +271,58 @@ fn shared_runtime() -> Option<&'static tokio::runtime::Runtime> {
         .as_ref()
 }
 
-fn on_runtime<T>(
-    future: impl std::future::Future<Output = Result<T, ClientError>>,
+/// One call, run on the client's runtime while this thread waits for its answer. Waiting on
+/// a channel rather than `block_on` is what makes this safe from every thread — a `block_on`
+/// panics on a thread that already drives a runtime — and a call the runtime lost comes back
+/// as an error, never as a wait that does not end.
+fn on_runtime<T: Send + 'static>(
+    future: impl std::future::Future<Output = Result<T, ClientError>> + Send + 'static,
 ) -> Result<T, ClientError> {
     let Some(runtime) = shared_runtime() else {
         return Err(ClientError::Unreachable(
             "this till could not start networking".to_owned(),
         ));
     };
-    runtime.block_on(future)
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    runtime.spawn(async move {
+        let _ = tx.send(future.await);
+    });
+    rx.recv().unwrap_or_else(|_| {
+        Err(ClientError::Unreachable(
+            "the call was lost before it answered".to_owned(),
+        ))
+    })
 }
 
 impl Master {
-    /// `Master::meet`, for a caller with no runtime.
+    /// `Master::meet`, for a caller on any thread.
     pub fn meet_blocking(base: &str, expected_fingerprint: &str) -> Result<Master, ClientError> {
-        on_runtime(Master::meet(base, expected_fingerprint))
+        let (base, fingerprint) = (base.to_owned(), expected_fingerprint.to_owned());
+        on_runtime(async move { Master::meet(&base, &fingerprint).await })
     }
 
-    /// `Master::join`, for a caller with no runtime.
+    /// `Master::join`, for a caller on any thread.
     pub fn join_blocking(
         &self,
         token: &str,
         name: &str,
         patience: Duration,
     ) -> Result<Credential, ClientError> {
-        on_runtime(self.join(token, name, patience))
+        let me = self.clone();
+        let (token, name) = (token.to_owned(), name.to_owned());
+        on_runtime(async move { me.join(&token, &name, patience).await })
     }
 
-    /// `Master::forward`, for a caller with no runtime.
+    /// `Master::forward`, for a caller on any thread.
     pub fn forward_blocking(&self, batch: &Forwarded) -> Result<Receipt, ClientError> {
-        on_runtime(self.forward(batch))
+        let (me, batch) = (self.clone(), batch.clone());
+        on_runtime(async move { me.forward(&batch).await })
     }
 
-    /// `Master::apply`, for a caller with no runtime.
+    /// `Master::apply`, for a caller on any thread.
     pub fn apply_blocking(&self, intent: &Intent) -> Result<Outcome, ClientError> {
-        on_runtime(self.apply(intent))
+        let (me, intent) = (self.clone(), intent.clone());
+        on_runtime(async move { me.apply(&intent).await })
     }
 }
 
@@ -385,5 +402,20 @@ mod fingerprint_tests {
         // An empty one is never a match: "nothing answered" must not read as "it matched".
         assert!(!same_fingerprint("", ""));
         assert!(!same_fingerprint("", "abcd12"));
+    }
+
+    /// A till's commands run on a runtime, and the blocking face must answer from there too:
+    /// a `block_on` on such a thread panics, and a panicked call never answers.
+    #[test]
+    fn the_blocking_face_answers_from_inside_a_runtime() {
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let (tx, rx) = std::sync::mpsc::channel();
+        runtime.spawn(async move {
+            let _ = tx.send(super::Master::meet_blocking("http://127.0.0.1:9", "abcd"));
+        });
+        let answer = rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("the call answered rather than panicking inside the runtime");
+        assert!(answer.is_err(), "nothing listens on port 9");
     }
 }

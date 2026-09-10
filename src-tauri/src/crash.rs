@@ -41,7 +41,8 @@ pub fn install() {
         // The log too: a crash that left a report but no log line is a crash nobody looking at
         // the log knows happened.
         crate::log_error!("the counter panicked — a crash report was written");
-        // And then let the default hook do its job, which includes actually ending the process.
+        // Then the default hook prints it. A panic on the main thread ends the process; one
+        // inside a runtime task ends only that task, so the log line above is what tells.
         previous(info);
     }));
 }

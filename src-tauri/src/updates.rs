@@ -738,7 +738,7 @@ pub fn look_for_an_update(
 pub async fn check_for_update(
     app: tauri::State<'_, crate::state::App>,
 ) -> crate::words::UiResult<UpdateState> {
-    check_on(&app)
+    crate::ipc::blocking(|| check_on(&app)).await
 }
 
 #[tauri::command]

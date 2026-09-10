@@ -767,43 +767,45 @@ mod tests {
         assert_eq!(PermissionSet::everything().len(), Permission::ALL.len());
     }
 
+    /// Every file that defines a command.
+    const SOURCES: [&str; 33] = [
+        include_str!("terminals.rs"),
+        include_str!("orders.rs"),
+        include_str!("buying.rs"),
+        include_str!("counting.rs"),
+        include_str!("share.rs"),
+        include_str!("inventory.rs"),
+        include_str!("lan.rs"),
+        include_str!("licensing.rs"),
+        include_str!("health.rs"),
+        include_str!("diagnostics.rs"),
+        include_str!("updates.rs"),
+        include_str!("setup.rs"),
+        include_str!("kitchen.rs"),
+        include_str!("dayclose.rs"),
+        include_str!("reports.rs"),
+        include_str!("ipc.rs"),
+        include_str!("flows.rs"),
+        include_str!("corrections.rs"),
+        include_str!("menu.rs"),
+        include_str!("tax.rs"),
+        include_str!("floor.rs"),
+        include_str!("credit.rs"),
+        include_str!("expenses.rs"),
+        include_str!("employment.rs"),
+        include_str!("delivery.rs"),
+        include_str!("payments.rs"),
+        include_str!("devices.rs"),
+        include_str!("firstrun.rs"),
+        include_str!("logo.rs"),
+        include_str!("settings/ipc.rs"),
+        include_str!("settings/printers.rs"),
+        include_str!("settings/backup.rs"),
+        include_str!("settings/numbering.rs"),
+    ];
+
     /// Every `#[tauri::command]` in the two files that define them.
     fn declared_commands() -> BTreeSet<String> {
-        const SOURCES: [&str; 33] = [
-            include_str!("terminals.rs"),
-            include_str!("orders.rs"),
-            include_str!("buying.rs"),
-            include_str!("counting.rs"),
-            include_str!("share.rs"),
-            include_str!("inventory.rs"),
-            include_str!("lan.rs"),
-            include_str!("licensing.rs"),
-            include_str!("health.rs"),
-            include_str!("diagnostics.rs"),
-            include_str!("updates.rs"),
-            include_str!("setup.rs"),
-            include_str!("kitchen.rs"),
-            include_str!("dayclose.rs"),
-            include_str!("reports.rs"),
-            include_str!("ipc.rs"),
-            include_str!("flows.rs"),
-            include_str!("corrections.rs"),
-            include_str!("menu.rs"),
-            include_str!("tax.rs"),
-            include_str!("floor.rs"),
-            include_str!("credit.rs"),
-            include_str!("expenses.rs"),
-            include_str!("employment.rs"),
-            include_str!("delivery.rs"),
-            include_str!("payments.rs"),
-            include_str!("devices.rs"),
-            include_str!("firstrun.rs"),
-            include_str!("logo.rs"),
-            include_str!("settings/ipc.rs"),
-            include_str!("settings/printers.rs"),
-            include_str!("settings/backup.rs"),
-            include_str!("settings/numbering.rs"),
-        ];
         let mut found = BTreeSet::new();
         for source in SOURCES {
             let mut lines = source.lines().peekable();
@@ -923,6 +925,39 @@ mod tests {
         let declared = declared_commands();
         assert!(declared.contains("app_status"), "missed ipc.rs");
         assert!(declared.contains("complete_bill"), "missed flows.rs");
+    }
+
+    /// An `async` command runs on the runtime's own threads, so its work must go through
+    /// `ipc::blocking`: anything slower — or anything that waits on a `block_on` — would
+    /// otherwise stall the runtime, or panic and leave the screen waiting for an answer that
+    /// never comes.
+    #[test]
+    fn every_async_command_runs_its_work_through_blocking() {
+        let mut wrong = Vec::new();
+        for source in SOURCES {
+            let mut lines = source.lines();
+            while let Some(line) = lines.next() {
+                let Some(rest) = line.trim().strip_prefix("pub async fn ") else {
+                    continue;
+                };
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| *c != '(' && *c != '<')
+                    .collect();
+                if name == "blocking" {
+                    continue;
+                }
+                let body: Vec<&str> = lines.by_ref().take_while(|l| !l.starts_with('}')).collect();
+                if !body.iter().any(|l| l.contains("blocking(")) {
+                    wrong.push(name);
+                }
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "these async commands do their work on the runtime's thread — wrap the body in \
+             `crate::ipc::blocking(|| ...).await`: {wrong:?}"
+        );
     }
 
     /// Public is a decision, and a short list.
