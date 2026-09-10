@@ -736,6 +736,18 @@ function BareBar() {
   );
 }
 
+/**
+ * How long the bell rings, in milliseconds — asked of the theme, never decided here. A
+ * counter with motion turned off has the beat set to zero there, so this comes back zero and
+ * the bell never rings at all.
+ */
+function ringsFor(): number {
+  const theme = getComputedStyle(document.documentElement);
+  const beat = Number.parseFloat(theme.getPropertyValue('--motion-beat'));
+  const beats = Number.parseFloat(theme.getPropertyValue('--beats'));
+  return Number.isFinite(beat) && Number.isFinite(beats) ? beat * beats : 0;
+}
+
 function TopBar({
   shopPath,
   screens,
@@ -784,6 +796,21 @@ function TopBar({
   const window = inApp() ? getCurrentWindow() : null;
 
   const face: IconName = themeIcon === 'moon' ? 'moon' : 'sun';
+
+  /**
+   * The bell rings when something NEW turns up — a count that went UP, not one that has been
+   * sitting there all morning. It stops on its own, and opening the alerts stops it too.
+   */
+  const [ringing, setRinging] = useState(false);
+  const counted = useRef(alertCount);
+  useEffect(() => {
+    const was = counted.current;
+    counted.current = alertCount;
+    if (alertCount <= was) return;
+    setRinging(true);
+    const stop = setTimeout(() => setRinging(false), ringsFor());
+    return () => clearTimeout(stop);
+  }, [alertCount]);
 
   const { inBar, inMore, elsewhere } = splitScreens(screens, current);
 
@@ -901,8 +928,17 @@ function TopBar({
 
         <button
           type="button"
-          className={['mb-bell', alertTone ? `mb-bell--${alertTone}` : ''].filter(Boolean).join(' ')}
-          onClick={onOpenAlerts}
+          className={[
+            'mb-bell',
+            alertTone ? `mb-bell--${alertTone}` : 'mb-bell--quiet',
+            ringing ? 'mb-bell--ringing' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          onClick={() => {
+            setRinging(false);
+            onOpenAlerts();
+          }}
           aria-label={
             alertCount === 0
               ? 'Alerts — nothing needs you'
@@ -910,7 +946,9 @@ function TopBar({
           }
           title={alertCount === 0 ? 'Alerts' : `${alertCount} waiting`}
         >
-          <Icon name="bell" size="sm" />
+          {/* The ring: a halo that beats a few times behind the bell, never over it. */}
+          <span className="mb-bell__ring" aria-hidden="true" />
+          <Icon name="bell" size="lg" className="mb-bell__glyph" />
           {alertCount > 0 ? <span className="mb-bell__count">{alertCount}</span> : null}
         </button>
 
@@ -921,7 +959,7 @@ function TopBar({
           aria-label={`Theme: ${themeName}. Switch.`}
           title={`Theme: ${themeName}`}
         >
-          <Icon name={face} size="md" />
+          <Icon name={face} size="lg" />
         </button>
 
         <span className="mb-topbar__windows">

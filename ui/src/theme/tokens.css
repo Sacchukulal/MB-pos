@@ -148,6 +148,13 @@
   --motion-fast: 120ms;
   --motion-normal: 200ms;
   --ease: cubic-bezier(0.2, 0, 0.2, 1);
+  /*
+   * The one exception to the 120–200 ms rule, and it is deliberate: the bell has to be
+   * noticed from across the counter by somebody who is looking at a table, not at the
+   * screen. One beat, and how many of them before it gives up and goes quiet.
+   */
+  --motion-beat: 1000ms;
+  --beats: 3;
 
   /*
    * THE CONTROL CONTRACT. Three heights, by job.
@@ -554,6 +561,8 @@ textarea {
   :root {
     --motion-fast: 0ms;
     --motion-normal: 0ms;
+    --motion-beat: 0ms;
+    --beats: 0;
   }
 }
 

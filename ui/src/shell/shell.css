@@ -438,13 +438,47 @@
 
 .mb-bell:hover {
   background: var(--surface-2);
+}
+
+/*
+ * The bell itself, above the halo. Anything waiting takes the colour of the worst of it, so
+ * the glyph carries the news as well as the number does — and the pointer does NOT wash that
+ * colour out, which is why only the quiet bell brightens on hover.
+ */
+.mb-bell__glyph {
+  position: relative;
+  z-index: 1;
+}
+
+.mb-bell--quiet:hover {
   color: var(--text);
 }
 
+.mb-bell--info {
+  color: var(--text);
+}
+
+.mb-bell--accent {
+  color: var(--brand);
+}
+
+.mb-bell--warn {
+  color: var(--warn);
+}
+
+.mb-bell--danger {
+  color: var(--danger);
+}
+
+/*
+ * The count sits in the corner OUTSIDE the bell, with a ring of the bar's own colour behind
+ * it — a badge that lands on the glyph hides the very thing it is about.
+ */
 .mb-bell__count {
   position: absolute;
-  top: var(--space-1);
-  right: var(--space-1);
+  top: calc(var(--border-width-thick) * -1);
+  right: calc(var(--border-width-thick) * -1);
+  z-index: 2;
   min-width: var(--space-4);
   height: var(--space-4);
   padding: 0 var(--space-1);
@@ -458,6 +492,12 @@
   border-radius: var(--radius-pill);
   color: var(--accent-ink);
   background: var(--info);
+  box-shadow: 0 0 0 var(--border-width-thick) var(--surface);
+}
+
+.mb-bell--accent .mb-bell__count {
+  background: var(--brand);
+  color: var(--accent-ink);
 }
 
 .mb-bell--warn .mb-bell__count {
@@ -469,6 +509,58 @@
   background: var(--danger);
   color: var(--accent-ink);
 }
+
+/*
+ * The halo. Always there, invisible, until something new turns up — which is what lets a
+ * counter with motion turned off show nothing at all: the theme sets the beat to zero, the
+ * animation never runs, and an opacity of 0 is what is left.
+ */
+.mb-bell__ring {
+  position: absolute;
+  inset: 0;
+  border: var(--border-width-thick) solid currentColor;
+  border-radius: var(--radius-md);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mb-bell--ringing .mb-bell__ring {
+  animation: mb-bell-ring var(--motion-beat) var(--ease) var(--beats);
+}
+
+.mb-bell--ringing .mb-bell__glyph {
+  transform-origin: 50% 20%;
+  animation: mb-bell-swing var(--motion-beat) var(--ease) var(--beats);
+}
+
+@keyframes mb-bell-ring {
+  from {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.45);
+  }
+}
+
+@keyframes mb-bell-swing {
+  0%,
+  60%,
+  100% {
+    transform: rotate(0deg);
+  }
+  10%,
+  30%,
+  50% {
+    transform: rotate(12deg);
+  }
+  20%,
+  40% {
+    transform: rotate(-12deg);
+  }
+}
+
 
 /* The alerts panel hangs off the title bar. */
 .mb-alerts__away {
@@ -489,34 +581,64 @@
   flex-direction: column;
   width: var(--alerts-width);
   max-height: var(--alerts-tall);
-  overflow-y: auto;
-  padding: var(--space-1) 0;
+  /* Clipped sideways so a row's stripe stops at the rounded corner. */
+  overflow: hidden auto;
   background: var(--surface);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
 }
 
-.mb-alerts__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
-  border-bottom: var(--border-width) solid var(--border);
+/*
+ * Every line in the panel starts at the same place. A row is indented by its own stripe, so
+ * anything without one is pushed out by that much — one sum, written once.
+ */
+.mb-alerts__head .mb-section,
+.mb-alerts__group,
+.mb-alerts__quiet {
+  padding-left: calc(var(--space-4) + var(--tile-stripe));
 }
 
-.mb-alerts__title {
-  margin: 0;
-  font-size: var(--text-md);
-  font-weight: var(--weight-bold);
+.mb-alerts__head {
+  position: sticky;
+  top: 0;
+  z-index: var(--layer-sticky);
+  background: var(--surface);
+}
+
+/*
+ * The kit owns the heading; the panel only says where it sits. Its rule stays full width —
+ * padding moves the words, not the border.
+ */
+.mb-alerts__head .mb-section {
+  padding-right: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+/* The label over a group of rows — the kit's caption, placed. */
+.mb-alerts__group {
+  padding-right: var(--space-3);
+  padding-block: var(--space-3) var(--space-2);
+}
+
+/* Only when something stands above it: under the head, its border would be the second line. */
+.mb-alerts__list + .mb-alerts__group {
+  border-top: var(--border-width) solid var(--border);
 }
 
 .mb-alerts__quiet {
   margin: 0;
-  padding: var(--space-4);
+  padding-right: var(--space-4);
+  padding-block: var(--space-4);
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: var(--line-normal);
+}
+
+/* A row carries the stripe, and the stripe is what everything else lines up against. */
+.mb-alerts__one {
+  padding-left: var(--space-4);
+  border-left: var(--tile-stripe) solid transparent;
 }
 
 .mb-alerts__list {
@@ -532,20 +654,25 @@
   display: flex;
   align-items: flex-start;
   gap: var(--gap-field);
-  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  padding-right: var(--space-3);
+  padding-block: var(--space-3);
   border-bottom: var(--border-width) solid var(--border);
-  border-left: var(--tile-stripe) solid transparent;
 }
 
 .mb-alerts__one:last-child {
   border-bottom: none;
 }
 
+/*
+ * Info is the tone of a thing that is merely true — a set-up step, a licence line, a notice
+ * already read. It gets the divider's own colour, so the stripe is there without shouting:
+ * the slate one read as an alarm beside two lines of grey text.
+ */
 .mb-alerts__one--info {
-  border-left-color: var(--info);
+  border-left-color: var(--border);
 }
 .mb-alerts__one--accent {
-  border-left-color: var(--accent);
+  border-left-color: var(--brand);
 }
 .mb-alerts__one--warn {
   border-left-color: var(--warn);
@@ -560,6 +687,9 @@
   color: var(--text-muted);
 }
 
+.mb-alerts__one--accent .mb-alerts__icon {
+  color: var(--brand);
+}
 .mb-alerts__one--warn .mb-alerts__icon {
   color: var(--warn);
 }
@@ -584,6 +714,21 @@
   font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: var(--line-normal);
+}
+
+/* When it turned up: the quietest line in the row. */
+.mb-alerts__when {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/*
+ * The one thing that fixes it. Under the sentence and hugging its own words — beside them it
+ * took a third of a narrow panel and broke every alert into four ragged lines.
+ */
+.mb-alerts__do {
+  align-self: flex-start;
+  margin-top: var(--space-1);
 }
 
 /* The More button keeps the word More: the current screen's name is the page title. */

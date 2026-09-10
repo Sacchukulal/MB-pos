@@ -1,4 +1,4 @@
-import { Button, Icon, SectionHeader, type IconName } from '../kit';
+import { Button, Caption, Icon, SectionHeader, type IconName } from '../kit';
 import type { NoticeView } from '../ipc/generated/NoticeView';
 
 /** One thing the shop should know about. */
@@ -36,6 +36,8 @@ export function AlertsPanel({
   onGo: (screen: string) => void;
   onClose: () => void;
 }) {
+  const nothing = alerts.length === 0 && notices.length === 0;
+
   return (
     <>
       {/* Pressing anywhere else closes it. */}
@@ -46,26 +48,31 @@ export function AlertsPanel({
         onClick={onClose}
       />
       <section className="mb-alerts" aria-label="Alerts">
-        <SectionHeader
-          title="Alerts"
-          action={
-            <button
-              type="button"
-              className="mb-topbar__button"
-              onClick={onClose}
-              aria-label="Close the alerts"
-            >
-              <Icon name="close" size="sm" />
-            </button>
-          }
-        />
+        {/* The head stays put while the list under it scrolls. */}
+        <div className="mb-alerts__head">
+          <SectionHeader
+            title="Alerts"
+            action={
+              <Button
+                variant="quiet"
+                size="sm"
+                iconOnly
+                icon={<Icon name="close" size="sm" />}
+                title="Close the alerts"
+                aria-label="Close the alerts"
+                onClick={onClose}
+              />
+            }
+          />
+        </div>
 
-        {alerts.length === 0 && notices.length === 0 ? (
+        {nothing ? (
           <p className="mb-alerts__quiet">
-            Nothing needs you. Anything the counter wants to tell you turns up
-            here.
+            Nothing needs you. Anything the counter wants to tell you turns up here.
           </p>
-        ) : alerts.length === 0 ? null : (
+        ) : null}
+
+        {alerts.length > 0 ? (
           <ul className="mb-alerts__list">
             {alerts.map((alert) => (
               <li key={alert.id} className={`mb-alerts__one mb-alerts__one--${alert.tone}`}>
@@ -73,28 +80,32 @@ export function AlertsPanel({
                 <div className="mb-alerts__body">
                   <span className="mb-alerts__what">{alert.title}</span>
                   <span className="mb-alerts__says">{alert.says}</span>
+                  {/* Under the words, not beside them: a panel this narrow has one column. */}
+                  {alert.goTo ? (
+                    <Button
+                      className="mb-alerts__do"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        onGo(alert.goTo as string);
+                        onClose();
+                      }}
+                    >
+                      {alert.goLabel ?? 'Do it'}
+                    </Button>
+                  ) : null}
                 </div>
-                {alert.goTo ? (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      onGo(alert.goTo as string);
-                      onClose();
-                    }}
-                  >
-                    {alert.goLabel ?? 'Do it'}
-                  </Button>
-                ) : null}
               </li>
             ))}
           </ul>
-        )}
+        ) : null}
 
         {/* Notices from Magic Bill. Read once the panel opens; the number on the bell counts the unread. */}
         {notices.length > 0 ? (
           <>
-            <SectionHeader title="From Magic Bill" />
+            <div className="mb-alerts__group">
+              <Caption>From Magic Bill</Caption>
+            </div>
             <ul className="mb-alerts__list" aria-label="Notices from Magic Bill">
               {notices.map((notice) => (
                 <li
@@ -105,7 +116,7 @@ export function AlertsPanel({
                   <div className="mb-alerts__body">
                     <span className="mb-alerts__what">{notice.title}</span>
                     {notice.body ? <span className="mb-alerts__says">{notice.body}</span> : null}
-                    <span className="mb-muted">{notice.when}</span>
+                    <span className="mb-alerts__when">{notice.when}</span>
                   </div>
                 </li>
               ))}
