@@ -94,6 +94,12 @@
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-pill: 999px;
+  /*
+   * A fill that runs right up to a panel's edge — a head strip, a table's head row — sits
+   * INSIDE the panel's line, so it is rounded by that much less. A square fill behind a
+   * rounded edge is the notch that shows in a card's top corners.
+   */
+  --radius-inside: calc(var(--radius-lg) - var(--border-width));
 
   /* Type. Inter, bundled; the OS face behind it if the file is ever missing. */
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI',
@@ -211,8 +217,15 @@
   --cart-width: 23rem;
   /* The totals breakdown scrolls past this, so the item list keeps its room. */
   --totals-breakdown-max: 7.5rem;
-  /* The processing-orders panel, between the floor and the cart. */
-  --queue-width: 16rem;
+  /* The processing-orders panel, between the floor and the cart. It takes the room the two
+     gaps beside it used to waste, so a bill number never touches its money. */
+  --queue-width: 19rem;
+  /*
+   * The space each side of that panel. The billing screen is the one screen where three
+   * regions stand side by side in one row, and a page-sized gap twice over reads as a hole —
+   * the panel is what should be wide there, not the air beside it.
+   */
+  --queue-gap: var(--space-2);
   --tile-min: 9rem;
   /* A tile's FLOOR. It grows for its content; it never cuts a timer in half. */
   --tile-height: 6.5rem;

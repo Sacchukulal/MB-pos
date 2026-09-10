@@ -8,7 +8,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--cart-width);
   grid-template-rows: auto minmax(0, 1fr);
-  gap: var(--gap-field) var(--space-4);
+  gap: var(--gap-field) var(--queue-gap);
   min-height: 0;
 }
 
@@ -59,7 +59,7 @@
 
 .mb-billing__floorrow--open {
   grid-template-columns: minmax(0, 1fr) var(--queue-width);
-  column-gap: var(--space-4);
+  column-gap: var(--queue-gap);
   transition: none;
 }
 

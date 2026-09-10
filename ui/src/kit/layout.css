@@ -138,11 +138,14 @@
   padding: var(--space-1) var(--space-3);
   background: var(--surface-2);
   border-bottom: var(--border-width) solid var(--border);
+  border-radius: var(--radius-inside) var(--radius-inside) 0 0;
 }
 
+/* A group's head is inside the body, not on the edge, so it is square. */
 .mb-panel .mb-panel > .mb-panel__head {
   padding-left: 0;
   padding-right: 0;
+  border-radius: 0;
 }
 
 .mb-panel__what {
@@ -178,6 +181,15 @@
 
 .mb-panel--flush > .mb-panel__body {
   padding: 0;
+}
+
+/*
+ * A table that IS the panel — no head strip above it — has its own head row on the panel's
+ * top edge. A cell cannot be rounded (the table's borders are collapsed), so the box the
+ * table scrolls in takes the corners and clips the fill to them.
+ */
+.mb-panel--flush > .mb-panel__body:first-child > .mb-table__wrap:only-child {
+  border-radius: var(--radius-inside);
 }
 
 .mb-sections {
@@ -428,6 +440,7 @@
   padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
   background: var(--surface-2);
   border-bottom: var(--border-width) solid var(--border);
+  border-radius: var(--radius-inside) var(--radius-inside) 0 0;
 }
 
 .mb-sidefold__title {
