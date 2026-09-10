@@ -60,20 +60,39 @@ const DEFAULT_DOTS_PER_PIXEL = 2;
 /** The coarsest the paper is ever drawn; beyond this a bill is a grey smudge. */
 const COARSEST_DOTS_PER_PIXEL = 8;
 
+/** The finest: two device pixels a dot, so a narrow roll in a wide column is not blown up. */
+const FINEST_DOTS_PER_PIXEL = 0.5;
+
+/** A crisp step is taken over an exact fit only when it fills this much of the room. */
+const CRISP_FILL = 0.9;
+
 /**
- * How many printer dots one CSS pixel stands for, so that the paper fits in `available` CSS
- * pixels. Every answer is a whole number of dots per DEVICE pixel, or one dot over two of
- * them: `pixelRatio` device pixels make a CSS pixel, so a dot always lands on whole device
- * pixels and a one-dot rule is never smeared across two at partial strength.
+ * How many printer dots one CSS pixel stands for, so that the paper fits the `available` CSS
+ * pixels it has. A crisp answer — a whole number of dots per DEVICE pixel, or one dot over two
+ * of them, so a one-dot rule lands on whole pixels — is taken when it leaves little of the
+ * room empty; otherwise the paper is exactly as wide as the room and the browser averages,
+ * which reads as a receipt seen from a step back rather than a small crisp one lost in a
+ * wide column.
  */
 export function dotsPerPixel(dots: number, available: number, pixelRatio = 1): number {
   const perDevice = pixelRatio > 0 ? pixelRatio : 1;
   if (!(available > 0) || !(dots > 0)) return DEFAULT_DOTS_PER_PIXEL * perDevice;
-  for (let step = 0.5; step <= COARSEST_DOTS_PER_PIXEL; step += step < 1 ? 0.5 : 1) {
+  for (
+    let step = FINEST_DOTS_PER_PIXEL;
+    step <= COARSEST_DOTS_PER_PIXEL;
+    step += step < 1 ? 0.5 : 1
+  ) {
     const ratio = step * perDevice;
-    if (dots / ratio <= available) return ratio;
+    const width = dots / ratio;
+    if (width <= available) {
+      if (width >= available * CRISP_FILL) return ratio;
+      break;
+    }
   }
-  return COARSEST_DOTS_PER_PIXEL * perDevice;
+  return Math.min(
+    Math.max(dots / available, FINEST_DOTS_PER_PIXEL * perDevice),
+    COARSEST_DOTS_PER_PIXEL * perDevice,
+  );
 }
 
 /** Whether every dot gets at least one whole device pixel, so it can be drawn without averaging. */

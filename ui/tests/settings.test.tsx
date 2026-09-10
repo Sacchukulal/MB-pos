@@ -90,6 +90,13 @@ const view: SettingsView = {
       label: 'The bill',
       canEdit: false,
       settings: [
+        setting('receipt.design', 'Design', 'choice', 'classic', {
+          topic: 'Design',
+          choices: [
+            { value: 'classic', label: 'Classic' },
+            { value: 'lined', label: 'Lined' },
+          ],
+        }),
         setting('receipt.show.token', 'Print the token number', 'tick', '1', {
           topic: 'What goes on the bill',
           help: 'The big number the customer waits for.',
@@ -153,6 +160,7 @@ beforeEach(() => {
     if (name === 'preview_settings') {
       return Promise.resolve({
         paper: '80 mm (3 inch)',
+        face: 'Times New Roman',
         notUsableYet: [],
         doc: {
           dots: 576,
@@ -297,8 +305,9 @@ describe('the settings screen', () => {
     fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
 
     expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
-    // Which paper it DREW on, said above the paper itself.
-    expect(screen.getByText('Sample · 80 mm (3 inch)')).toBeTruthy();
+    // Which paper and which face it DREW with, said above the paper itself — facts, not boxes.
+    expect(screen.getByText(/80 mm \(3 inch\) · Times New Roman/)).toBeTruthy();
+    expect(screen.queryByLabelText('Paper width')).toBeNull();
 
     call.mockClear();
     fireEvent.change(screen.getByLabelText('Ticket footer'), {
@@ -314,18 +323,35 @@ describe('the settings screen', () => {
   });
 
   /** The shop's own details are not a piece of paper. */
-  it('shows no paper and no roll width on the shop section', async () => {
+  it('shows no paper on the shop section', async () => {
     draw();
     await screen.findByLabelText('Shop name');
 
-    expect(screen.queryByLabelText('Paper width')).toBeNull();
     expect(screen.queryByLabelText('Preview of what prints')).toBeNull();
     expect(call).not.toHaveBeenCalledWith('preview_settings', expect.anything());
 
     // And it is on the section that DOES design a piece of paper.
     fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
-    expect(await screen.findByLabelText('Paper width')).toBeTruthy();
-    expect(screen.getByLabelText('Preview of what prints')).toBeTruthy();
+    expect(await screen.findByLabelText('Preview of what prints')).toBeTruthy();
+  });
+
+  /** A design is a handful of choices, so it is drawn as buttons and the one in force is lit. */
+  it('draws the design as buttons, and picking one is an edit like any other', async () => {
+    draw();
+    await screen.findByLabelText('Shop name');
+    fireEvent.click(screen.getByRole('button', { name: /The bill/ }));
+
+    const group = await screen.findByRole('group', { name: 'Design' });
+    const classic = screen.getByRole('button', { name: 'Classic' });
+    expect(group.contains(classic)).toBe(true);
+    expect(classic.getAttribute('aria-pressed')).toBe('true');
+    // This section may not be changed, so the buttons are there and disabled.
+    expect((screen.getByRole('button', { name: 'Lined' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    // Each topic is its own group, headed once.
+    expect(screen.getByText('What goes on the bill')).toBeTruthy();
+    expect(screen.getByText('Your logo')).toBeTruthy();
   });
 
   /** A size and its bold tick are one decision, so they are one line. */

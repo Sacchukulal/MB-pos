@@ -268,9 +268,9 @@ fn every_setting_on_the_paper_changes_the_paper() {
         if !matches!(entry.group, Group::Receipt | Group::Kitchen) {
             continue;
         }
-        // The two typeface settings, and they are exempt for a real reason rather than a
-        // convenient one.
-        if entry.key == "receipt.font" || entry.key == "kitchen.font" {
+        // The typeface is drawn by the face, not laid out by the template, so the text of the
+        // document cannot change with it.
+        if entry.key == "receipt.font" {
             continue;
         }
         let mut config = base_config.clone();
@@ -586,30 +586,25 @@ fn only_the_store_group_lives_in_the_store_profile() {
 
 // The typeface, from the settings screen to the job.
 
-/// The shop's chosen face is the one on the job.
+/// The shop's one chosen face is the one on every job, the kitchen ticket's included.
 #[test]
-fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
+fn the_chosen_typeface_is_the_one_every_paper_is_printed_in() {
     let scratch = Scratch::new("settings-typeface");
     let app = a_shop(&scratch, "typeface");
 
     crate::settings::ipc::save_on(
         &app,
-        vec![
-            crate::settings::ipc::SettingEdit {
-                key: "receipt.font".to_owned(),
-                value: "monospace".to_owned(),
-            },
-            crate::settings::ipc::SettingEdit {
-                key: "kitchen.font".to_owned(),
-                value: "courier".to_owned(),
-            },
-        ],
+        vec![crate::settings::ipc::SettingEdit {
+            key: "receipt.font".to_owned(),
+            value: "courier".to_owned(),
+        }],
     )
-    .expect("both faces save");
+    .expect("the face saves");
 
     let config = app.shop_config();
-    assert_eq!(config.receipt.font, "monospace");
-    assert_eq!(config.kitchen.font, "courier");
+    assert_eq!(config.receipt.font, "courier");
+    // There is no second face to set: the kitchen ticket has no typeface row of its own.
+    assert!(crate::settings::catalog::find("kitchen.font").is_none());
 
     // What `App::print` would stamp on each kind of paper.
     let day = crate::flows::today(crate::flows::now());
@@ -623,13 +618,13 @@ fn the_chosen_typeface_is_the_one_the_bill_is_printed_in() {
 
     assert_eq!(
         app.face_for_test(bill.kind),
-        Some("monospace".to_owned()),
-        "the bill did not take the shop's bill face"
+        Some("courier".to_owned()),
+        "the bill did not take the shop's face"
     );
     assert_eq!(
         app.face_for_test(ticket.kind),
         Some("courier".to_owned()),
-        "the kitchen ticket did not take the shop's kitchen face"
+        "the kitchen ticket did not take the shop's face"
     );
 
     // And a shop that chooses the default asks for it by name — not an empty string the loader
@@ -918,8 +913,8 @@ fn a_typeface_that_left_the_list_still_opens_and_reads_as_the_nearest_one() {
     let scratch = Scratch::new("settings_legacy_font");
     let app = a_shop(&scratch, "legacy_font");
 
-    // Exactly what is on disk in a shop that chose Lucida Console for the bill and Times for
-    // the ticket before today.
+    // Exactly what is on disk in a shop that chose Lucida Console for the bill before today,
+    // with the kitchen ticket's own face row from the days it had one.
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
@@ -934,7 +929,7 @@ fn a_typeface_that_left_the_list_still_opens_and_reads_as_the_nearest_one() {
                 settings.set(
                     OUTLET,
                     "kitchen.font",
-                    &"times".to_owned(),
+                    &"arial".to_owned(),
                     crate::flows::now(),
                     None,
                 )
@@ -951,15 +946,13 @@ fn a_typeface_that_left_the_list_still_opens_and_reads_as_the_nearest_one() {
         })
         .expect("the settings load, rather than refusing the shop over a typeface");
 
-    assert_eq!(config.receipt.font, "monospace");
-    assert_eq!(config.kitchen.font, "times");
+    assert_eq!(config.receipt.font, "courier");
     // And what it reads as is something the screen can show back and the printer can load.
-    for key in [&config.receipt.font, &config.kitchen.font] {
-        assert!(
-            mb_print::font::family(key).is_some(),
-            "{key} is not on the list"
-        );
-    }
+    assert!(
+        mb_print::font::family(&config.receipt.font).is_some(),
+        "{} is not on the list",
+        config.receipt.font
+    );
 }
 
 /// Choosing 2 inch changes the paper the bill is laid out on.

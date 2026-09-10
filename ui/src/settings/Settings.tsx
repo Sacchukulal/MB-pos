@@ -1,12 +1,13 @@
 /** The settings screen, and there is only one of it. */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import {
   Button,
   Card,
   cx,
   Checkbox,
+  Choice,
   ConfirmDialog,
   EmptyState,
   InfoTip,
@@ -25,14 +26,13 @@ import {
   Select,
   Spinner,
   useToast,
-  useDevicePixelRatio,
 } from '../kit';
 import { call, inApp, isUiError } from '../ipc/call';
 import type { GroupView } from '../ipc/generated/GroupView';
 import type { PreviewView } from '../ipc/generated/PreviewView';
 import type { SettingView } from '../ipc/generated/SettingView';
 import type { SettingsView } from '../ipc/generated/SettingsView';
-import { Receipt, dotsPerPixel, marginDots } from '../preview/Receipt';
+import { Receipt } from '../preview/Receipt';
 import { Appearance } from './Appearance';
 import { Devices } from './Devices';
 import { Numbering } from './Numbering';
@@ -47,10 +47,6 @@ import './settings.css';
 const OWN_SCREEN: Record<string, () => ReactNode> = {
   printers: () => <Printers />,
   tax: () => <Tax />,
-  // The logo is a FILE, not a scalar, so it cannot be in the catalogue — but `receipt.logo` and
-  // `receipt.logo_width_pct` are, and they were two settings pointing at a picture nothing
-  // could supply.
-  receipt: () => <Logo />,
   numbering: () => <Numbering />,
   appearance: () => <Appearance />,
   tills: () => <Tills />,
@@ -61,6 +57,17 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
 /** Sections whose own screen draws their settings, so the generic form stays away. */
 const DRAWS_OWN_SETTINGS = new Set(['tax']);
 
+/**
+ * What a topic carries besides its settings, by the key of its first setting. The logo is a
+ * FILE, so it cannot be in the catalogue; it sits with the two settings that place it.
+ */
+const TOPIC_EXTRAS: Record<string, () => ReactNode> = {
+  'receipt.logo': () => <Logo />,
+};
+
+/** Choices of a handful, drawn as buttons rather than a list. */
+const AS_BUTTONS = new Set(['receipt.design', 'receipt.font', 'kitchen.format']);
+
 /** Sections that are not settings. */
 const EXTRA_SECTIONS = [
   // A till is a row, not a setting.
@@ -69,9 +76,6 @@ const EXTRA_SECTIONS = [
 
 /** Which sections show the paper beside them. */
 const SHOWS_PAPER = new Set(['receipt', 'kitchen']);
-
-/** How much of the settings screen the paper may take; the form keeps the rest. */
-const PAPER_SHARE = 0.5;
 
 /** The edits a person has made and not yet saved, by key. */
 type Edits = Record<string, string>;
@@ -149,7 +153,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
   const active = groups.find((g) => g.code === group) ?? groups[0];
   const showsPaper = active !== undefined && SHOWS_PAPER.has(active.code) && matches === null;
 
-  // The live preview.
+  // The live preview: every edit, saved or not, is on the paper as soon as Rust has drawn it.
   useEffect(() => {
     if (!inApp() || !showsPaper || !active) return;
     const list = Object.entries(edits).map(([key, value]) => ({ key, value }));
@@ -257,6 +261,9 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
     );
   }
 
+  const hasForm =
+    active !== undefined && active.settings.length > 0 && !DRAWS_OWN_SETTINGS.has(active.code);
+
   return (
     <div className="mb-settings">
       <div className="mb-settings__rail">
@@ -285,66 +292,51 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
 
       {/* Two columns, two scrollbars. */}
       <div className={cx('mb-settings__panes', showsPaper && 'mb-settings__panes--paper')}>
-        {/*
-          Back to the top when the section changes, and this was a bug found by looking: the
-          body kept the previous section's scroll position, so clicking "Your shop" after
-          scrolling through the bill landed halfway down the shop's form with its heading off
-          screen.
-        */}
-          <Scroller className="mb-settings__body" ref={body}>
-            {matches ? (
-              <Found
-                view={view}
-                matches={matches}
-                edits={edits}
-                onChange={onChange}
-                onClear={() => onSearch('')}
-              />
-            ) : active ? (
-              /*
-               * ONE bordered panel for the whole section. Every card inside it is a group
-               * (heading + hairline), which is what the kit does with a card in a panel — so
-               * the section reads as one form, not as a stack of boxes.
-               */
-              <Panel className="mb-settings__form">
+        {/* Back to the top when the section changes: the body would keep the last scroll. */}
+        <Scroller className="mb-settings__body" ref={body}>
+          {matches ? (
+            <Found
+              view={view}
+              matches={matches}
+              edits={edits}
+              onChange={onChange}
+              onClear={() => onSearch('')}
+            />
+          ) : active ? (
+            /*
+             * ONE bordered panel for the whole section, named once at its head. Every card
+             * inside it is a group parted from the next by a hairline, which is what the kit
+             * does with a card in a panel — so the section reads as one form, not as a stack
+             * of boxes.
+             */
+            <Panel
+              className="mb-settings__form"
+              title={active.label}
+              actions={
+                hasForm && active.canEdit ? (
+                  <Button size="sm" variant="quiet" onClick={onResetSection}>
+                    Reset this section
+                  </Button>
+                ) : null
+              }
+            >
               <div className="mb-sections">
-                {/* The paper, at the top, before anything else on this screen. */}
-                {SHOWS_PAPER.has(active.code) ? (
-                  <PaperWidth
-                    paper={paper}
-                    onChanged={() => {
-                      // Nudge the preview to re-ask.
-                      setEdits((was) => ({ ...was }));
-                    }}
-                  />
-                ) : null}
-                {active.settings.length > 0 && !DRAWS_OWN_SETTINGS.has(active.code) ? (
-                  <Section
-                    section={active}
-                    edits={edits}
-                    onChange={onChange}
-                    onReset={onResetSection}
-                  />
-                ) : null}
+                {hasForm ? <Section section={active} edits={edits} onChange={onChange} /> : null}
                 {OWN_SCREEN[active.code]?.()}
               </div>
-              </Panel>
-            ) : (
-              <EmptyState
-                title="Nothing here for you"
-                hint="You do not have permission to change any of this shop's settings."
-              />
-            )}
-          </Scroller>
+            </Panel>
+          ) : (
+            <EmptyState
+              title="Nothing here for you"
+              hint="You do not have permission to change any of this shop's settings."
+            />
+          )}
+        </Scroller>
 
-          {showsPaper ? <Paper preview={paper} kitchen={active?.code === 'kitchen'} /> : null}
-        </div>
+        {showsPaper ? <Paper preview={paper} kitchen={active?.code === 'kitchen'} /> : null}
+      </div>
 
-      {/*
-        Its own row, spanning both columns, and this was a bug found by looking: the screen is a
-        two-column grid, so the save bar landed in the left cell under the section list, six
-        words wide and six lines tall.
-      */}
+      {/* Its own row, spanning both columns: the screen is a two-column grid. */}
       <div className="mb-settings__save">
         <SaveBar
           dirty={dirty}
@@ -380,48 +372,39 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
           if (to) setGroup(to);
         }}
       />
-
     </div>
   );
 }
 
+/** A section's settings: one card per topic, in the order the catalogue lists them. */
 function Section({
   section,
   edits,
   onChange,
-  onReset,
 }: {
   section: GroupView;
   edits: Edits;
   onChange: (key: string, value: string) => void;
-  onReset: () => void;
 }) {
   return (
-    <Card>
-      <SectionHeader
-        title={section.label}
-        sticky
-        action={
-          section.canEdit ? (
-            <Button size="sm" variant="quiet" onClick={onReset}>
-              Reset this section
-            </Button>
-          ) : null
-        }
-      />
-      {/* Sub-headings, and they were missing until somebody looked. */}
+    <>
       {topicsOf(section).map(({ topic, settings }) => (
-        <section key={topic} className="mb-settings__topic">
+        <Card key={topic}>
+          {/* A setting with no heading of its own falls back to its section's name, which the
+              panel already wears. */}
+          {topic === section.label ? null : <SectionHeader title={topic} />}
+          {TOPIC_EXTRAS[settings[0]!.key]?.()}
           {/*
-            A setting with no heading of its own falls back to its section's name, which drew
-            "YOUR SHOP" directly under the heading "Your shop" — a stutter, and found by looking
-            at it.
+            A run of tick boxes packs tighter than a run of boxes to type in, and a run of
+            shared lines stacks as a table.
           */}
-          {topic === section.label ? null : (
-            <h3 className="mb-settings__subtitle">{topic}</h3>
-          )}
-          {/* A run of tick boxes packs tighter than a run of boxes to type in. */}
-          <div className={cx('mb-settings__fields', allTicks(settings) && 'mb-settings__fields--ticks')}>
+          <div
+            className={cx(
+              'mb-settings__fields',
+              allTicks(settings) && 'mb-settings__fields--ticks',
+              allLines(settings) && 'mb-settings__fields--lines',
+            )}
+          >
             {linesOf(settings).map((line) =>
               line.row === '' ? (
                 <Field
@@ -444,101 +427,32 @@ function Section({
               ),
             )}
           </div>
-        </section>
+        </Card>
       ))}
-    </Card>
+    </>
   );
 }
 
-/** How wide the roll is — 2, 3 or 4 inch, at the top of the bill designer. */
-const PAPER_WIDTHS = [
-  { value: '58', label: '2 inch (58 mm)' },
-  { value: '80', label: '3 inch (80 mm)' },
-  { value: '100', label: '4 inch (100 mm)' },
-];
-
-function PaperWidth({
-  paper,
-  onChanged,
-}: {
-  paper: PreviewView | null;
-  onChanged: () => void;
-}) {
-  const toast = useToast();
-  // The preview says which paper it drew on ("80 mm (3 inch)"); the number in it is the value.
-  const current = paper?.paper.match(/^(\d+)/)?.[1] ?? '80';
-
+/**
+ * The paper, beside the settings that change it. Its width is the column's, and the roll is
+ * drawn as wide as that column allows; the paper size and the typeface are facts here, set on
+ * Printers and on The bill.
+ */
+function Paper({ preview, kitchen }: { preview: PreviewView | null; kitchen: boolean }) {
   return (
-    <Card>
-      <SectionHeader
-        title="Paper"
-        sticky
-        note="The roll your bills print on. Everything below is laid out to fit it."
-      />
-      <div className="mb-settings__fields">
-        <Select
-          label="Paper width"
-          value={current}
-          options={PAPER_WIDTHS}
-          onChange={(event) => {
-            const mm = Number(event.currentTarget.value);
-            call('set_paper_size', { mm })
-              .then(() => {
-                toast.show('ok', `Bills print on ${mm} mm paper now.`);
-                onChanged();
-              })
-              .catch((cause) => {
-                if (isUiError(cause)) toast.show('danger', cause.message);
-              });
-          }}
-        />
-      </div>
-    </Card>
-  );
-}
-
-/** The paper, beside the settings that change it. */
-function Paper({
-  preview,
-  kitchen,
-}: {
-  preview: PreviewView | null;
-  kitchen: boolean;
-}) {
-  const aside = useRef<HTMLElement>(null);
-  const pixelRatio = useDevicePixelRatio();
-  const [room, setRoom] = useState(0);
-  // How much of the screen the paper may take: measured, and again whenever the window changes.
-  useLayoutEffect(() => {
-    const panes = aside.current?.parentElement;
-    if (!panes) return undefined;
-    const measure = () => setRoom(panes.clientWidth * PAPER_SHARE);
-    measure();
-    if (typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(measure);
-    observer.observe(panes);
-    return () => observer.disconnect();
-  }, []);
-  // The whole roll, margins included, at the finest whole-dot ratio that fits its share.
-  const rollDots = preview ? preview.doc.dots + 2 * marginDots(preview.doc) : null;
-  const rollWidth =
-    rollDots === null ? null : rollDots / dotsPerPixel(rollDots, room, pixelRatio);
-  return (
-    <aside
-      ref={aside}
-      className="mb-settings__paper"
-      aria-label="Preview of what prints"
-      style={ /* mb-tokens-allow: the roll's own width in dots, named by Rust, at this screen's pixel ratio */
-        rollWidth === null ? undefined : { ['--roll-width' as string]: `${rollWidth}px` }
-      }
-    >
+    <aside className="mb-settings__paper" aria-label="Preview of what prints">
       <div className="mb-settings__paperhead">
         <span className="mb-settings__papertitle">
           {kitchen ? 'The kitchen ticket' : 'The bill'}
         </span>
-        <span className="mb-settings__papernote">
-          {preview ? `Sample · ${preview.paper}` : 'Sample'}
-        </span>
+        {preview ? (
+          <span className="mb-settings__papernote">
+            {preview.paper} · {preview.face}
+            <InfoTip label="About the paper and the typeface">
+              The paper is set on Printers. The typeface is set on The bill.
+            </InfoTip>
+          </span>
+        ) : null}
       </div>
 
       {/* The roll's own scrollbar. */}
@@ -590,6 +504,11 @@ function linesOf(settings: SettingView[]): { row: string; settings: SettingView[
 /** Whether a run is nothing but tick boxes — see the note where it is used. */
 function allTicks(settings: SettingView[]): boolean {
   return settings.every((setting) => setting.control === 'tick');
+}
+
+/** Whether a run is nothing but shared lines — the text sizes. */
+function allLines(settings: SettingView[]): boolean {
+  return settings.every((setting) => setting.row !== '');
 }
 
 /** Settings that are one decision, on one line. */
@@ -735,6 +654,18 @@ function Field({
           />
         );
       case 'choice':
+        if (AS_BUTTONS.has(setting.key)) {
+          return (
+            <Choice
+              label={setting.label}
+              hint={inLine ? undefined : hint}
+              value={value}
+              options={setting.choices}
+              disabled={disabled}
+              onPick={onChange}
+            />
+          );
+        }
         return (
           <Select
             label={inLine ? undefined : setting.label}
@@ -817,9 +748,12 @@ function Field({
 
   return (
     <div
-      className={['mb-settings__field', changed ? 'mb-settings__field--changed' : '']
-        .filter(Boolean)
-        .join(' ')}
+      className={cx(
+        'mb-settings__field',
+        changed && 'mb-settings__field--changed',
+        // A row of buttons wants the whole line, or it wraps into two.
+        AS_BUTTONS.has(setting.key) && 'mb-settings__field--wide',
+      )}
     >
       {body}
       {changed ? (

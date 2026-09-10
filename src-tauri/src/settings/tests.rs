@@ -352,23 +352,13 @@ fn every_typeface_on_the_settings_screen_is_one_the_printer_knows() {
     }
 }
 
-/// Six faces, named as a Windows user knows them, key for key with the print crate's list.
+/// Two faces, named as a Windows user knows them, key for key with the print crate's list.
 #[test]
-fn the_typefaces_are_six_plain_family_names() {
+fn the_typefaces_are_two_plain_family_names() {
     use super::catalog::FONTS;
 
     let offered: Vec<&str> = FONTS.iter().map(|c| c.value).collect();
-    assert_eq!(
-        offered,
-        [
-            "monospace",
-            "sans_serif",
-            "serif",
-            "arial",
-            "courier",
-            "times"
-        ]
-    );
+    assert_eq!(offered, ["times", "courier"]);
     let families: Vec<&str> = mb_print::font::FAMILIES.iter().map(|f| f.key).collect();
     assert_eq!(offered, families);
     for (choice, family) in FONTS.iter().zip(mb_print::font::FAMILIES) {

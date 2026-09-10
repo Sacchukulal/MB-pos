@@ -7,6 +7,10 @@ import type { PreviewDoc } from "./PreviewDoc";
  */
 export type PreviewView = { doc: PreviewDoc, paper: string, 
 /**
+ * The typeface the paper is drawn in, by the name a shop knows it by.
+ */
+face: string, 
+/**
  * Settings that could not be used yet, by name.
  */
 notUsableYet: Array<string>, };

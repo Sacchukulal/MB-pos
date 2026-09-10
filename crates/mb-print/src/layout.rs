@@ -929,7 +929,7 @@ mod tests {
 
     /// A typewriter face, so every column is a whole character wide.
     fn metrics(kind: PaperKind) -> Metrics {
-        let font = crate::font::family("monospace")
+        let font = crate::font::family("courier")
             .expect("on the list")
             .load()
             .expect("loads");
@@ -1030,8 +1030,9 @@ mod tests {
         let shifted = layout_for(&shifted_doc, &m).expect("lays out");
         assert_eq!(plain.lines[0].indent_dots, 0);
         assert!(
-            shifted.lines[0].indent_dots >= 24 && shifted.lines[0].indent_dots <= 26,
-            "3 mm is 24 dots, snapped to whole characters: {}",
+            shifted.lines[0].indent_dots.abs_diff(24) < plain.base_advance,
+            "3 mm is 24 dots, snapped to whole characters of {}: {}",
+            plain.base_advance,
             shifted.lines[0].indent_dots
         );
         assert_eq!(shifted.lines[0].indent_dots % plain.base_advance, 0);
@@ -1064,7 +1065,7 @@ mod tests {
                 "504.00".to_owned(),
             ]],
             style: Style {
-                size: Style::LADDER[7],
+                size: Style::LADDER[5],
                 bold: false,
             },
         });
@@ -1076,7 +1077,7 @@ mod tests {
         );
         assert_eq!(
             laid.lines[0].style.size,
-            Style::LADDER[7],
+            Style::LADDER[5],
             "the size a shop chose is the size that prints"
         );
         let lines = laid.text_lines();

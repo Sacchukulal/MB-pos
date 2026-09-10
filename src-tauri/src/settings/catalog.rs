@@ -2,7 +2,7 @@
 
 use mb_core::Money;
 use mb_print::doc::Pattern;
-use mb_print::settings::{LogoPosition, QrMode, RowHeight};
+use mb_print::settings::{BillDesign, LogoPosition, QrMode, RowHeight, TicketFormat};
 
 use super::value::{Choice, Invalid, Kind, Shape, Value};
 use super::{ShopConfig, Storage};
@@ -235,28 +235,52 @@ pub(super) const SIZES: &[Choice] = &[
 /// them so). A key that left this list is mapped by `modernise` when a shop opens.
 pub(super) const FONTS: &[Choice] = &[
     Choice {
-        value: "monospace",
-        label: "Monospace",
-    },
-    Choice {
-        value: "sans_serif",
-        label: "Sans-Serif",
-    },
-    Choice {
-        value: "serif",
-        label: "Serif",
-    },
-    Choice {
-        value: "arial",
-        label: "Arial",
+        value: "times",
+        label: "Times New Roman",
     },
     Choice {
         value: "courier",
         label: "Courier New",
     },
+];
+
+/// How the bill is dressed — `mb_print::settings::BillDesign`, name for name.
+const BILL_DESIGNS: &[Choice] = &[
     Choice {
-        value: "times",
-        label: "Times New Roman",
+        value: "classic",
+        label: "Classic",
+    },
+    Choice {
+        value: "lined",
+        label: "Lined",
+    },
+    Choice {
+        value: "boxed",
+        label: "Boxed",
+    },
+    Choice {
+        value: "centred",
+        label: "Centred",
+    },
+];
+
+/// How the kitchen ticket is set — `mb_print::settings::TicketFormat`, name for name.
+const TICKET_FORMATS: &[Choice] = &[
+    Choice {
+        value: "classic",
+        label: "Classic",
+    },
+    Choice {
+        value: "big_token",
+        label: "Big token",
+    },
+    Choice {
+        value: "table_card",
+        label: "Table card",
+    },
+    Choice {
+        value: "slip",
+        label: "Slip",
     },
 ];
 
@@ -744,6 +768,44 @@ fn row_height_from(text: &str) -> Option<RowHeight> {
     }
 }
 
+const fn design_to(d: BillDesign) -> &'static str {
+    match d {
+        BillDesign::Classic => "classic",
+        BillDesign::Lined => "lined",
+        BillDesign::Boxed => "boxed",
+        BillDesign::Centred => "centred",
+    }
+}
+
+fn design_from(text: &str) -> Option<BillDesign> {
+    match text {
+        "classic" => Some(BillDesign::Classic),
+        "lined" => Some(BillDesign::Lined),
+        "boxed" => Some(BillDesign::Boxed),
+        "centred" => Some(BillDesign::Centred),
+        _ => None,
+    }
+}
+
+const fn format_to(f: TicketFormat) -> &'static str {
+    match f {
+        TicketFormat::Classic => "classic",
+        TicketFormat::BigToken => "big_token",
+        TicketFormat::TableCard => "table_card",
+        TicketFormat::Slip => "slip",
+    }
+}
+
+fn format_from(text: &str) -> Option<TicketFormat> {
+    match text {
+        "classic" => Some(TicketFormat::Classic),
+        "big_token" => Some(TicketFormat::BigToken),
+        "table_card" => Some(TicketFormat::TableCard),
+        "slip" => Some(TicketFormat::Slip),
+        _ => None,
+    }
+}
+
 const fn logo_to(l: LogoPosition) -> &'static str {
     match l {
         LogoPosition::None => "none",
@@ -1049,6 +1111,39 @@ pub const CATALOG: &[Entry] = &[
     ),
     // The bill.
     pick!(
+        "receipt.design",
+        Receipt,
+        Row,
+        "Design",
+        "Classic: a centred letterhead and one details line. Lined: rules frame the \
+         letterhead and the column names. Boxed: the details as label rows and the total \
+         in a band. Centred: everything down the middle.",
+        ["design", "style", "look", "layout", "format", "template"],
+        BILL_DESIGNS,
+        design_to,
+        design_from,
+        receipt.design
+    ),
+    pick_text!(
+        "receipt.font",
+        Receipt,
+        Row,
+        "Typeface",
+        "Bills and kitchen tickets print in this face.",
+        [
+            "font",
+            "typeface",
+            "face",
+            "typography",
+            "letters",
+            "print",
+            "kot",
+            "kitchen"
+        ],
+        FONTS,
+        receipt.font
+    ),
+    pick!(
         "receipt.pattern",
         Receipt,
         Row,
@@ -1294,17 +1389,6 @@ pub const CATALOG: &[Entry] = &[
         ["separator", "line", "payment"],
         receipt.separators.below_payments
     ),
-    pick_text!(
-        "receipt.font",
-        Receipt,
-        Row,
-        "Bill typeface",
-        "The face your bills print in. All of these come with Windows — if one \
-         is missing from this computer, Magic Bill quietly prints in Times New Roman.",
-        ["font", "typeface", "face", "typography", "letters", "print"],
-        FONTS,
-        receipt.font
-    ),
     size!(
         "receipt.sections.store_name.scale",
         Receipt,
@@ -1454,6 +1538,15 @@ pub const CATALOG: &[Entry] = &[
     number!("receipt.qr_width_pct", Receipt, Row, "QR code width",
         "As a percentage of the paper width. Too small and a phone cannot read it.",
         ["qr", "size", "width"], 10..=100 "%", u8, receipt.qr_width_pct),
+    flag!(
+        "receipt.bill_barcode",
+        Receipt,
+        Row,
+        "Print the bill number as a barcode",
+        "A scanner brings that bill back onto the screen. Two more lines of paper on every bill.",
+        ["barcode", "scan", "scanner", "recall", "bill"],
+        receipt.bill_barcode
+    ),
     words!(
         "receipt.footer",
         Receipt,
@@ -1478,6 +1571,44 @@ pub const CATALOG: &[Entry] = &[
         receipt.composition_note
     ),
     // The kitchen ticket.
+    pick!(
+        "kitchen.format",
+        Kitchen,
+        Row,
+        "Format",
+        "Classic: the title, the token, the table row, the dishes. Big token: the token \
+         is the biggest thing on the ticket. Table card: the table is. Slip: one head \
+         line, then the dishes.",
+        ["kot", "format", "design", "style", "layout", "template"],
+        TICKET_FORMATS,
+        format_to,
+        format_from,
+        kitchen.format
+    ),
+    pick!(
+        "kitchen.pattern",
+        Kitchen,
+        Row,
+        "Separator line",
+        "",
+        ["kot", "line", "divider"],
+        PATTERNS,
+        pattern_to,
+        pattern_from,
+        kitchen.pattern
+    ),
+    pick!(
+        "kitchen.row_height",
+        Kitchen,
+        Row,
+        "Row height",
+        "How much air there is between dishes. The kitchen reads this at speed.",
+        ["kot", "spacing", "compact", "relaxed"],
+        ROW_HEIGHTS,
+        row_height_to,
+        row_height_from,
+        kitchen.row_height
+    ),
     flag!(
         "kitchen.show_title",
         Kitchen,
@@ -1561,30 +1692,6 @@ pub const CATALOG: &[Entry] = &[
         ["kot", "two column", "packing", "short", "paper"],
         kitchen.two_column
     ),
-    pick!(
-        "kitchen.pattern",
-        Kitchen,
-        Row,
-        "Separator line",
-        "",
-        ["kot", "line", "divider"],
-        PATTERNS,
-        pattern_to,
-        pattern_from,
-        kitchen.pattern
-    ),
-    pick!(
-        "kitchen.row_height",
-        Kitchen,
-        Row,
-        "Row height",
-        "How much air there is between dishes. The kitchen reads this at speed.",
-        ["kot", "spacing", "compact", "relaxed"],
-        ROW_HEIGHTS,
-        row_height_to,
-        row_height_from,
-        kitchen.row_height
-    ),
     flag!(
         "kitchen.separators.below_title",
         Kitchen,
@@ -1629,19 +1736,6 @@ pub const CATALOG: &[Entry] = &[
         "",
         ["kot", "separator", "items"],
         kitchen.separators.below_items
-    ),
-    pick_text!(
-        "kitchen.font",
-        Kitchen,
-        Row,
-        "Kitchen ticket typeface",
-        "The face your kitchen tickets print in. It does not have to be the \
-         same as the bill's.",
-        [
-            "font", "typeface", "face", "kot", "kitchen", "letters", "print"
-        ],
-        FONTS,
-        kitchen.font
     ),
     size!(
         "kitchen.title.scale",
@@ -1918,15 +2012,6 @@ pub const CATALOG: &[Entry] = &[
             Ok(())
         },
     },
-    flag!(
-        "receipt.bill_barcode",
-        Receipt,
-        Row,
-        "Print the bill number as a barcode",
-        "Adds a barcode to the foot of every bill, so a scanner can bring that          bill back onto the screen. Leave it off if you have no scanner — it          is two more lines of paper on every bill.",
-        ["barcode", "scan", "scanner", "recall", "bill"],
-        receipt.bill_barcode
-    ),
     // The things a counter is plugged into.
     number!("devices.scan_average_gap_ms", Devices, Row, "A scan types faster than (average)",
         "How quickly characters have to arrive, on average, to be a barcode \
@@ -2076,25 +2161,27 @@ pub fn find(key: &str) -> Option<&'static Entry> {
 /// Sub-headings, by key prefix — and this is a bug found by looking at it.
 const TOPICS: &[(&str, &str)] = &[
     ("store.upi_", "Taking money by UPI"),
-    ("receipt.pattern", "Paper and spacing"),
-    ("receipt.row_height", "Paper and spacing"),
+    ("receipt.design", "Design"),
+    ("receipt.font", "Design"),
+    ("receipt.pattern", "Design"),
+    ("receipt.row_height", "Design"),
     ("receipt.show.", "What goes on the bill"),
     ("receipt.separators.", "Dividing lines"),
-    ("receipt.font", "Typeface and sizes"),
-    ("receipt.sections.", "Typeface and sizes"),
+    ("receipt.sections.", "Text sizes"),
     ("receipt.logo", "Your logo"),
-    ("receipt.qr", "The UPI QR code"),
+    ("receipt.qr", "QR code and barcode"),
+    ("receipt.bill_barcode", "QR code and barcode"),
     ("receipt.footer", "The last words"),
     ("receipt.composition_note", "The last words"),
+    ("kitchen.format", "Design"),
+    ("kitchen.pattern", "Design"),
+    ("kitchen.row_height", "Design"),
     ("kitchen.show_", "What goes on the ticket"),
     ("kitchen.two_column", "What goes on the ticket"),
-    ("kitchen.pattern", "Paper and spacing"),
-    ("kitchen.row_height", "Paper and spacing"),
     ("kitchen.separators.", "Dividing lines"),
-    ("kitchen.font", "Typeface and sizes"),
-    ("kitchen.title", "Typeface and sizes"),
-    ("kitchen.details", "Typeface and sizes"),
-    ("kitchen.items", "Typeface and sizes"),
+    ("kitchen.title", "Text sizes"),
+    ("kitchen.details", "Text sizes"),
+    ("kitchen.items", "Text sizes"),
     ("billing.search_mode", "At the counter"),
     ("billing.rounding", "At the counter"),
     ("billing.lock_order_type", "At the counter"),
@@ -2126,8 +2213,6 @@ pub fn topic_for(entry: &Entry) -> &'static str {
 
 /// Two settings that belong on one line, by key prefix.
 const ROWS: &[(&str, &str)] = &[
-    ("receipt.font", "Bill typeface"),
-    ("kitchen.font", "Ticket typeface"),
     ("receipt.sections.store_name.", "Shop name"),
     ("receipt.sections.meta.", "Bill details"),
     ("receipt.sections.items.", "Item list"),

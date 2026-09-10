@@ -645,24 +645,36 @@ export function Keypad({ onPress, disabled, dot = true }: KeypadProps) {
 /** A choice of a few, as buttons: the one in force is filled. */
 export function Choice({
   label,
+  hint,
   value,
   options,
+  disabled = false,
   onPick,
 }: {
   label: string;
+  hint?: string;
   value: string;
   options: readonly { value: string; label: string }[];
+  disabled?: boolean;
   onPick: (value: string) => void;
 }) {
   return (
     <div className="mb-field">
-      <span className="mb-field__label">{label}</span>
+      {hint ? (
+        <div className="mb-field__labelrow">
+          <span className="mb-field__label">{label}</span>
+          <InfoTip label={`About ${label}`}>{hint}</InfoTip>
+        </div>
+      ) : (
+        <span className="mb-field__label">{label}</span>
+      )}
       <div className="mb-row mb-row--gap-inline mb-row--wrap" role="group" aria-label={label}>
         {options.map((option) => (
           <Button
             key={option.value}
             variant={option.value === value ? 'primary' : 'secondary'}
             aria-pressed={option.value === value}
+            disabled={disabled}
             onClick={() => option.value !== value && onPick(option.value)}
           >
             {option.label}

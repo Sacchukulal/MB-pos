@@ -953,7 +953,7 @@ fn the_typeface_a_job_asked_for_is_the_one_the_queue_asks_for() {
     );
 
     queue
-        .enqueue(ticket("kitchen").in_face(Some("monospace".to_owned())))
+        .enqueue(ticket("kitchen").in_face(Some("courier".to_owned())))
         .expect("queued");
     assert!(
         until(|| printer_fake.sent.lock().unwrap().len() == 1),
@@ -963,7 +963,7 @@ fn the_typeface_a_job_asked_for_is_the_one_the_queue_asks_for() {
     let asked = watching.asked.lock().unwrap().clone();
     assert_eq!(
         asked,
-        vec![Some("monospace".to_owned())],
+        vec![Some("courier".to_owned())],
         "the queue drew the ticket with a face the job did not ask for"
     );
 

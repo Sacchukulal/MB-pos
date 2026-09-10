@@ -368,15 +368,10 @@ impl App {
         self.face_for(kind)
     }
 
-    /// Which typeface a kind of document is printed in.
+    /// Which typeface a kind of document is printed in: the shop's one face, whatever the paper.
     #[must_use]
-    fn face_for(&self, kind: mb_print::queue::JobKind) -> Option<String> {
-        let config = self.shop_config();
-        let chosen = match kind {
-            mb_print::queue::JobKind::Kitchen => config.kitchen.font,
-            _ => config.receipt.font,
-        };
-        Some(chosen).filter(|f| !f.is_empty())
+    fn face_for(&self, _kind: mb_print::queue::JobKind) -> Option<String> {
+        Some(self.shop_config().receipt.font).filter(|f| !f.is_empty())
     }
 
     /// Read the configuration from the open shop and publish it.

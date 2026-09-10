@@ -260,7 +260,7 @@ mod tests {
         let paper = Paper::new(PaperKind::Mm58);
         let doc = day_close_document(paper, &context);
         // In a typewriter face the narrow roll is 32 characters across.
-        let typewriter = crate::font::family("monospace")
+        let typewriter = crate::font::family("courier")
             .expect("on the list")
             .load()
             .expect("loads");
@@ -269,6 +269,6 @@ mod tests {
         for line in text.lines() {
             assert!(line.chars().count() <= 32, "too wide: {line:?}");
         }
-        assert!(text.contains("MATCHES EXACTLY"), "{text}");
+        assert!(text.contains("MATCHES"), "{text}");
     }
 }

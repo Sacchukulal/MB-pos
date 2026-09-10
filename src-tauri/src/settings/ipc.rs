@@ -323,8 +323,17 @@ pub fn search_on(app: &App, text: String) -> UiResult<Vec<String>> {
 pub struct PreviewView {
     pub doc: crate::preview::PreviewDoc,
     pub paper: String,
+    /// The typeface the paper is drawn in, by the name a shop knows it by.
+    pub face: String,
     /// Settings that could not be used yet, by name.
     pub not_usable_yet: Vec<String>,
+}
+
+/// The face the preview was drawn with, in the words the screen shows.
+fn face_label(key: &str) -> String {
+    mb_print::font::family(mb_print::font::current_key(key))
+        .map_or(key, |family| family.label)
+        .to_owned()
 }
 
 /// The paper the preview is drawn on, in the words the screen shows.
@@ -370,6 +379,7 @@ pub fn preview_on(app: &App, group: String, edits: Vec<SettingEdit>) -> UiResult
     Ok(PreviewView {
         doc,
         paper: paper_label(around.paper),
+        face: face_label(&wanted.receipt.font),
         not_usable_yet,
     })
 }

@@ -110,8 +110,8 @@ mod tests {
     #[test]
     fn a_face_is_loaded_once_and_then_shared() {
         let faces = SystemFaces::new().expect("the default face loads");
-        let first = faces.face(Some("monospace"));
-        let second = faces.face(Some("monospace"));
+        let first = faces.face(Some("courier"));
+        let second = faces.face(Some("courier"));
         assert!(
             Arc::ptr_eq(&first, &second),
             "the face cache is not caching, and every ticket re-parses a font file"

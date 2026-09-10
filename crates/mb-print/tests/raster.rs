@@ -375,7 +375,7 @@ fn a_printer_is_drawn_the_same_way_wherever_it_is_asked() {
     let faces = mb_print::font::OneFace::default_face().expect("loads");
 
     let mut printer = PrinterConfig::new("p1", "Counter", Target::None);
-    let drawing = mb_print::drawing_for(&printer, Some("monospace"), &faces);
+    let drawing = mb_print::drawing_for(&printer, Some("courier"), &faces);
     assert_eq!(drawing.engine, Engine::Raster);
     assert!(drawing.metrics.font().is_some());
     assert_eq!(drawing.metrics.paper(), printer.paper);

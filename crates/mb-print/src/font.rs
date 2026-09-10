@@ -303,31 +303,12 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 // The faces a shop may choose between.
 
-/// The faces on offer. Six names, every one drawn from a face stock Windows carries: the three
-/// generic names resolve the way a browser on Windows resolves them.
+/// The faces on offer: two that every Windows carries, one proportional and one typewriter.
 pub const FAMILIES: &[Family] = &[
     Family {
-        key: "monospace",
-        label: "Monospace",
-        file: "consola.ttf",
-        monospace: true,
-    },
-    Family {
-        key: "sans_serif",
-        label: "Sans-Serif",
-        file: "arial.ttf",
-        monospace: false,
-    },
-    Family {
-        key: "serif",
-        label: "Serif",
+        key: "times",
+        label: "Times New Roman",
         file: "times.ttf",
-        monospace: false,
-    },
-    Family {
-        key: "arial",
-        label: "Arial",
-        file: "arial.ttf",
         monospace: false,
     },
     Family {
@@ -335,12 +316,6 @@ pub const FAMILIES: &[Family] = &[
         label: "Courier New",
         file: "cour.ttf",
         monospace: true,
-    },
-    Family {
-        key: "times",
-        label: "Times New Roman",
-        file: "times.ttf",
-        monospace: false,
     },
 ];
 
@@ -353,8 +328,7 @@ pub fn current_key(stored: &str) -> &'static str {
         return known.key;
     }
     match stored {
-        "builtin" | "consolas" | "consolas_bold" | "lucida" | "cascadia" => "monospace",
-        "calibri" | "verdana" => "arial",
+        "monospace" | "builtin" | "consolas" | "consolas_bold" | "lucida" | "cascadia" => "courier",
         _ => DEFAULT_KEY,
     }
 }
@@ -437,10 +411,10 @@ mod measuring {
 
     /// A face in which every character is the same width.
     fn typewriter() -> Font {
-        family("monospace")
+        family("courier")
             .expect("on the list")
             .load()
-            .expect("the monospace face loads")
+            .expect("the typewriter face loads")
     }
 
     /// In a typewriter face every character is the same width, so measuring a string is
@@ -518,27 +492,27 @@ mod tests {
 
     /// A face in which every character is the same width.
     fn typewriter() -> Font {
-        family("monospace")
+        family("courier")
             .expect("on the list")
             .load()
-            .expect("the monospace face loads")
+            .expect("the typewriter face loads")
     }
 
     #[test]
     fn the_default_face_loads() {
         let font = Font::default_face().expect("the default face must load");
         assert_eq!(font.name(), "Times New Roman");
-        assert_eq!(family(DEFAULT_KEY).map(|f| f.label), Some("Times New Roman"));
+        assert_eq!(
+            family(DEFAULT_KEY).map(|f| f.label),
+            Some("Times New Roman")
+        );
     }
 
-    /// Six faces, plain family names, and every stored key from any build lands on one.
+    /// Two faces, plain family names, and every stored key from any build lands on one.
     #[test]
-    fn six_faces_and_every_old_key_lands_on_one_of_them() {
+    fn two_faces_and_every_old_key_lands_on_one_of_them() {
         let keys: Vec<&str> = FAMILIES.iter().map(|f| f.key).collect();
-        assert_eq!(
-            keys,
-            ["monospace", "sans_serif", "serif", "arial", "courier", "times"]
-        );
+        assert_eq!(keys, ["times", "courier"]);
         for family in FAMILIES {
             assert!(
                 !family.label.contains(" — "),
@@ -548,13 +522,17 @@ mod tests {
             assert_eq!(current_key(family.key), family.key);
         }
         for (old, now) in [
-            ("builtin", "monospace"),
-            ("consolas", "monospace"),
-            ("consolas_bold", "monospace"),
-            ("lucida", "monospace"),
-            ("cascadia", "monospace"),
-            ("calibri", "arial"),
-            ("verdana", "arial"),
+            ("monospace", "courier"),
+            ("builtin", "courier"),
+            ("consolas", "courier"),
+            ("consolas_bold", "courier"),
+            ("lucida", "courier"),
+            ("cascadia", "courier"),
+            ("sans_serif", "times"),
+            ("serif", "times"),
+            ("arial", "times"),
+            ("calibri", "times"),
+            ("verdana", "times"),
             ("georgia", "times"),
             ("", "times"),
             ("wingdings", "times"),

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::doc::{Align, Block, Column, Document, Style};
 use crate::error::PrintError;
 use crate::paper::Paper;
-use crate::settings::KitchenSettings;
+use crate::settings::{KitchenSettings, TicketFormat};
 
 /// One line of the ticket: what to cook, how many, and what the waiter said.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,83 +78,11 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
     let s = ctx.settings;
     let mut doc = Document::new(paper);
 
-    // The head, in one or two rows instead of six.
-    if s.show_title {
-        let title = match ctx.kind {
-            TicketKind::New => "KITCHEN",
-            TicketKind::Cancellation => "*** CANCEL ***",
-        };
-        match ctx.kot_number.filter(|_| s.show_kot_number) {
-            Some(number) => {
-                doc.row(title, format!("KOT {number}"), s.title);
-            }
-            None => {
-                doc.text(title, s.title, Align::Centre);
-            }
-        }
-        if let Some(station) = ctx.station {
-            doc.text(station, s.details, Align::Centre);
-        }
-        if ctx.reprint {
-            // The same weight the bill gives a duplicate, and for a bigger reason: a ticket
-            // printed twice is food cooked twice.
-            doc.text("*** REPRINT ***", s.details, Align::Centre);
-        }
-        if s.separators.below_title {
-            doc.separator(s.pattern);
-        }
-    }
-
-    if s.show_token
-        && let Some(token) = ctx.token
-    {
-        doc.text(format!("TOKEN {token}"), s.title, Align::Centre);
-        if s.separators.below_token {
-            doc.separator(s.pattern);
-        }
-    }
-
-    // One row: what to put it on, what kind of order it is, and when it was called.
-    let table = match (s.show_table, ctx.table) {
-        (true, Some(table)) => format!("Table {table}"),
-        _ => String::new(),
-    };
-    let kind = if s.show_order_type {
-        super::order_type_label(ctx.order_type)
-    } else {
-        ""
-    };
-    let time = match (s.show_time, ctx.time) {
-        (true, Some(time)) => time,
-        _ => "",
-    };
-    if !table.is_empty() || !kind.is_empty() || !time.is_empty() {
-        doc.push(Block::Columns {
-            columns: vec![
-                Column::fill(Align::Left),
-                Column::fill(Align::Centre),
-                Column::fill(Align::Right),
-            ],
-            rows: vec![vec![table, kind.to_owned(), time.to_owned()]],
-            style: s.details,
-        });
-    }
-    // The bill number and the waiter are for a question, not for cooking, so they go on one
-    // quiet row under the rest.
-    let mut aside = Vec::new();
-    if s.show_bill_number
-        && let Some(number) = ctx.bill_number
-    {
-        aside.push(format!("Bill {number}"));
-    }
-    if let Some(waiter) = ctx.waiter {
-        aside.push(waiter.to_owned());
-    }
-    if !aside.is_empty() {
-        doc.text(aside.join("   "), s.details, Align::Left);
-    }
-    if s.separators.below_details {
-        doc.separator(s.pattern);
+    match s.format {
+        TicketFormat::Classic => classic_head(&mut doc, ctx),
+        TicketFormat::BigToken => big_token_head(&mut doc, ctx),
+        TicketFormat::TableCard => table_card_head(&mut doc, ctx),
+        TicketFormat::Slip => slip_head(&mut doc, ctx),
     }
     // Air before the food, so the cook's eye lands on the first line and not on the header.
     doc.air(s.row_height.section_air());
@@ -172,6 +100,261 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
     doc.spacer(1);
 
     Ok(doc)
+}
+
+/// The word at the top of the ticket.
+const fn title_of(ctx: &KitchenContext<'_>) -> &'static str {
+    match ctx.kind {
+        TicketKind::New => "KITCHEN",
+        TicketKind::Cancellation => "*** CANCEL ***",
+    }
+}
+
+/// The biggest text a ticket carries: the token or the table, read across the kitchen.
+const BIGGEST: Style = Style {
+    size: Style::LARGEST,
+    bold: true,
+};
+
+/// `KOT 14`, when the ticket shows its number.
+fn kot_of(ctx: &KitchenContext<'_>) -> Option<String> {
+    ctx.kot_number
+        .filter(|_| ctx.settings.show_kot_number)
+        .map(|number| format!("KOT {number}"))
+}
+
+/// `TOKEN 7`, when the ticket shows it.
+fn token_of(ctx: &KitchenContext<'_>) -> Option<String> {
+    ctx.token
+        .filter(|_| ctx.settings.show_token)
+        .map(|token| format!("TOKEN {token}"))
+}
+
+/// `Table 6`, when the ticket shows it.
+fn table_of(ctx: &KitchenContext<'_>) -> Option<String> {
+    ctx.table
+        .filter(|_| ctx.settings.show_table)
+        .map(|table| format!("Table {table}"))
+}
+
+fn kind_of(ctx: &KitchenContext<'_>) -> Option<&'static str> {
+    ctx.settings
+        .show_order_type
+        .then(|| super::order_type_label(ctx.order_type))
+}
+
+fn time_of<'a>(ctx: &KitchenContext<'a>) -> Option<&'a str> {
+    ctx.time.filter(|_| ctx.settings.show_time)
+}
+
+/// A cancellation says so at the top whatever the format, and a reprint says so too: a ticket
+/// cooked twice is food thrown away. The station line goes with them.
+fn marks(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    let s = ctx.settings;
+    if let Some(station) = ctx.station {
+        doc.text(station, s.details, Align::Centre);
+    }
+    if ctx.reprint {
+        doc.text("*** REPRINT ***", s.details, Align::Centre);
+    }
+}
+
+/// Three cells across one row, when any of them has something in it.
+fn three_across(doc: &mut Document, style: Style, cells: [String; 3]) {
+    if cells.iter().all(String::is_empty) {
+        return;
+    }
+    doc.push(Block::Columns {
+        columns: vec![
+            Column::fill(Align::Left),
+            Column::fill(Align::Centre),
+            Column::fill(Align::Right),
+        ],
+        rows: vec![cells.to_vec()],
+        style,
+    });
+}
+
+/// The bill number and the waiter are for a question, not for cooking, so they go on one
+/// quiet row under the rest.
+fn aside_row(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    let s = ctx.settings;
+    let mut aside = Vec::new();
+    if s.show_bill_number
+        && let Some(number) = ctx.bill_number
+    {
+        aside.push(format!("Bill {number}"));
+    }
+    if let Some(waiter) = ctx.waiter {
+        aside.push(waiter.to_owned());
+    }
+    if !aside.is_empty() {
+        doc.text(aside.join("   "), s.details, Align::Left);
+    }
+}
+
+/// The title row and what goes with it, in the details size — the formats that make the
+/// token or the table the big thing keep the title small.
+fn small_title(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    let s = ctx.settings;
+    let loud = ctx.kind == TicketKind::Cancellation;
+    if s.show_title || loud {
+        let style = if loud { s.title } else { s.details };
+        match kot_of(ctx) {
+            Some(kot) => {
+                doc.row(title_of(ctx), kot, style);
+            }
+            None => {
+                doc.text(title_of(ctx), style, Align::Centre);
+            }
+        }
+    } else if let Some(kot) = kot_of(ctx) {
+        doc.text(kot, s.details, Align::Right);
+    }
+    marks(doc, ctx);
+    if s.separators.below_title {
+        doc.separator(s.pattern);
+    }
+}
+
+/// The title row, the token, the table row, the bill row.
+fn classic_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    let s = ctx.settings;
+    if s.show_title {
+        match kot_of(ctx) {
+            Some(kot) => {
+                doc.row(title_of(ctx), kot, s.title);
+            }
+            None => {
+                doc.text(title_of(ctx), s.title, Align::Centre);
+            }
+        }
+        marks(doc, ctx);
+        if s.separators.below_title {
+            doc.separator(s.pattern);
+        }
+    }
+    if let Some(token) = token_of(ctx) {
+        doc.text(token, s.title, Align::Centre);
+        if s.separators.below_token {
+            doc.separator(s.pattern);
+        }
+    }
+    three_across(
+        doc,
+        s.details,
+        [
+            table_of(ctx).unwrap_or_default(),
+            kind_of(ctx).unwrap_or_default().to_owned(),
+            time_of(ctx).unwrap_or_default().to_owned(),
+        ],
+    );
+    aside_row(doc, ctx);
+    if s.separators.below_details {
+        doc.separator(s.pattern);
+    }
+}
+
+/// The token as big as the paper allows, the rest small around it.
+fn big_token_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    let s = ctx.settings;
+    small_title(doc, ctx);
+    if let Some(token) = token_of(ctx) {
+        doc.text(token, BIGGEST, Align::Centre);
+        if s.separators.below_token {
+            doc.separator(s.pattern);
+        }
+    }
+    three_across(
+        doc,
+        s.details,
+        [
+            table_of(ctx).unwrap_or_default(),
+            kind_of(ctx).unwrap_or_default().to_owned(),
+            time_of(ctx).unwrap_or_default().to_owned(),
+        ],
+    );
+    aside_row(doc, ctx);
+    if s.separators.below_details {
+        doc.separator(s.pattern);
+    }
+}
+
+/// The table as big as the paper allows; a parcel, with no table, shows its kind instead.
+fn table_card_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    let s = ctx.settings;
+    small_title(doc, ctx);
+    let big = match ctx.table.filter(|_| s.show_table) {
+        Some(table) => format!("TABLE {table}"),
+        None => super::order_type_label(ctx.order_type).to_uppercase(),
+    };
+    doc.text(big, BIGGEST, Align::Centre);
+    if s.separators.below_token {
+        doc.separator(s.pattern);
+    }
+    three_across(
+        doc,
+        s.details,
+        [
+            token_of(ctx).unwrap_or_default(),
+            kind_of(ctx).unwrap_or_default().to_owned(),
+            time_of(ctx).unwrap_or_default().to_owned(),
+        ],
+    );
+    aside_row(doc, ctx);
+    if s.separators.below_details {
+        doc.separator(s.pattern);
+    }
+}
+
+/// One head row, then the dishes.
+fn slip_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    let s = ctx.settings;
+    if ctx.kind == TicketKind::Cancellation {
+        doc.text(title_of(ctx), s.title, Align::Centre);
+    }
+    marks(doc, ctx);
+    let left = kot_of(ctx).unwrap_or_else(|| {
+        if s.show_title {
+            title_of(ctx).to_owned()
+        } else {
+            String::new()
+        }
+    });
+    let middle = table_of(ctx)
+        .or_else(|| kind_of(ctx).map(str::to_owned))
+        .unwrap_or_default();
+    three_across(
+        doc,
+        Style {
+            size: s.details.size,
+            bold: true,
+        },
+        [left, middle, time_of(ctx).unwrap_or_default().to_owned()],
+    );
+    let mut second = Vec::new();
+    if let Some(token) = token_of(ctx) {
+        second.push(token);
+    }
+    if table_of(ctx).is_some()
+        && let Some(kind) = kind_of(ctx)
+    {
+        second.push(kind.to_owned());
+    }
+    if s.show_bill_number
+        && let Some(number) = ctx.bill_number
+    {
+        second.push(format!("Bill {number}"));
+    }
+    if let Some(waiter) = ctx.waiter {
+        second.push(waiter.to_owned());
+    }
+    if !second.is_empty() {
+        doc.text(second.join("  "), s.details, Align::Left);
+    }
+    if s.separators.below_details {
+        doc.separator(s.pattern);
+    }
 }
 
 /// The normal ticket: quantity first, because the kitchen reads the number, not the name.

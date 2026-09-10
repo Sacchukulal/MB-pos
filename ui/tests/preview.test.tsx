@@ -109,27 +109,30 @@ describe('the graphics engine preview is the printer raster on one canvas', () =
     expect(style).toContain(`height: ${4 / ratio}px`);
   });
 
-  it('chooses the finest ratio that fits the room it has', () => {
-    // 576 dots in 600 px: one dot a pixel fits; in 300 px it takes two; in 400, two as well —
-    // one and a half would smear every dot over parts of two pixels.
+  it('takes a crisp ratio when it fills the room, and fits the room exactly otherwise', () => {
+    // 576 dots in 600 px: one dot a pixel fills it; in 300 px two dots a pixel do. In 400 px
+    // two dots a pixel would leave a quarter of the column empty, so the paper is drawn as
+    // wide as the column and the browser averages the dots.
     expect(dotsPerPixel(576, 600)).toBe(1);
     expect(dotsPerPixel(576, 300)).toBe(2);
-    expect(dotsPerPixel(576, 400)).toBe(2);
+    expect(dotsPerPixel(576, 400)).toBe(1.44);
     expect(dotsPerPixel(576, 1200)).toBe(0.5);
+    // A narrow roll in a wide column is not blown up past two pixels a dot.
+    expect(dotsPerPixel(400, 1200)).toBe(0.5);
     // Nothing measured yet is a sensible default, not a division by zero.
     expect(dotsPerPixel(576, 0)).toBe(2);
     // And nothing coarser than the ceiling, however narrow the screen.
     expect(dotsPerPixel(832, 10)).toBe(8);
+    // Whatever the room, the paper never overflows it.
     for (const available of [97, 233, 401, 777]) {
-      const ratio = dotsPerPixel(576, available);
-      expect(ratio === 0.5 || Number.isInteger(ratio)).toBe(true);
+      expect(576 / dotsPerPixel(576, available)).toBeLessThanOrEqual(available);
     }
   });
 
   it('counts dots per DEVICE pixel on a scaled display', () => {
     // At 125% scaling a CSS pixel is 1.25 device pixels, so one dot a device pixel is 1.25.
-    expect(dotsPerPixel(576, 600, 1.25)).toBe(1.25);
-    expect(dotsPerPixel(576, 300, 1.25)).toBe(2.5);
+    expect(dotsPerPixel(576, 470, 1.25)).toBe(1.25);
+    expect(dotsPerPixel(576, 235, 1.25)).toBe(2.5);
     expect(dotsPerPixel(576, 0, 1.25)).toBe(2.5);
     expect(drawsEveryDot(1.25, 1.25)).toBe(true);
     expect(drawsEveryDot(2.5, 1.25)).toBe(false);

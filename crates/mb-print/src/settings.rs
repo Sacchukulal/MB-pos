@@ -33,6 +33,37 @@ pub enum QrMode {
     Dynamic,
 }
 
+/// How the bill is dressed. Every design prints the same facts in the same order; they differ
+/// in how the letterhead, the bill's details and the total are set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BillDesign {
+    /// A centred letterhead, the details on one line, the table, the sums.
+    #[default]
+    Classic,
+    /// Rules frame the letterhead and the column names; a heavy rule closes the total.
+    Lined,
+    /// The letterhead between heavy rules, the details as label rows, the total in a band.
+    Boxed,
+    /// Everything centred: the details line by line, the total as one big centred line.
+    Centred,
+}
+
+/// How the kitchen ticket is set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TicketFormat {
+    /// The title row, the token, the table row, then the dishes.
+    #[default]
+    Classic,
+    /// The token is the biggest thing on the ticket — a counter or a parcel shelf reads it.
+    BigToken,
+    /// The table is the biggest thing on the ticket — a dine-in floor reads it.
+    TableCard,
+    /// One head line, then the dishes: the least paper.
+    Slip,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RowHeight {
@@ -215,9 +246,12 @@ pub struct ReceiptSettings {
     pub qr_width_pct: u8,
     #[serde(default)]
     pub bill_barcode: bool,
-    /// The typeface this is printed in, as a key from `crate::font::FAMILIES`.
+    /// The typeface every paper this shop prints is drawn in — the bill and the kitchen
+    /// ticket alike — as a key from `crate::font::FAMILIES`.
     #[serde(default)]
     pub font: String,
+    #[serde(default)]
+    pub design: BillDesign,
     pub footer: String,
     /// Printed above the totals when the shop is a composition dealer — they may not collect
     /// GST and must say so.
@@ -240,6 +274,7 @@ impl Default for ReceiptSettings {
             // Named rather than empty: "" is not one of the choices, and the settings catalogue
             // is right to refuse a value that is not on its own list.
             font: crate::font::DEFAULT_KEY.to_owned(),
+            design: BillDesign::Classic,
             footer: "Thank you, visit again".to_owned(),
             composition_note: "Composition taxable person, not eligible to collect tax on supplies"
                 .to_owned(),
@@ -290,9 +325,8 @@ pub struct KitchenSettings {
     pub title: Style,
     pub details: Style,
     pub items: Style,
-    /// The typeface this is printed in, as a key from `crate::font::FAMILIES`.
     #[serde(default)]
-    pub font: String,
+    pub format: TicketFormat,
 }
 
 impl Default for KitchenSettings {
@@ -317,9 +351,7 @@ impl Default for KitchenSettings {
             title: dots(Style::HEADING, true),
             details: dots(Style::BODY, true),
             items: dots(Style::LADDER[8], true),
-            // Named rather than empty: "" is not one of the choices, and the settings catalogue
-            // is right to refuse a value that is not on its own list.
-            font: crate::font::DEFAULT_KEY.to_owned(),
+            format: TicketFormat::Classic,
         }
     }
 }

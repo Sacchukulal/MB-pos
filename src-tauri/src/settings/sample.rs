@@ -190,15 +190,16 @@ impl Around {
 /// with that printer's paper, offset, engine and face.
 pub fn around_for(app: &crate::state::App, group: &str, wanted: &ShopConfig) -> Around {
     // The same question the queue asks, through the same function — the kitchen ticket and the
-    // bill each have their own printer, their own face and their own engine, and a preview
-    // that guessed any of them would be a preview that lies. The kitchen ticket goes where a
-    // real ticket with no category routing goes: `flows::printer_for(Role::Kitchen)`. The face
-    // is the one being previewed, saved or not.
-    let (role, face) = if group == "kitchen" {
-        (mb_print::printer::Role::Kitchen, &wanted.kitchen.font)
+    // bill each have their own printer and their own engine, and a preview that guessed either
+    // would be a preview that lies. The kitchen ticket goes where a real ticket with no
+    // category routing goes: `flows::printer_for(Role::Kitchen)`. The face is the shop's one
+    // face, as it is on screen right now, saved or not.
+    let role = if group == "kitchen" {
+        mb_print::printer::Role::Kitchen
     } else {
-        (mb_print::printer::Role::Bill, &wanted.receipt.font)
+        mb_print::printer::Role::Bill
     };
+    let face = &wanted.receipt.font;
     let printer = crate::flows::printer_for(app, role).unwrap_or_else(|_| {
         mb_print::printer::PrinterConfig::new(
             "prn_preview",

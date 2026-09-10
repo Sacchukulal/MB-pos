@@ -39,21 +39,6 @@
   min-height: 0;
 }
 
-/* The section's name stays put while its settings scroll. */
-.mb-settings__head {
-  position: sticky;
-  top: 0;
-  z-index: var(--layer-sticky);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
-  padding-bottom: var(--space-2);
-  background: var(--surface);
-  border-bottom: var(--border-width) solid var(--border);
-}
-
 /* One run of settings under one sub-heading. */
 .mb-settings__topic {
   margin-bottom: var(--gap-section);
@@ -66,23 +51,6 @@
 /* The section's form: ONE bordered panel; the groups inside are parted by hairlines (kit). */
 .mb-settings__form {
   min-width: 0;
-}
-
-
-.mb-settings__subtitle {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase; /* mb-layout-allow: a form caption */
-  color: var(--text-faint);
-}
-
-.mb-settings__title {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
-  color: var(--text);
 }
 
 /* Two columns at 1366 and wider, one below it. */
@@ -99,9 +67,19 @@
   gap: var(--space-2) var(--space-4);
 }
 
-/* The paper takes 28rem of the screen, so the settings beside it get a tighter column. */
+/* A run of nothing but shared lines — the text sizes — stacks as a table. */
+.mb-settings__fields--lines {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+/* The paper takes a column of the screen, so the settings beside it get a tighter column. */
 .mb-settings__panes--paper .mb-settings__fields {
   grid-template-columns: repeat(auto-fill, minmax(var(--settings-field-tight), 1fr));
+}
+
+.mb-settings__panes--paper .mb-settings__fields--lines {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .mb-settings__field {
@@ -110,6 +88,11 @@
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
+}
+
+/* A row of buttons takes the whole line, whatever the grid is doing. */
+.mb-settings__field--wide {
+  grid-column: 1 / -1;
 }
 
 /* Settings that are one decision, on one line. */
@@ -188,28 +171,21 @@
   min-height: 0;
 }
 
+/*
+ * The paper column is one fixed column, never wider than its share of the screen; the roll is
+ * drawn as wide as the column allows (see `dotsPerPixel`), so the settings keep their room
+ * whatever the roll and whatever the display scaling.
+ */
 .mb-settings__panes--paper {
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) min(var(--settings-paper), var(--settings-paper-share));
+  gap: var(--space-4);
 }
 
-/*
- * The paper column is as wide as the roll at one dot a device pixel (`--roll-width`, set by
- * the screen from the numbers Rust sends), plus its own padding and the roll's scrollbar — so
- * the preview is drawn dot for dot, never averaged. Capped, so the settings keep their room.
- */
 .mb-settings__paper {
   display: grid;
   /* The heading stays; only the roll under it scrolls. */
   grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-2);
-  width: min(
-    calc(
-      var(--roll-width, var(--settings-paper)) + 2 * var(--space-3) + 2 * var(--border-width) +
-        var(--scrollbar)
-    ),
-    var(--settings-paper-max)
-  );
   min-width: 0;
   min-height: 0;
   padding: var(--space-3);
@@ -220,9 +196,10 @@
 
 .mb-settings__paperhead {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  min-height: var(--control-sm);
 }
 
 .mb-settings__papertitle {
@@ -232,6 +209,9 @@
 }
 
 .mb-settings__papernote {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   margin: 0;
   font-size: var(--text-xs);
   color: var(--text-faint);
@@ -242,14 +222,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-}
-
-/*
- * The paper beside the settings has less room than the gallery does, so it sets ONE value — the
- * character width — and the receipt's own multipliers follow it.
- */
-.mb-settings__paper .mb-receipt__paper {
-  --receipt-char: var(--text-xs);
 }
 
 .mb-printers {

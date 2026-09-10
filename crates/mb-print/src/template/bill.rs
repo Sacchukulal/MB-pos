@@ -3,10 +3,10 @@
 use mb_core::{AnyOrder, Bill, PlaceOfSupply, PriceBasis};
 use serde::{Deserialize, Serialize};
 
-use crate::doc::{Align, BandLine, Block, Column, Document, Style};
+use crate::doc::{Align, BandLine, Block, Column, Document, Pattern, Style};
 use crate::error::PrintError;
 use crate::metrics::Metrics;
-use crate::settings::{LogoPosition, QrMode, ReceiptSettings};
+use crate::settings::{BillDesign, LogoPosition, QrMode, ReceiptSettings};
 
 /// Which copy this is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,9 +152,22 @@ fn store_lines(ctx: &BillContext<'_>) -> Vec<BandLine> {
     lines
 }
 
+/// The rule a design puts over and under its letterhead, if it puts one.
+const fn frame_of(design: BillDesign, pattern: Pattern) -> Option<Pattern> {
+    match design {
+        BillDesign::Classic | BillDesign::Centred => None,
+        BillDesign::Lined => Some(pattern),
+        BillDesign::Boxed => Some(Pattern::Bold),
+    }
+}
+
 fn header(doc: &mut Document, ctx: &BillContext<'_>) {
     let s = ctx.settings;
     let lines = store_lines(ctx);
+
+    if let Some(frame) = frame_of(s.design, s.pattern) {
+        doc.separator(frame);
+    }
 
     match (s.logo, &ctx.logo) {
         // The letterhead: logo on one side, the shop on the other.
@@ -187,8 +200,16 @@ fn header(doc: &mut Document, ctx: &BillContext<'_>) {
         }
     }
 
-    if s.separators.below_store_header {
-        doc.separator(s.pattern);
+    // A framed letterhead closes with its own frame; the tick draws the plain rule otherwise.
+    match frame_of(s.design, s.pattern) {
+        Some(frame) if s.design == BillDesign::Boxed => {
+            doc.separator(frame);
+        }
+        _ => {
+            if s.separators.below_store_header {
+                doc.separator(s.pattern);
+            }
+        }
     }
 }
 
@@ -275,19 +296,53 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
         (true, Some(n)) if n > 0 => Some(format!("Covers {n}")),
         _ => None,
     };
-    let cashier = match (s.show.cashier, ctx.cashier) {
-        (true, Some(name)) => Some(format!("Cashier {name}")),
-        _ => None,
-    };
+    let cashier_name = ctx.cashier.filter(|_| s.show.cashier);
     // Not when it is the same person.
-    let waiter = match (s.show.waiter, ctx.waiter) {
-        (true, Some(name)) if Some(name) != ctx.cashier.filter(|_| s.show.cashier) => {
-            Some(format!("Order {name}"))
-        }
-        _ => None,
-    };
+    let waiter_name = ctx
+        .waiter
+        .filter(|_| s.show.waiter)
+        .filter(|name| Some(*name) != cashier_name);
+    let cashier = cashier_name.map(|name| format!("Cashier {name}"));
+    let waiter = waiter_name.map(|name| format!("Order {name}"));
 
-    if narrow_table(metrics, ctx) {
+    if s.design == BillDesign::Boxed {
+        // Label rows, the way an invoice reads: the label in its own column, the fact beside.
+        let mut rows = vec![vec!["Bill no.".to_owned(), number.formatted.clone()]];
+        rows.push(vec!["Date".to_owned(), when]);
+        let mut place = vec![kind.to_owned()];
+        place.extend(table.clone());
+        place.extend(covers.clone());
+        rows.push(vec!["Order".to_owned(), place.join(", ")]);
+        if let Some(name) = cashier_name {
+            rows.push(vec!["Cashier".to_owned(), name.to_owned()]);
+        }
+        if let Some(name) = waiter_name {
+            rows.push(vec!["Taken by".to_owned(), name.to_owned()]);
+        }
+        doc.push(Block::Columns {
+            columns: vec![
+                Column::fixed(LABEL_COLUMNS, Align::Left),
+                Column::fill(Align::Left),
+            ],
+            rows,
+            style: s.sections.meta,
+        });
+    } else if s.design == BillDesign::Centred {
+        // Line by line down the middle, each fact parted from the next by a dot.
+        doc.text(
+            format!("Bill {}  {when}", number.formatted),
+            s.sections.meta,
+            Align::Centre,
+        );
+        let mut place = vec![kind.to_owned()];
+        place.extend(table.clone());
+        place.extend(covers.clone());
+        doc.text(place.join(" - "), s.sections.meta, Align::Centre);
+        let people: Vec<String> = cashier.clone().into_iter().chain(waiter.clone()).collect();
+        if !people.is_empty() {
+            doc.text(people.join(" - "), s.sections.meta, Align::Centre);
+        }
+    } else if narrow_table(metrics, ctx) {
         // Two inches: three rows, and no word spent on a label.
         doc.row(
             &number.formatted,
@@ -372,6 +427,9 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
 
 const WHEN_COLUMNS: usize = 17;
 
+/// The label column of the boxed design's details: wide enough for "Taken by".
+const LABEL_COLUMNS: usize = 10;
+
 fn token_of(order: &AnyOrder) -> Option<String> {
     match order {
         AnyOrder::Draft(_) => None,
@@ -446,6 +504,10 @@ fn wide_items(doc: &mut Document, ctx: &BillContext<'_>) {
     head.push("Rate".to_owned());
     head.push("Amount".to_owned());
 
+    // The lined design rules the column names above as well as below.
+    if s.design == BillDesign::Lined {
+        doc.separator(s.pattern);
+    }
     doc.push(Block::Columns {
         columns: columns.clone(),
         rows: vec![head],
@@ -639,16 +701,44 @@ fn totals(doc: &mut Document, ctx: &BillContext<'_>) {
 
     // The air around the one number the customer looks at.
     doc.spacer(s.row_height.section_gap());
-    if s.separators.below_subtotals {
-        doc.separator(s.pattern);
-    }
-    doc.row(
-        "TOTAL",
-        b.grand_total.to_plain_string(),
-        s.sections.grand_total,
-    );
-    if s.separators.below_grand_total {
-        doc.separator(s.pattern);
+    let total = b.grand_total.to_plain_string();
+    match s.design {
+        // A band of heavy rules, whatever the ticks say: the band is the design.
+        BillDesign::Boxed => {
+            doc.separator(Pattern::Bold);
+            doc.row("TOTAL", total, s.sections.grand_total);
+            doc.separator(Pattern::Bold);
+        }
+        BillDesign::Centred => {
+            if s.separators.below_subtotals {
+                doc.separator(s.pattern);
+            }
+            doc.text(
+                format!("TOTAL {total}"),
+                s.sections.grand_total,
+                Align::Centre,
+            );
+            if s.separators.below_grand_total {
+                doc.separator(s.pattern);
+            }
+        }
+        // Always ruled above; closed by a heavy rule when the tick asks for one.
+        BillDesign::Lined => {
+            doc.separator(s.pattern);
+            doc.row("TOTAL", total, s.sections.grand_total);
+            if s.separators.below_grand_total {
+                doc.separator(Pattern::Bold);
+            }
+        }
+        BillDesign::Classic => {
+            if s.separators.below_subtotals {
+                doc.separator(s.pattern);
+            }
+            doc.row("TOTAL", total, s.sections.grand_total);
+            if s.separators.below_grand_total {
+                doc.separator(s.pattern);
+            }
+        }
     }
 
     // The total in words, which a B2B customer's accounts department asks for.

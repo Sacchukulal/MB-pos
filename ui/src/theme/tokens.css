@@ -243,13 +243,9 @@
   /* A tick box is a line of words, so it packs tighter than a field you type in. */
   --settings-tick: 15rem;
   --settings-field-tight: var(--field-md);
-  /*
-   * Wide enough that an 80 mm roll — 640 dots, margins included — fits at a dot and a half a
-   * pixel, and a 58 mm roll dot for dot.
-   */
-  --settings-paper: 31rem;
-  /* The most the paper column may take, however wide the roll: the settings keep their room. */
-  --settings-paper-max: 44rem;
+  /* The paper column beside the bill and ticket settings, and the most of the screen it may take. */
+  --settings-paper: 26rem;
+  --settings-paper-share: 40%;
 
   /* The day close. */
   --dayclose-column: 22rem;
