@@ -465,3 +465,16 @@
   font-weight: var(--weight-medium);
   color: var(--text);
 }
+
+/* What a second till types: each on its own row, Copy beside the security code. */
+.mb-tills__code {
+  grid-column: 1 / -1;
+}
+
+.mb-tills__copy {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--gap-inline);
+  overflow-wrap: anywhere;
+}

@@ -13,4 +13,9 @@ waitingSays: string, waiting: number,
 /**
  * How many tills the plan allows, and how many there are.
  */
-allowed: number, limitSays: string, mayManage: boolean, };
+allowed: number, limitSays: string, mayManage: boolean, 
+/**
+ * What a new till types to reach this one: `https://192.168.1.7:7331` and the
+ * certificate's fingerprint. Empty unless this is the main till with its network on.
+ */
+joinAddress: string, joinFingerprint: string, };

@@ -13,7 +13,7 @@ headline: string,
 /**
  * `ok`, `warn` or `danger`.
  */
-tone: string, address: string, port: number, fingerprint: string, 
+tone: string, 
 /**
  * Written when the counter's certificate is new, because every phone must then be added
  * again — and fifteen waiters discovering that one at a time during a rush is the

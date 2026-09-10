@@ -86,9 +86,13 @@ impl Desk {
         pair
     }
 
-    /// Stop showing it. Called when the panel closes.
+    /// Stop showing it, and turn away whoever is still queueing: a phone left at a closed
+    /// desk would poll for ever.
     pub fn close(&self) {
-        lock(&self.inner).open = None;
+        let mut inner = lock(&self.inner);
+        inner.open = None;
+        let turned_away: Vec<String> = inner.waiting.drain(..).map(|w| w.request_id).collect();
+        inner.refused.extend(turned_away);
     }
 
     /// What the panel is showing, if anything, and whether it has expired.
@@ -322,5 +326,19 @@ mod tests {
         desk.refuse(&request);
         assert_eq!(desk.collect(&request), Err(Refusal::BadToken));
         assert!(desk.waiting().is_empty());
+    }
+
+    /// Closing the desk tells the phones still queueing, instead of leaving them polling.
+    #[test]
+    fn closing_the_desk_turns_away_whoever_is_waiting() {
+        let desk = Desk::new();
+        let (token, _) = desk.open(at(0));
+        let request = desk
+            .present(&token, "Ravi's phone", "android", None, "192.168.1.31", at(1))
+            .expect("queued");
+        desk.close();
+        assert!(desk.waiting().is_empty());
+        assert!(desk.showing(at(2)).is_none());
+        assert_eq!(desk.collect(&request), Err(Refusal::BadToken));
     }
 }

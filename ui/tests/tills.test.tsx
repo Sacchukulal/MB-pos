@@ -46,6 +46,8 @@ const QUIET: TillsView = {
   allowed: 3,
   limitSays: 'Your plan allows 3 tills. You are using 2.',
   mayManage: true,
+  joinAddress: '',
+  joinFingerprint: '',
 };
 
 function show(view: TillsView) {

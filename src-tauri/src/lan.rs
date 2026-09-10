@@ -526,9 +526,6 @@ pub struct NetworkView {
     pub headline: String,
     /// `ok`, `warn` or `danger`.
     pub tone: String,
-    pub address: String,
-    pub port: u32,
-    pub fingerprint: String,
     /// Written when the counter's certificate is new, because every phone must then be added
     /// again — and fifteen waiters discovering that one at a time during a rush is the
     /// alternative to saying so here.
@@ -579,10 +576,7 @@ pub struct DeviceRowView {
 pub struct WaitingView {
     pub request_id: String,
     pub name: String,
-    pub platform: String,
     pub ip: String,
-    /// The whole sentence: "SM-A146B is asking to join, from 192.168.1.31.".
-    pub says: String,
 }
 
 pub fn view_on(app: &App) -> UiResult<NetworkView> {
@@ -657,15 +651,6 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
     Ok(NetworkView {
         headline,
         tone,
-        address: network
-            .as_ref()
-            .map(|n| n.address.clone())
-            .unwrap_or_default(),
-        port: network.as_ref().map_or(0, |n| u32::from(n.port)),
-        fingerprint: network
-            .as_ref()
-            .map(|n| n.fingerprint.clone())
-            .unwrap_or_default(),
         certificate_note: if network.as_ref().is_some_and(|n| n.is_new_certificate) {
             "This counter has a new security certificate, so every phone has \
              to be added again."
@@ -701,12 +686,7 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
                     .map(|w| WaitingView {
                         request_id: w.request_id.clone(),
                         name: w.name.clone(),
-                        platform: w.platform.clone(),
                         ip: w.ip.clone(),
-                        says: format!(
-                            "{} wants to join, from {}. Whose phone is it?",
-                            w.name, w.ip
-                        ),
                     })
                     .collect()
             })
@@ -824,9 +804,10 @@ pub fn allow_on(app: &App, request_id: String, staff_id: Option<String>) -> UiRe
     .map_err(|r| UiError::new("lan.refused", r.message()))?;
 
     // Approved first, then off the queue: the phone can never poll between the two and be
-    // told the code is bad. The code stays up: the next waiter scans without another press.
+    // told the code is bad.
     network.shared.desk.approve(&request_id, device);
     let _ = network.shared.desk.take(&request_id);
+    settle(&network.shared.desk);
     view_on(app)
 }
 
@@ -834,8 +815,17 @@ pub fn refuse_on(app: &App, request_id: String) -> UiResult<NetworkView> {
     guard::require(app, Permission::DevicesPair)?;
     if let Some(network) = app.network() {
         network.shared.desk.refuse(&request_id);
+        settle(&network.shared.desk);
     }
     view_on(app)
+}
+
+/// The desk closes once the last phone at it has been answered; the next phone starts from
+/// Add phone again.
+fn settle(desk: &mb_lan::Desk) {
+    if desk.waiting().is_empty() {
+        desk.close();
+    }
 }
 
 /// Take a phone off the counter.

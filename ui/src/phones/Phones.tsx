@@ -3,13 +3,11 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  Badge,
   Button,
   ConfirmDialog,
   EmptyState,
-  Fact,
-  Facts,
   Icon,
+  Modal,
   Notice,
   Page,
   PageHeader,
@@ -39,8 +37,8 @@ export function Phones() {
   const [view, setView] = useState<NetworkView | null>(null);
   const [removing, setRemoving] = useState<DeviceRowView | null>(null);
   const [busy, setBusy] = useState(false);
-  /** Whose phone each waiting one is, chosen before Allow. */
-  const [owners, setOwners] = useState<Record<string, string>>({});
+  /** Whose the phone at the desk is, chosen before Allow. */
+  const [picked, setPicked] = useState<{ id: string; owner: string } | null>(null);
   const toast = useToast();
 
   const report = useCallback(
@@ -85,13 +83,6 @@ export function Phones() {
       .finally(() => setBusy(false));
   };
 
-  const copy = (text: string) => {
-    navigator.clipboard
-      .writeText(text)
-      .then(() => toast.show('ok', 'Copied.'))
-      .catch(() => toast.show('danger', 'It could not be copied.'));
-  };
-
   if (!view) return null;
 
   const tone = TONES[view.tone] ?? 'info';
@@ -103,6 +94,12 @@ export function Phones() {
   ]
     .filter(Boolean)
     .join(' · ');
+  // The desk is open while Rust shows a code or holds a phone at it; the dialog mirrors that.
+  // Phones are answered one at a time, first come first served.
+  const asking = view.waiting[0];
+  const adding = view.code !== '' || asking !== undefined;
+  // The choice belongs to one request: the next phone starts with nobody chosen.
+  const owner = picked !== null && picked.id === asking?.requestId ? picked.owner : '';
 
   const columns: readonly Column<DeviceRowView>[] = [
     { key: 'name', header: 'Phone', render: (d) => <strong>{d.name}</strong> },
@@ -127,21 +124,15 @@ export function Phones() {
         title="Phones"
         subtitle={subtitle}
         actions={
-          view.code ? (
-            <Button variant="secondary" disabled={busy} onClick={() => run(() => call('close_pairing'))}>
-              Stop adding
-            </Button>
-          ) : (
-            <Button
-              variant="primary"
-              disabled={busy || full}
-              title={full ? 'Every phone the plan allows is on this counter' : undefined}
-              onClick={() => run(() => call('open_pairing'))}
-            >
-              <Icon name="plus" size="sm" />
-              Add phones
-            </Button>
-          )
+          <Button
+            variant="primary"
+            disabled={busy || full}
+            title={full ? 'Every phone the plan allows is on this counter' : undefined}
+            onClick={() => run(() => call('open_pairing'))}
+          >
+            <Icon name="plus" size="sm" />
+            Add phone
+          </Button>
         }
       />
 
@@ -168,125 +159,79 @@ export function Phones() {
       </Notice>
       {view.certificateNote ? <Notice tone="warn">{view.certificateNote}</Notice> : null}
 
-      {view.code ? (
-        <Panel title="Add a phone" note="Scan the code with the Magic Bill app, or type it in.">
-          <div className="mb-phones__pairing">
-            <div
-              className="mb-phones__qr"
-              role="img"
-              aria-label="Scan this with the Magic Bill app on the phone"
-            >
-              {view.qr.map((row, y) => (
-                // The code is positional: two identical rows are two different places.
-                <div className="mb-phones__qrrow" key={`${y}-${row}`}>
-                  {[...row].map((cell, x) => (
-                    <span
-                      key={`${y}-${x}`}
-                      className={cell === '#' ? 'mb-phones__dot mb-phones__dot--on' : 'mb-phones__dot'}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
-            <div className="mb-phones__code">
-              <span className="mb-phones__label">Code</span>
-              <strong className="mb-code">{view.code}</strong>
-              <span className="mb-phones__label">Changes after every phone</span>
-            </div>
-          </div>
-
-          {view.waiting.length > 0 ? (
-            <div className="mb-phones__waiting">
-              {view.waiting.map((w) => {
-                const owner = owners[w.requestId] ?? '';
-                return (
-                  <div className="mb-phones__ask" key={w.requestId}>
-                    <div className="mb-phones__who">
-                      <Icon name="phone" size="md" />
-                      <div>
-                        <strong>{w.name}</strong>
-                        <span className="mb-phones__label">{w.ip}</span>
-                      </div>
-                    </div>
-                    {/* Whose phone it is decides what it may do: a waiter's phone acts as the
-                        waiter, a shared tablet acts as nobody. */}
-                    <Select
-                      aria-label="Whose phone is this?"
-                      value={owner}
-                      onChange={(e) => setOwners({ ...owners, [w.requestId]: e.target.value })}
-                      options={[
-                        { value: '', label: 'Whose phone?' },
-                        { value: SHARED, label: 'Shared tablet' },
-                        ...view.people.map((p) => ({ value: p.id, label: p.name })),
-                      ]}
-                    />
-                    <div className="mb-phones__answer">
-                      <Button
-                        variant="quiet"
-                        disabled={busy}
-                        onClick={() => run(() => call('refuse_device', { requestId: w.requestId }))}
-                      >
-                        Refuse
-                      </Button>
-                      <Button
-                        variant="primary"
-                        disabled={busy || owner === ''}
-                        onClick={() =>
-                          run(
-                            () =>
-                              call('allow_device', {
-                                requestId: w.requestId,
-                                staffId: owner === SHARED ? null : owner,
-                              }),
-                            `${w.name} is on this counter.`,
-                          )
-                        }
-                      >
-                        Allow
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="mb-phones__label">Waiting for a phone to scan.</p>
-          )}
-        </Panel>
-      ) : null}
-
-      <Panel
-        title="On this counter"
-        actions={<Badge tone={full ? 'warn' : 'neutral'}>{`${phones.length} of ${view.phonesAllowed}`}</Badge>}
-        flush
-      >
+      <Panel title="On this counter" flush>
         <Table
           columns={columns}
           rows={phones}
           rowKey={(d) => d.id}
-          empty={<EmptyState small title="No phones yet" says="Press Add phones and scan the code." />}
+          empty={<EmptyState small title="No phones yet" says="Press Add phone and scan the code." />}
         />
       </Panel>
 
-      <Panel title="This counter">
-        <Facts>
-          <Fact label="Address">{view.address || '—'}</Fact>
-          <Fact label="Port">{view.port || '—'}</Fact>
-          <Fact label="Security code" code className="mb-phones__fingerprint-fact">
-            {view.fingerprint ? (
-              <span className="mb-phones__fingerprint">
-                {view.fingerprint}
-                <Button size="sm" variant="quiet" onClick={() => copy(view.fingerprint)}>
-                  <Icon name="copy" size="sm" />
-                  Copy
-                </Button>
-              </span>
-            ) : (
-              '—'
-            )}
-          </Fact>
-        </Facts>
-      </Panel>
+      <Modal
+        open={adding}
+        title="Add phone"
+        onClose={() => run(() => call('close_pairing'))}
+        actions={
+          asking ? (
+            <>
+              <Button
+                variant="quiet"
+                disabled={busy}
+                onClick={() => run(() => call('refuse_device', { requestId: asking.requestId }))}
+              >
+                Refuse
+              </Button>
+              <Button
+                variant="primary"
+                disabled={busy || owner === ''}
+                onClick={() =>
+                  run(
+                    () =>
+                      call('allow_device', {
+                        requestId: asking.requestId,
+                        staffId: owner === SHARED ? null : owner,
+                      }),
+                    `${asking.name} is on this counter.`,
+                  )
+                }
+              >
+                Allow
+              </Button>
+            </>
+          ) : (
+            <Button disabled={busy} onClick={() => run(() => call('close_pairing'))}>
+              Cancel
+            </Button>
+          )
+        }
+      >
+        {asking ? (
+          <>
+            <div className="mb-phones__asking">
+              <Icon name="phone" size="lg" />
+              <div>
+                <strong>{asking.name}</strong>
+                <span className="mb-phones__label">{asking.ip}</span>
+              </div>
+            </div>
+            {/* Whose phone it is decides what it may do: a waiter's phone acts as the waiter,
+                a shared tablet acts as nobody. */}
+            <Select
+              label="Whose phone"
+              value={owner}
+              onChange={(e) => setPicked({ id: asking.requestId, owner: e.target.value })}
+              options={[
+                { value: '', label: 'Choose' },
+                { value: SHARED, label: 'Shared tablet' },
+                ...view.people.map((p) => ({ value: p.id, label: p.name })),
+              ]}
+            />
+          </>
+        ) : (
+          <ScanCode qr={view.qr} code={view.code} />
+        )}
+      </Modal>
 
       <ConfirmDialog
         open={removing !== null}
@@ -303,5 +248,29 @@ export function Phones() {
         onCancel={() => setRemoving(null)}
       />
     </Page>
+  );
+}
+
+/** The QR with the short code under it, for the phone that cannot scan. */
+function ScanCode({ qr, code }: { qr: readonly string[]; code: string }) {
+  return (
+    <div className="mb-phones__scan">
+      <div className="mb-phones__qr" role="img" aria-label="Scan this with the Magic Bill app">
+        {qr.map((row, y) => (
+          // The code is positional: two identical rows are two different places.
+          <div className="mb-phones__qrrow" key={`${y}-${row}`}>
+            {[...row].map((cell, x) => (
+              <span
+                key={`${y}-${x}`}
+                className={cell === '#' ? 'mb-phones__dot mb-phones__dot--on' : 'mb-phones__dot'}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+      <span className="mb-phones__label">Or type the code in the app</span>
+      <strong className="mb-phones__code">{code}</strong>
+      <span className="mb-phones__label">Waiting for a phone to scan</span>
+    </div>
   );
 }

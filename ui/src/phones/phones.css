@@ -1,4 +1,4 @@
-/* The Phones page: the road's state, the code, the phones, the counter's own details. */
+/* The Phones page: the road's state, the phones on the counter, and the Add phone dialog. */
 
 .mb-phones-page {
   display: flex;
@@ -8,16 +8,6 @@
   height: 100%;
 }
 
-.mb-phones-page .mb-panel__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-group);
-}
-
-.mb-phones-page .mb-panel--flush > .mb-panel__body {
-  gap: 0;
-}
-
 .mb-phones__label {
   margin: 0;
   font-size: var(--type-caption);
@@ -25,12 +15,13 @@
   color: var(--text-muted);
 }
 
-/* The QR beside the code. */
-.mb-phones__pairing {
+/* The QR, the code under it, and what the dialog is waiting for: one column, centred. */
+.mb-phones__scan {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  gap: var(--gap-section);
+  gap: var(--space-2);
+  padding-block: var(--space-2);
 }
 
 .mb-phones__qr {
@@ -38,6 +29,7 @@
   flex-direction: column;
   /* The quiet zone: a QR with no margin round it is one half the phones will not read. */
   padding: var(--space-3);
+  margin-bottom: var(--space-2);
   background: var(--print-paper);
   border-radius: var(--radius-sm);
 }
@@ -60,64 +52,27 @@
 }
 
 .mb-phones__code {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.mb-phones__code .mb-code {
+  font-family: var(--font-mono);
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   letter-spacing: var(--tracking-caps);
   color: var(--text);
 }
 
-/* One row per phone asking to join: who it is, whose it is, the answer. */
-.mb-phones__waiting {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-field);
-}
-
-.mb-phones__ask {
-  display: grid;
-  grid-template-columns: 1fr var(--phones-owner) auto;
-  align-items: center;
-  gap: var(--gap-group);
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
-}
-
-.mb-phones__who {
+/* The phone at the desk: who it says it is, and where from. */
+.mb-phones__asking {
   display: flex;
   align-items: center;
   gap: var(--gap-field);
   min-width: 0;
 }
 
-.mb-phones__who > div {
+.mb-phones__asking > div {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.mb-phones__answer {
-  display: flex;
-  gap: var(--gap-inline);
-}
-
-/* Long, so it wraps rather than pushing the panel sideways. */
-.mb-phones__fingerprint {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--gap-inline);
-  overflow-wrap: anywhere;
-}
-
-/* The security code is long: it takes the whole row, with Copy beside it. */
-.mb-phones__fingerprint-fact {
-  grid-column: 1 / -1;
+.mb-phones__asking strong {
+  font-size: var(--text-lg);
 }

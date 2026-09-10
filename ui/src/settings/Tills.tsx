@@ -2,7 +2,19 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Badge, Button, Card, Input, Modal, SectionHeader, Spinner, useToast } from '../kit';
+import {
+  Badge,
+  Button,
+  Card,
+  Fact,
+  Facts,
+  Icon,
+  Input,
+  Modal,
+  SectionHeader,
+  Spinner,
+  useToast,
+} from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { TerminalView } from '../ipc/generated/TerminalView';
 import type { TillsView } from '../ipc/generated/TillsView';
@@ -106,6 +118,13 @@ export function Tills() {
       .finally(() => setBusy(false));
   };
 
+  const copy = (text: string) => {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => toast.show('ok', 'Copied.'))
+      .catch(() => toast.show('danger', 'It could not be copied.'));
+  };
+
   const sendNow = () => {
     setBusy(true);
     call('send_waiting_bills')
@@ -174,18 +193,41 @@ export function Tills() {
         ))}
       </Card>
 
+      {/* What a second till types to reach this one; the short code comes from Phones. */}
+      {view.mayManage && view.joinAddress !== '' ? (
+        <Card>
+          <SectionHeader
+            title="For a second till"
+            note="Type these into Join a shop on the new till, with the short code from Phones, Add phone."
+          />
+          <Facts>
+            <Fact label="Address" code className="mb-tills__code">
+              {view.joinAddress}
+            </Fact>
+            <Fact label="Security code" code className="mb-tills__code">
+              <span className="mb-tills__copy">
+                {view.joinFingerprint}
+                <Button
+                  size="sm"
+                  variant="quiet"
+                  iconOnly
+                  title="Copy"
+                  aria-label="Copy the security code"
+                  onClick={() => copy(view.joinFingerprint)}
+                >
+                  <Icon name="copy" size="sm" />
+                </Button>
+              </span>
+            </Fact>
+          </Facts>
+        </Card>
+      ) : null}
+
       {view.mayManage ? (
         <Card>
           <SectionHeader
             title="Add this computer to a shop"
-            note={
-              <>
-                Do this on the NEW till, not on the main one. On the main till
-                open Settings, Phones, and press &ldquo;Add a phone&rdquo; — it
-                shows the address, the security code and a short code to type
-                here. Somebody at the main till has to press Allow.
-              </>
-            }
+            note="Do this on the new till. The address and security code are on the main till's Tills page; the short code under Phones, Add phone. Somebody at the main till presses Allow."
           />
           <div className="mb-row--end">
             <Button variant="primary" onClick={() => setJoining(NOTHING_TYPED)}>
@@ -249,7 +291,7 @@ export function Tills() {
         <Input
           label="The main till's security code"
           value={joining?.fingerprint ?? ''}
-          hint="Also on the main till's Phones screen. This is what stops a stranger on the WiFi pretending to be it."
+          hint="On the main till's Tills page."
           onChange={(e) =>
             setJoining((was) => (was ? { ...was, fingerprint: e.currentTarget.value } : was))
           }
@@ -257,7 +299,7 @@ export function Tills() {
         <Input
           label="The short code"
           value={joining?.token ?? ''}
-          hint="It stops working after a few minutes."
+          hint="Under the QR on the main till's Phones screen. It stops working after a few minutes."
           onChange={(e) =>
             setJoining((was) => (was ? { ...was, token: e.currentTarget.value } : was))
           }

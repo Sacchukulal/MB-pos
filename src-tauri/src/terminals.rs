@@ -104,6 +104,10 @@ pub struct TillsView {
     pub allowed: u32,
     pub limit_says: String,
     pub may_manage: bool,
+    /// What a new till types to reach this one: `https://192.168.1.7:7331` and the
+    /// certificate's fingerprint. Empty unless this is the main till with its network on.
+    pub join_address: String,
+    pub join_fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
@@ -128,6 +132,12 @@ pub fn tills_on(app: &App) -> UiResult<TillsView> {
         .unwrap_or(0);
     let allowed = app.entitlement().limits.terminals;
     let stood_down = stood_down_says(app).unwrap_or_default();
+    let reachable = app.network().filter(|n| !n.address.is_empty()).map(|n| {
+        (
+            format!("https://{}:{}", n.address, n.port),
+            n.fingerprint.clone(),
+        )
+    });
 
     app.with_shop(|shop| {
         shop.db
@@ -182,6 +192,16 @@ pub fn tills_on(app: &App) -> UiResult<TillsView> {
                     allowed,
                     limit_says: limit_says(rows.len(), allowed),
                     may_manage: who.must(Permission::SettingsStore).is_ok(),
+                    join_address: reachable
+                        .as_ref()
+                        .filter(|_| is_master)
+                        .map(|(address, _)| address.clone())
+                        .unwrap_or_default(),
+                    join_fingerprint: reachable
+                        .as_ref()
+                        .filter(|_| is_master)
+                        .map(|(_, fingerprint)| fingerprint.clone())
+                        .unwrap_or_default(),
                 })
             })
             .map_err(|e| words::from_db(&e))

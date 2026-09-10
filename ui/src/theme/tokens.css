@@ -311,9 +311,8 @@
   --account-label: 8rem;
   --account-side: 22rem;
 
+  /* One QR module in the Add phone dialog: big enough to scan from across the counter. */
   --qr-dot: 6px;
-  /* The "whose phone" dropdown on a phone asking to join. */
-  --phones-owner: 14rem;
   /* The two values in this file that a theme must NOT change. */
   --print-ink: #000000;
   --print-paper: #ffffff;
