@@ -548,3 +548,222 @@ fn an_item_called_chicken_biryani_half_survives() {
         "the comma broke the columns — audit G7"
     );
 }
+
+/// The reason anybody imports a menu: a shop with nothing in it and a list from the old till.
+/// A category the shop has never heard of is CREATED, not refused.
+#[test]
+fn a_file_naming_new_categories_creates_them_and_says_which() {
+    let scratch = Scratch::new("csv_new_cats");
+    let db = scratch.open();
+    shop::build(&db);
+
+    // Three categories the fixture does not have, and one it does, under a different case.
+    let csv = "category,name,price\r\n\
+               CHINEES,Chicken 65,200\r\n\
+               CHINEES,Chicken Lollipop,240\r\n\
+               NORTH INDIAN,Butter Naan,45\r\n\
+               JUICE,Lime Soda,60\r\n\
+               food,Idli,30\r\n";
+
+    let plan = db
+        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .expect("planned");
+
+    assert!(plan.is_clean(), "{:?}", plan.refused);
+    let made: Vec<&str> = plan
+        .new_categories
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(
+        made,
+        vec!["CHINEES", "NORTH INDIAN", "JUICE"],
+        "two rows of one category must make ONE category, and Food already exists"
+    );
+    assert_eq!(plan.new_items.len(), 5);
+    assert!(
+        plan.summary().contains("3 new categories"),
+        "the dry run must name what it is about to add: {}",
+        plan.summary()
+    );
+
+    let written = db
+        .transaction(|tx| {
+            let repos = Repos::new(tx);
+            repos.menu_csv().apply(OUTLET, &plan, at(1))
+        })
+        .expect("imported");
+    assert_eq!(written, 5);
+
+    let categories = db
+        .transaction(|tx| Repos::new(tx).menu().list_categories(OUTLET))
+        .expect("categories");
+    assert!(categories.iter().any(|c| c.name == "CHINEES"));
+    assert!(categories.iter().any(|c| c.name == "NORTH INDIAN"));
+
+    // The idli joined the category the fixture already had, spelt its way.
+    let items = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items");
+    let idli = items.iter().find(|i| i.name == "Idli").expect("the idli");
+    assert_eq!(
+        idli.category_id.as_ref().map(mb_core::CategoryId::as_str),
+        Some("cat_food"),
+        "a category that differs only in case is the SAME category"
+    );
+}
+
+/// The same file twice is the same shop, not two of everything.
+#[test]
+fn importing_the_same_file_twice_adds_no_second_category() {
+    let scratch = Scratch::new("csv_twice");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let csv = "category,name,price\r\n\
+               MOMOS,Steam Momo,90\r\n";
+
+    for _ in 0..2 {
+        db.transaction(|tx| {
+            let repos = Repos::new(tx);
+            let plan = repos.menu_csv().plan(OUTLET, csv)?;
+            repos.menu_csv().apply(OUTLET, &plan, at(1))
+        })
+        .expect("imported");
+    }
+
+    let categories = db
+        .transaction(|tx| Repos::new(tx).menu().list_categories(OUTLET))
+        .expect("categories");
+    assert_eq!(
+        categories.iter().filter(|c| c.name == "MOMOS").count(),
+        1,
+        "the second run made a second category"
+    );
+    let items = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items");
+    assert_eq!(items.iter().filter(|i| i.name == "Steam Momo").count(), 1);
+}
+
+/// Rupees are what a person types. Paise are what the export writes. A hundredfold apart, so
+/// a row that says both is refused rather than guessed at.
+#[test]
+fn a_price_may_be_rupees_or_paise_but_never_both() {
+    let scratch = Scratch::new("csv_rupees");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let csv = "name,price\r\n\
+               Lime Soda,60\r\n\
+               Filter Coffee,22.50\r\n\
+               Special Thali,\"Rs 1,250\"\r\n";
+
+    let plan = db
+        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .expect("planned");
+    assert!(plan.is_clean(), "{:?}", plan.refused);
+
+    let paise = |name: &str| {
+        plan.new_items
+            .iter()
+            .find(|i| i.name == name)
+            .map(|i| i.unit_price.paise())
+    };
+    assert_eq!(paise("Lime Soda"), Some(6000), "60 rupees is 6000 paise");
+    assert_eq!(paise("Filter Coffee"), Some(2250));
+    assert_eq!(paise("Special Thali"), Some(125_000), "Rs and a comma");
+
+    // Both columns at once is a guess about money, and we do not guess about money.
+    let both = "name,price,price_paise\r\nLime Soda,60,6000\r\n";
+    let plan = db
+        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, both))
+        .expect("planned");
+    assert_eq!(plan.refused.len(), 1);
+    assert!(
+        plan.refused[0].1.contains("not both"),
+        "{}",
+        plan.refused[0].1
+    );
+}
+
+/// A new item with no slab of its own takes its category's, then the shop's — the same ladder
+/// the rest of the app climbs. A two-column file must not refuse every row.
+#[test]
+fn an_item_with_no_tax_column_falls_back_to_the_shops_rate() {
+    let scratch = Scratch::new("csv_shop_slab");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let shop_slab = db
+        .transaction(|tx| Repos::new(tx).tax_classes().shop_slab(OUTLET))
+        .expect("the shop has a rate");
+
+    let plan = db
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, "name,price\r\nRasam,40\r\n")
+        })
+        .expect("planned");
+
+    assert!(plan.is_clean(), "{:?}", plan.refused);
+    assert_eq!(plan.new_items.len(), 1);
+    assert_eq!(plan.new_items[0].tax_class_id, shop_slab);
+}
+
+/// Excel writes a byte-order mark and capitalises headings. Neither is the owner's fault.
+#[test]
+fn a_header_survives_a_byte_order_mark_and_everyday_words() {
+    let scratch = Scratch::new("csv_header");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let csv = "\u{feff}Item,Rate,Group\r\n\
+               Chicken 65,200,CHINEES\r\n";
+
+    let plan = db
+        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .expect("planned");
+
+    assert!(plan.is_clean(), "{:?}", plan.refused);
+    assert_eq!(plan.new_items.len(), 1);
+    assert_eq!(plan.new_items[0].unit_price.paise(), 20000);
+    assert_eq!(plan.new_categories.len(), 1);
+}
+
+/// Two names can slug to one id. Saving is an upsert by id, so a collision would quietly
+/// overwrite a real item — the second one must be given an id of its own.
+#[test]
+fn two_items_that_slug_alike_do_not_overwrite_each_other() {
+    let scratch = Scratch::new("csv_slug");
+    let db = scratch.open();
+    shop::build(&db);
+
+    let csv = "name,price\r\n\
+               Tea!,10\r\n\
+               Tea?,12\r\n";
+
+    let plan = db
+        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .expect("planned");
+    assert!(plan.is_clean(), "{:?}", plan.refused);
+    assert_ne!(
+        plan.new_items[0].id, plan.new_items[1].id,
+        "both rows landed on one id"
+    );
+
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        repos.menu_csv().apply(OUTLET, &plan, at(1))
+    })
+    .expect("imported");
+
+    let items = db
+        .transaction(|tx| Repos::new(tx).menu().list_items(OUTLET, false))
+        .expect("items");
+    assert_eq!(
+        items.iter().filter(|i| i.name.starts_with("Tea")).count(),
+        2
+    );
+}

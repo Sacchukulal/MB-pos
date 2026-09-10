@@ -177,6 +177,25 @@
   font-size: var(--text-sm);
 }
 
+/* The categories the file would add, named before anything is written. */
+.mb-import__added {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* The shape a file has to be in, for whoever is about to pick one. */
+.mb-import__shape {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.mb-import__shape code {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
 /* What an item is made of. */
 
 .mb-comp__list {

@@ -239,7 +239,13 @@ pub(crate) fn parse_csv(text: &str) -> Vec<Vec<Option<String>>> {
     let mut field = String::new();
     let mut quoted = false;
     let mut was_quoted = false;
-    let mut chars = text.chars().peekable();
+    // Excel writes a byte-order mark at the front of a UTF-8 CSV. Left in, it becomes part of
+    // the first column's name and no header ever matches again.
+    let mut chars = text
+        .strip_prefix('\u{feff}')
+        .unwrap_or(text)
+        .chars()
+        .peekable();
 
     while let Some(ch) = chars.next() {
         if quoted {

@@ -678,6 +678,9 @@ pub struct ImportPlanView {
     pub summary: String,
     pub new_items: i64,
     pub updated_items: i64,
+    /// The names of the categories this file would add to the shop. Created, not refused —
+    /// but never without saying which, and never before the owner has read the list.
+    pub new_categories: Vec<String>,
     /// "Line 4: there is no category called \"Snaks\"".
     pub refused: Vec<String>,
     /// Nothing may be imported until this is true.
@@ -695,6 +698,7 @@ pub fn plan_import_on(app: &App, csv: String) -> UiResult<ImportPlanView> {
                     summary: plan.summary(),
                     new_items: plan.new_items.len().try_into().unwrap_or(i64::MAX),
                     updated_items: plan.updated_items.len().try_into().unwrap_or(i64::MAX),
+                    new_categories: plan.new_categories.iter().map(|c| c.name.clone()).collect(),
                     refused: plan
                         .refused
                         .iter()
@@ -713,7 +717,7 @@ pub fn run_import_on(app: &App, csv: String) -> UiResult<String> {
     let at = now();
     let day = today(at);
 
-    let written = app.with_shop(|shop| {
+    let (written, categories) = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
@@ -732,19 +736,29 @@ pub fn run_import_on(app: &App, csv: String) -> UiResult<String> {
                         "imported": written,
                         "new": plan.new_items.len(),
                         "changed": plan.updated_items.len(),
+                        "categories_added": plan.new_categories.len(),
                     })),
                 )?;
-                Ok(written)
+                Ok((written, plan.new_categories.len()))
             })
             .map_err(|e| words::from_db(&e))
     })?;
 
-    log_info!("{} imported {written} menu item(s)", who.name);
-    Ok(match written {
+    log_info!(
+        "{} imported {written} menu item(s) and {categories} new category(ies)",
+        who.name
+    );
+    let mut said = match written {
         0 => "Nothing was imported — the file had no rows.".to_owned(),
         1 => "One item imported.".to_owned(),
         n => format!("{n} items imported."),
-    })
+    };
+    match categories {
+        0 => {}
+        1 => said.push_str(" One category was added."),
+        c => said.push_str(&format!(" {c} categories were added.")),
+    }
+    Ok(said)
 }
 
 /// The whole menu as a spreadsheet.

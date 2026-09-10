@@ -17,6 +17,7 @@ import {
   Page,
   PageHeader,
   Panel,
+  plural,
   RowMenu,
   Scroller,
   SearchField,
@@ -789,6 +790,9 @@ function BulkPrices({
   );
 }
 
+/** How many refused rows the dialog names before it starts counting them instead. */
+const REFUSALS_SHOWN = 10;
+
 /** The spreadsheet. */
 function ImportMenu({
   csv,
@@ -808,16 +812,29 @@ function ImportMenu({
     call('plan_menu_import', { csv }).then(setPlan).catch(onFailed);
   }, [csv, onFailed]);
 
+  // A bad file is a diagnosis, not a wall: the first few lines say what is wrong, and the
+  // count says how far it goes.
+  const shown = plan?.refused.slice(0, REFUSALS_SHOWN) ?? [];
+  const hidden = (plan?.refused.length ?? 0) - shown.length;
+
   return (
     <Modal open title="Import a menu" onClose={onClose} wide>
+      <p className="mb-import__shape">
+        The shortest file that works is <code>name,price</code>. Add <code>category</code> and a
+        category the shop does not have yet is created. Prices are in rupees.
+      </p>
       {plan ? (
         <div className="mb-import__plan">
           <strong>{plan.summary}</strong>
-          {plan.refused.length > 0 ? (
+          {plan.newCategories.length > 0 ? (
+            <p className="mb-import__added">New categories: {plan.newCategories.join(', ')}</p>
+          ) : null}
+          {shown.length > 0 ? (
             <ul className="mb-import__refused">
-              {plan.refused.map((line) => (
+              {shown.map((line) => (
                 <li key={line}>{line}</li>
               ))}
+              {hidden > 0 ? <li>and {plural(hidden, 'more row')}</li> : null}
             </ul>
           ) : null}
         </div>

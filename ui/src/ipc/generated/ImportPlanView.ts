@@ -9,6 +9,11 @@ export type ImportPlanView = {
  */
 summary: string, newItems: bigint, updatedItems: bigint, 
 /**
+ * The names of the categories this file would add to the shop. Created, not refused —
+ * but never without saying which, and never before the owner has read the list.
+ */
+newCategories: Array<string>, 
+/**
  * "Line 4: there is no category called \"Snaks\"".
  */
 refused: Array<string>, 
