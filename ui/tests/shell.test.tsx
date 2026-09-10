@@ -136,6 +136,15 @@ it('does not mount the screen behind the lock', async () => {
   expect(call).not.toHaveBeenCalledWith('menu_items');
 });
 
+/** A shop with thirty people has thirty names on the lock screen, and the card still fits. */
+it('scrolls the names inside the card rather than running off the window', async () => {
+  const { container } = show();
+  await screen.findByText('Who is at the counter?');
+  for (const part of ['.mb-lock__people', '.mb-lock__pad']) {
+    expect(container.querySelector(part)?.classList.contains('mb-scroll'), part).toBe(true);
+  }
+});
+
 /* Given longer than the default five seconds, and not because it is slow. */
 it('mounts the screen with a session behind it, so its data arrives', { timeout: 20_000 }, async () => {
   show();

@@ -6,7 +6,6 @@ import {
   Button,
   ConfirmDialog,
   Icon,
-  Modal,
   Notice,
   Panel,
   Spinner,
@@ -17,22 +16,11 @@ import { call, isUiError, subscribe } from '../ipc/call';
 import type { Pushed } from '../ipc/generated/Pushed';
 import type { UpdateState } from '../ipc/generated/UpdateState';
 import { Line, Lines } from './Lines';
-
-/** The one dialog an update happens in, once one is found. */
-type Dialog =
-  | { kind: 'found'; version: string; notes: string; downloaded: boolean }
-  | { kind: 'busy'; version: string; stage: string; percent: number; bytes: number; total: number }
-  | { kind: 'closing'; says: string }
-  | { kind: 'failed'; says: string };
-
-/** Bytes as a person reads them on a progress line. */
-function megabytes(bytes: number): string {
-  return `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 1 : 0)} MB`;
-}
+import { UpdateDialog, useUpdateRun } from './Update';
 
 export function Version() {
   const [view, setView] = useState<UpdateState | null>(null);
-  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const run = useUpdateRun();
   const [checking, setChecking] = useState(false);
   const [confirmingBack, setConfirmingBack] = useState(false);
   const toast = useToast();
@@ -49,23 +37,12 @@ export function Version() {
     call('look_for_an_update').then(setView).catch(complain);
   }, [complain]);
 
-  // Rust says how far the download has got; the dialog draws it. A shelf read elsewhere
-  // (the daily licence check) lands here too.
+  // A shelf read elsewhere — the update watcher — lands here too.
   useEffect(() => {
     let stop: (() => void) | undefined;
     subscribe((message: Pushed) => {
-      if (message.kind === 'version') {
-        call('look_for_an_update').then(setView).catch(complain);
-      }
-      if (message.kind !== 'update') return;
-      setDialog({
-        kind: 'busy',
-        version: message.version,
-        stage: message.stage,
-        percent: message.percent,
-        bytes: message.bytes,
-        total: message.total,
-      });
+      if (message.kind !== 'version') return;
+      call('look_for_an_update').then(setView).catch(complain);
     })
       .then((unlisten) => {
         stop = unlisten;
@@ -82,24 +59,13 @@ export function Version() {
     );
   }
 
-  const found = (fresh: UpdateState): Dialog | null =>
-    fresh.available
-      ? {
-          kind: 'found',
-          version: fresh.available,
-          notes: fresh.notes,
-          downloaded: fresh.downloaded,
-        }
-      : null;
-
   /** Ask the shelf. The button carries the spinner; the page stays alive. */
   const check = () => {
     setChecking(true);
     call('check_for_update')
       .then((fresh) => {
         setView(fresh);
-        const dialogFound = found(fresh);
-        if (dialogFound) setDialog(dialogFound);
+        if (fresh.available) run.offer(fresh.available, fresh.notes, fresh.downloaded);
         else toast.show('ok', `This is the newest version, ${fresh.running}.`);
       })
       .catch((cause: unknown) => {
@@ -111,52 +77,20 @@ export function Version() {
       .finally(() => setChecking(false));
   };
 
-  const install = (version: string) => {
-    setDialog({ kind: 'busy', version, stage: 'downloading', percent: 0, bytes: 0, total: 0 });
-    call('install_update')
-      .then((says) => setDialog({ kind: 'closing', says }))
-      .catch((cause: unknown) => {
-        setDialog({
-          kind: 'failed',
-          says: isUiError(cause) ? cause.message : 'The update could not be installed.',
-        });
-      });
-  };
-
-  const goBack = () => {
-    setConfirmingBack(false);
-    setDialog({
-      kind: 'busy',
-      version: view.previous ?? '',
-      stage: 'installing',
-      percent: 100,
-      bytes: 0,
-      total: 0,
-    });
-    call('go_back_a_version')
-      .then((says) => setDialog({ kind: 'closing', says }))
-      .catch((cause: unknown) => {
-        setDialog({
-          kind: 'failed',
-          says: isUiError(cause) ? cause.message : 'The earlier version could not be started.',
-        });
-      });
-  };
+  /** The version waiting on the shelf, if one is. */
+  const waiting = view.available;
 
   return (
     <Panel
       title="Version"
       actions={
-        view.available ? (
+        waiting ? (
           <Button
             variant="primary"
-            onClick={() => {
-              const dialogFound = found(view);
-              if (dialogFound) setDialog(dialogFound);
-            }}
+            onClick={() => run.offer(waiting, view.notes, view.downloaded)}
           >
             <Icon name="download" size="sm" />
-            Install {view.available}
+            Install {waiting}
           </Button>
         ) : (
           <Button variant="secondary" disabled={checking} onClick={check}>
@@ -166,9 +100,9 @@ export function Version() {
         )
       }
     >
-      {view.available ? (
+      {waiting ? (
         <Notice tone="accent" icon="download">
-          Version {view.available} is ready to install.
+          Version {waiting} is ready to install.
           {view.notes ? ` ${view.notes}` : ''}
         </Notice>
       ) : null}
@@ -204,124 +138,13 @@ export function Version() {
         confirmLabel="Go back"
         cancelLabel="Stay on this one"
         onCancel={() => setConfirmingBack(false)}
-        onConfirm={goBack}
+        onConfirm={() => {
+          setConfirmingBack(false);
+          run.goBack(view.previous ?? '');
+        }}
       />
 
-      {dialog ? (
-        <UpdateDialog dialog={dialog} onInstall={install} onClose={() => setDialog(null)} />
-      ) : null}
+      <UpdateDialog run={run} />
     </Panel>
-  );
-}
-
-/** What each stage of an update is called on the screen. */
-const STAGE_WORDS: Record<string, string> = {
-  downloading: 'Downloading',
-  checking: 'Checking the download',
-  installing: 'Installing',
-};
-
-/** Every step of an update in one place: what was found, the download, the hand-over. */
-function UpdateDialog({
-  dialog,
-  onInstall,
-  onClose,
-}: {
-  dialog: Dialog;
-  onInstall: (version: string) => void;
-  onClose: () => void;
-}) {
-  // While the installer is on its way there is nothing to close: the counter closes itself.
-  const closable = dialog.kind !== 'busy' && dialog.kind !== 'closing';
-  const stay = () => {
-    if (closable) onClose();
-  };
-
-  if (dialog.kind === 'found') {
-    return (
-      <Modal
-        open
-        title={`Version ${dialog.version} is ready`}
-        onClose={stay}
-        actions={
-          <>
-            <Button variant="quiet" onClick={onClose}>
-              Later
-            </Button>
-            <Button variant="primary" onClick={() => onInstall(dialog.version)}>
-              <Icon name="download" size="sm" />
-              {dialog.downloaded ? 'Install now' : 'Download and install'}
-            </Button>
-          </>
-        }
-      >
-        {dialog.notes ? <p>{dialog.notes}</p> : null}
-        <p className="mb-muted">
-          Magic Bill closes and opens again on the new version. Your data is not touched. Best
-          done after the last bill of the day.
-        </p>
-      </Modal>
-    );
-  }
-
-  if (dialog.kind === 'busy') {
-    const stage = STAGE_WORDS[dialog.stage] ?? 'Working';
-    const downloading = dialog.stage === 'downloading';
-    return (
-      <Modal open title={`Updating to ${dialog.version}`} onClose={stay}>
-        <div className="mb-account__progress">
-          <div className="mb-account__stage">
-            <span>{stage}…</span>
-            <span className="mb-code">{downloading ? `${dialog.percent}%` : ''}</span>
-          </div>
-          <div
-            className="mb-progress"
-            role="progressbar"
-            aria-label={stage}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={downloading ? dialog.percent : undefined}
-          >
-            <div
-              className={downloading ? 'mb-progress__bar' : 'mb-progress__bar mb-progress__bar--busy'}
-              style={downloading ? { width: `${dialog.percent}%` } : undefined}
-            />
-          </div>
-          <p className="mb-muted">
-            {downloading && dialog.total > 0
-              ? `${megabytes(dialog.bytes)} of ${megabytes(dialog.total)}`
-              : dialog.stage === 'installing'
-                ? 'Magic Bill closes now and opens again by itself.'
-                : 'One moment.'}
-          </p>
-        </div>
-      </Modal>
-    );
-  }
-
-  if (dialog.kind === 'closing') {
-    return (
-      <Modal open title="Installing" onClose={stay}>
-        <div className="mb-account__wait">
-          <Spinner label="Closing" />
-          <span>{dialog.says}</span>
-        </div>
-      </Modal>
-    );
-  }
-
-  return (
-    <Modal
-      open
-      title="The update did not go through"
-      onClose={stay}
-      actions={
-        <Button variant="primary" onClick={onClose}>
-          OK
-        </Button>
-      }
-    >
-      <p>{dialog.says}</p>
-    </Modal>
   );
 }

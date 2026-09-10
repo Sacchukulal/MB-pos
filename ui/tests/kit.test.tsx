@@ -263,6 +263,25 @@ describe('Badge', () => {
   });
 });
 
+/** A dialog opened over another one — adding a customer while a bill waits on the account. */
+describe('one dialog over another', () => {
+  it('closes the top one on Escape and leaves the one underneath open', () => {
+    const closeUnder = vi.fn();
+    const closeOver = vi.fn();
+    render(
+      <Modal open title="On the account" onClose={closeUnder}>
+        <Modal open title="Add a customer" onClose={closeOver}>
+          <Input label="Name" />
+        </Modal>
+      </Modal>,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(closeOver).toHaveBeenCalledTimes(1);
+    expect(closeUnder).not.toHaveBeenCalled();
+  });
+});
+
 describe('a dialog and the caret (§1, keyboard-first)', () => {
   it('puts the caret in the first field rather than taking it back out', () => {
     render(

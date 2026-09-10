@@ -108,7 +108,7 @@ export function Lock({ people, owner, lastSignedIn, onSignedIn }: LockProps) {
             onType={(text) => dispatch({ kind: 'typed', field: 'name', text })}
             onChoose={(person) => dispatch({ kind: 'choose', person })}
           />
-          <div className="mb-lock__pad">
+          <Scroller inset className="mb-lock__pad">
             <Logo size="lg" />
             <SignIn person={mode.person} digits={mode.digits} busy={state.busy} onPad={onPad} />
             {problem}
@@ -118,7 +118,7 @@ export function Lock({ people, owner, lastSignedIn, onSignedIn }: LockProps) {
                 Forgotten your PIN?
               </Button>
             ) : null}
-          </div>
+          </Scroller>
         </div>
       </div>
     );

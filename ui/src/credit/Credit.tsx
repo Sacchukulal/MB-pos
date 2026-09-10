@@ -9,6 +9,7 @@ import {
   EmptyState,
   Foot,
   freshId,
+  Icon,
   Input,
   Modal,
   MoneyInput,
@@ -16,6 +17,7 @@ import {
   Panel,
   PhoneInput,
   PageHeader,
+  Row,
   SearchField,
   SectionHeader,
   Select,
@@ -111,18 +113,7 @@ export function Credit() {
     },
   ];
 
-  const addCustomer = () =>
-    setEditing({
-      id: freshId('cus'),
-      name: '',
-      phone: null,
-      gstin: null,
-      address: null,
-      creditLimit: null,
-      isActive: true,
-      balance: { paise: 0n, text: '0.00' },
-      oldest: '—',
-    });
+  const addCustomer = () => setEditing(blankCustomer());
 
   return (
     <Page className="mb-credit" scroll={false}>
@@ -375,6 +366,21 @@ function Account({
   );
 }
 
+/** A customer nobody has filled in yet: where both ways in start. */
+function blankCustomer(): CustomerView {
+  return {
+    id: freshId('cus'),
+    name: '',
+    phone: null,
+    gstin: null,
+    address: null,
+    creditLimit: null,
+    isActive: true,
+    balance: { paise: 0n, text: '0.00' },
+    oldest: '—',
+  };
+}
+
 function EditCustomer({
   customer,
   onClose,
@@ -458,6 +464,8 @@ export function PutOnAccount({
   const [people, setPeople] = useState<readonly CustomerView[]>([]);
   const [find, setFind] = useState('');
   const [chosen, setChosen] = useState<CustomerView | null>(null);
+  /** The customer being added from here, and `null` when nobody is. */
+  const [adding, setAdding] = useState<CustomerView | null>(null);
   const [says, setSays] = useState<string | null>(null);
   const [over, setOver] = useState(false);
 
@@ -486,15 +494,22 @@ export function PutOnAccount({
     <Modal open title="On the account" onClose={onClose} wide>
       {chosen === null ? (
         <>
-          <SearchField
-            value={find}
-            placeholder="Name or number"
-            onChange={(event) => setFind(event.target.value)}
-          />
+          {/* Find somebody, or add them without leaving the bill. */}
+          <Row>
+            <SearchField
+              value={find}
+              placeholder="Name or number"
+              onChange={(event) => setFind(event.target.value)}
+            />
+            <Button variant="secondary" onClick={() => setAdding(blankCustomer())}>
+              <Icon name="plus" size="sm" />
+              Add a customer
+            </Button>
+          </Row>
           {shown.length === 0 ? (
             <EmptyState
               title="No customers yet"
-              hint="Add one in Credit, and their bills can go on the account."
+              hint="Add one here, and this bill can go on their account."
             />
           ) : (
             <ul className="mb-comp__list">
@@ -534,6 +549,22 @@ export function PutOnAccount({
           </div>
         </>
       )}
+
+      {adding ? (
+        <Modal open title="Add a customer" onClose={() => setAdding(null)}>
+          <EditCustomer
+            customer={adding}
+            onClose={() => setAdding(null)}
+            onSaved={(fresh) => {
+              setPeople(fresh);
+              setAdding(null);
+              const saved = fresh.find((person) => person.id === adding.id);
+              if (saved) pick(saved);
+            }}
+            onFailed={onFailed}
+          />
+        </Modal>
+      ) : null}
     </Modal>
   );
 }

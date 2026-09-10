@@ -413,7 +413,7 @@ pub fn after_licence_change(app: &App) {
     });
     app.sender_wakeup().wake();
     tell_the_window(app);
-    crate::updates::check_now(app);
+    app.shelf_wakeup().wake();
 }
 
 /// The window hears the banner and its tone.

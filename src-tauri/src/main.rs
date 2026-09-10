@@ -260,6 +260,9 @@ fn main() {
             // threads, both after the window is up, neither able to hold a bill.
             licensing::start_refresher(app.handle());
             sync::start_sender(app.handle());
+            // The release shelf, on its own thread: a new version is offered seconds after the
+            // counter opens rather than whenever the licence check next succeeds.
+            updates::start_watcher(app.handle());
             // A till that was switched off while somebody moved the main till finds out here,
             // on its own, because the machine that failed is exactly the one that could not be
             // told at the time.

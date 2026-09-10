@@ -13,6 +13,7 @@ import type { DayStateView } from '../ipc/generated/DayStateView';
 import { useTheme } from '../theme/ThemeProvider';
 import { useTick } from '../clock';
 import { Account } from '../account/Account';
+import { UpdateOffer } from '../account/Update';
 import { FirstRun } from '../setup/FirstRun';
 import { AlertsPanel, loudest, type Alert } from './Alerts';
 import { DayGate } from './DayGate';
@@ -651,6 +652,11 @@ export function Shell() {
       {/* Billing waits: a day left open is closed, or called a holiday, before anything else. */}
       {/* What the phones asked the counter to settle — over whichever screen is up. */}
       {!locked ? <SettleDesk /> : null}
+      {/*
+        A new version, offered once each time the counter is opened, to whoever can install it.
+        Later leaves it to the bell and the Account page.
+      */}
+      {!locked && held.includes('settings.store') ? <UpdateOffer version={waiting} /> : null}
       {!locked && dayState && dayState.pending.length > 0 && !gateWaived ? (
         <DayGate
           state={dayState}

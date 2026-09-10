@@ -200,3 +200,53 @@ describe('putting a bill on an account (scope 5.2)', () => {
     expect(sent?.[1]).toEqual({ customerId: 'cus_rekha', overrideLimit: true });
   });
 });
+
+describe('a new customer, from the bill', () => {
+  /**
+   * The same form the Credit screen uses, on the same command, and the bill goes straight onto
+   * the account it just made.
+   */
+  it('adds one without leaving the bill and goes on to their account', async () => {
+    const added = customer({
+      id: 'cus_new',
+      name: 'Suresh',
+      phone: '9000000010',
+      balance: money(0, '0.00'),
+      oldest: '—',
+    });
+    call.mockImplementation((name: string, args?: Record<string, unknown>) => {
+      if (name === 'customers') return Promise.resolve([]);
+      if (name === 'save_customer') return Promise.resolve([{ ...added, id: (args?.edit as { id: string }).id }]);
+      if (name === 'credit_headroom') {
+        return Promise.resolve({
+          customer: 'Suresh',
+          balance: money(0, '0.00'),
+          after: money(114_000, '1,140.00'),
+          limit: null,
+          verdict: 'fine',
+          says: 'Suresh owes nothing. This bill takes them to 1,140.00.',
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    render(
+      <ToastProvider>
+        <PutOnAccount onClose={vi.fn()} onDone={vi.fn()} onFailed={vi.fn()} />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Add a customer/ }));
+    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Suresh' } });
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '9000000010' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const saved = call.mock.calls.find((c) => c[0] === 'save_customer');
+    expect((saved?.[1] as { edit: { name: string } }).edit.name).toBe('Suresh');
+
+    // Straight on to what this bill would do to the account just made.
+    expect(await screen.findByText(/takes them to 1,140.00/)).toBeTruthy();
+    fireEvent.click(screen.getByText('Put it on the account'));
+    expect(call.mock.calls.find((c) => c[0] === 'put_on_account')).toBeTruthy();
+  });
+});

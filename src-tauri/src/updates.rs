@@ -419,9 +419,41 @@ pub fn check_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> 
     Ok(check_now(app))
 }
 
-/// The shelf read and judged against this build and this shop's place in the rollout. Runs
-/// after every licence check (start-up, then daily) and on the button. A version seen for the
-/// first time is told to the window, so the bell rings without the screen being open.
+/// How long the watcher leaves the shelf alone between reads.
+const READ_SHELF_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
+
+/// How long it waits before the first read, so the shelf never competes with the first paint.
+const FIRST_READ_AFTER: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The one thread that reads the release shelf: soon after the counter opens, every six hours
+/// after that, and whenever the licence changes. Never on the thread that paints.
+pub fn start_watcher(handle: &tauri::AppHandle) {
+    use tauri::Manager as _;
+    let handle = handle.clone();
+    let spawned = std::thread::Builder::new()
+        .name("mb-updates".to_owned())
+        .spawn(move || {
+            let mut wait = FIRST_READ_AFTER;
+            loop {
+                let Some(app) = handle.try_state::<crate::state::App>() else {
+                    return;
+                };
+                app.shelf_wakeup().wait_for(wait);
+                let Some(app) = handle.try_state::<crate::state::App>() else {
+                    return;
+                };
+                check_now(&app);
+                wait = READ_SHELF_EVERY;
+            }
+        });
+    if let Err(e) = spawned {
+        crate::log_warn!("the update watcher could not be started: {e}");
+    }
+}
+
+/// The shelf read and judged against this build and this shop's place in the rollout. Runs on
+/// the watcher's thread and on the button. A version seen for the first time is told to the
+/// window, so the bell rings without the screen being open.
 pub fn check_now(app: &crate::state::App) -> UpdateState {
     let mut state = app.updates();
     let before = state.available.clone();

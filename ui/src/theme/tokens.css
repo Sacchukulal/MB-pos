@@ -324,7 +324,6 @@
   /* The sign-in card: the people down the left, the pad on the right. */
   --lock-split-width: 40rem;
   --lock-people-width: 15rem;
-  --lock-people-height: 18rem;
   --dot-size: 0.625rem;
   --permission-min: 15rem;
   /* The menu screen. */

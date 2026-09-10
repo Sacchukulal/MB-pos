@@ -434,3 +434,32 @@ describe('the cart controls', () => {
     }
   });
 });
+
+// The lock screen's card, which is the one card that has to hold a shop's whole staff.
+
+describe('the lock screen card', () => {
+  const auth = readFileSync(join('src', 'auth', 'auth.css'), 'utf8');
+  const block = (rule: string) => {
+    const at = auth.indexOf(rule);
+    expect(at, `${rule} is missing`).toBeGreaterThan(-1);
+    return auth.slice(at, auth.indexOf('}', at));
+  };
+
+  /** However many names there are, the card stops at the window and the list scrolls. */
+  it('stops at the window rather than growing past it', () => {
+    // The row is the window: an auto row grows with the card and then nothing clamps it.
+    expect(block('.mb-lock {')).toContain('grid-template-rows: minmax(0, 1fr)');
+    expect(block('.mb-lock__card {')).toContain('max-height: 100%');
+    expect(block('.mb-lock__card--split {')).toContain('grid-template-rows: minmax(0, 1fr)');
+  });
+
+  it('lets both columns shrink, so each one scrolls inside the card', () => {
+    expect(block('.mb-lock__people-column {')).toContain('min-height: 0');
+    expect(block('.mb-lock__pad {')).toContain('min-height: 0');
+    const people = block('.mb-lock__people {');
+    expect(people).toContain('flex: 1');
+    expect(people).toContain('min-height: 0');
+    // A fixed height is what cut the list off, and there must not be a second one anywhere.
+    expect(auth).not.toContain('--lock-people-height');
+  });
+});

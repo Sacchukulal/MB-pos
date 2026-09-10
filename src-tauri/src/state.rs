@@ -57,6 +57,8 @@ pub struct App {
     sender_wakeup: Arc<crate::cloud::Wakeup>,
     /// Wake the daily licence check now.
     refresher_wakeup: Arc<crate::cloud::Wakeup>,
+    /// Wake the release-shelf watcher now.
+    shelf_wakeup: Arc<crate::cloud::Wakeup>,
     /// The owner who has signed in on the first run and not yet opened a folder. Held here and
     /// never on disk: it carries the licence key.
     owner_sign_in: Mutex<Option<crate::firstrun::OwnerSignIn>>,
@@ -117,6 +119,7 @@ impl App {
             sync: Mutex::new(sync),
             sender_wakeup: crate::cloud::Wakeup::new(),
             refresher_wakeup: crate::cloud::Wakeup::new(),
+            shelf_wakeup: crate::cloud::Wakeup::new(),
             owner_sign_in: Mutex::new(None),
         })
     }
@@ -169,6 +172,11 @@ impl App {
     #[must_use]
     pub fn refresher_wakeup(&self) -> Arc<crate::cloud::Wakeup> {
         Arc::clone(&self.refresher_wakeup)
+    }
+
+    #[must_use]
+    pub fn shelf_wakeup(&self) -> Arc<crate::cloud::Wakeup> {
+        Arc::clone(&self.shelf_wakeup)
     }
 
     /// The counter's login to the cloud, if it has one.
