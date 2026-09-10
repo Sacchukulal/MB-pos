@@ -199,18 +199,40 @@ fn searching_by_section_finds_that_section() {
     );
 }
 
+/// The GST number is judged for the screen's mark and never refused: the shop decides what
+/// prints.
 #[test]
-fn a_gstin_that_does_not_match_its_state_is_refused() {
-    let mut config = ShopConfig::default();
-    config.store.state_code = "29".to_owned(); // Karnataka
-    config.store.gstin = "29ABCDE1234F1ZW".to_owned();
-    assert!(catalog::check_gstin_against_state(&config).is_ok());
+fn a_gstin_is_judged_against_its_shape_and_state_but_never_refused() {
+    assert!(catalog::judge_gstin("29ABCDE1234F1ZW", "29").is_ok());
+    assert!(
+        catalog::judge_gstin(" 29abcde1234f1zw ", "29").is_ok(),
+        "case and spaces"
+    );
 
     // A real Kerala number on a Karnataka shop.
+    let wrong = catalog::judge_gstin("32ABCDE1234F1Z9", "29").expect_err("it was allowed");
+    assert!(wrong.message.contains("Kerala"), "{}", wrong.message);
+    assert!(wrong.message.contains("Karnataka"), "{}", wrong.message);
+
+    let short = catalog::judge_gstin("29ABC", "29").expect_err("it was allowed");
+    assert!(short.message.contains("15 characters"), "{}", short.message);
+
+    let no_state = catalog::judge_gstin("29ABCDE1234F1ZW", "").expect_err("it was allowed");
+    assert_eq!(no_state.key, Some("store.state_code"));
+
+    // Empty is no mark, and the page says so with None rather than a refusal.
+    assert!(crate::tax::judge_gstin("", "29").is_none());
+    assert!(crate::tax::judge_gstin("32ABCDE1234F1Z9", "29").is_some_and(|m| !m.fine));
+
+    // And the save that used to be refused goes through: a regular shop with no number still
+    // charges GST, because the registration box alone decides it.
+    let mut config = ShopConfig::default();
+    config.store.registration = "regular".to_owned();
+    config.store.gstin = String::new();
+    assert!(config.store.registration().charges_gst());
     config.store.gstin = "32ABCDE1234F1Z9".to_owned();
-    let error = catalog::check_gstin_against_state(&config).expect_err("it was allowed");
-    assert!(error.message.contains("Kerala"), "{}", error.message);
-    assert_eq!(error.key, Some("store.gstin"));
+    config.store.state_code = "29".to_owned();
+    assert!(config.store.registration().charges_gst());
 }
 
 /// A charge is added for the order type that earned it, and for no other.
@@ -231,17 +253,23 @@ fn charges_follow_the_order_type() {
     billing.packing_charge = mb_core::Money::from_paise(1_000);
     billing.delivery_charge = mb_core::Money::from_paise(3_000);
 
-    let dine_in = billing.charges_for(OrderType::DineIn, &book).expect("charges");
+    let dine_in = billing
+        .charges_for(OrderType::DineIn, &book)
+        .expect("charges");
     assert_eq!(dine_in.len(), 1);
     assert_eq!(dine_in[0].kind, ChargeKind::Service);
 
-    let parcel = billing.charges_for(OrderType::Parcel, &book).expect("charges");
+    let parcel = billing
+        .charges_for(OrderType::Parcel, &book)
+        .expect("charges");
     assert_eq!(parcel.len(), 1);
     assert_eq!(parcel[0].kind, ChargeKind::Packing);
     // A parcel is not a table: no service charge on food nobody served.
     assert!(!parcel.iter().any(|c| c.kind == ChargeKind::Service));
 
-    let delivery = billing.charges_for(OrderType::Delivery, &book).expect("charges");
+    let delivery = billing
+        .charges_for(OrderType::Delivery, &book)
+        .expect("charges");
     assert_eq!(delivery.len(), 1);
     assert_eq!(delivery[0].kind, ChargeKind::Delivery);
 
@@ -332,7 +360,14 @@ fn the_typefaces_are_six_plain_family_names() {
     let offered: Vec<&str> = FONTS.iter().map(|c| c.value).collect();
     assert_eq!(
         offered,
-        ["monospace", "sans_serif", "serif", "arial", "courier", "times"]
+        [
+            "monospace",
+            "sans_serif",
+            "serif",
+            "arial",
+            "courier",
+            "times"
+        ]
     );
     let families: Vec<&str> = mb_print::font::FAMILIES.iter().map(|f| f.key).collect();
     assert_eq!(offered, families);

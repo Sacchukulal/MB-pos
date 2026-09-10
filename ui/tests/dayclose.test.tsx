@@ -84,8 +84,6 @@ const days: DaysView = {
   mayAct: true,
   closingSays: '',
   dayRunsSays: 'The day is the calendar date: a bill after midnight belongs to the new day.',
-  startsAt: '00:00',
-  maySetDay: true,
   carrySays: '',
   days: [
     {

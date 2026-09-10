@@ -57,7 +57,7 @@ impl Group {
             Group::Printers => "Printers",
             Group::Numbering => "Bill and token numbers",
             Group::Billing => "Billing",
-            Group::Day => "The day",
+            Group::Day => "Closing the day",
             Group::Stock => "Stock",
             Group::Backup => "Backup",
             Group::Appearance => "How it looks",
@@ -89,11 +89,12 @@ impl Group {
         Group::ALL.iter().copied().find(|g| g.code() == code)
     }
 
-    /// Whether the Settings screen lists this group. Backup lives on the Account screen; its
-    /// one setting is stored and searched like any other.
+    /// Whether the Settings screen lists this group. Backup is set on the Account screen and
+    /// the stock count rule on the Stock screen's Count tab; both are stored and searched
+    /// like any other setting.
     #[must_use]
     pub const fn on_settings_screen(self) -> bool {
-        !matches!(self, Group::Backup)
+        !matches!(self, Group::Backup | Group::Stock)
     }
 }
 
@@ -355,6 +356,26 @@ const REGISTRATIONS: &[Choice] = &[
     Choice {
         value: "regular",
         label: "Regular GST",
+    },
+];
+
+/// When a backup is taken by itself.
+pub(crate) const BACKUP_SCHEDULES: &[Choice] = &[
+    Choice {
+        value: "off",
+        label: "Only when I press Back up now",
+    },
+    Choice {
+        value: "hourly",
+        label: "Every hour",
+    },
+    Choice {
+        value: "daily",
+        label: "Every day at",
+    },
+    Choice {
+        value: "day_close",
+        label: "When the day is closed",
     },
 ];
 
@@ -966,7 +987,14 @@ pub const CATALOG: &[Entry] = &[
         "Menu prices",
         "Whether the price you type for an item already has the tax inside it. A slab or \
          a single item can say otherwise.",
-        ["inclusive", "exclusive", "mrp", "price", "tax included", "added on top"],
+        [
+            "inclusive",
+            "exclusive",
+            "mrp",
+            "price",
+            "tax included",
+            "added on top"
+        ],
         PRICE_BASES,
         store.price_basis
     ),
@@ -1766,7 +1794,15 @@ pub const CATALOG: &[Entry] = &[
         label: "A new day starts at",
         help: "Midnight makes the day the calendar date. At 05:00 a bill printed at 1 a.m. \
                counts as yesterday's. Set once; it changes which day every bill lands in.",
-        synonyms: &["day", "business day", "5 am", "close", "midnight", "cutoff", "time"],
+        synonyms: &[
+            "day",
+            "business day",
+            "5 am",
+            "close",
+            "midnight",
+            "cutoff",
+            "time",
+        ],
         kind: Kind::Time,
         read: |c| Value::Int(i64::from(c.day.starts_at_minutes)),
         write: |c, v| {
@@ -1826,16 +1862,62 @@ pub const CATALOG: &[Entry] = &[
         day.float_amount
     ),
     words!(
-        "backup.second_folder",
+        "backup.folder",
         Backup,
         Row,
-        "Second copy",
-        "A pen drive or a network share that gets a copy of every backup.",
-        ["backup", "second", "pen drive", "usb", "network"],
+        "Backups go to",
+        "Empty keeps them in the shop folder.",
+        ["backup", "folder", "where"],
         260,
         Folder,
-        backup.second_folder
+        backup.folder
     ),
+    words!(
+        "backup.copies",
+        Backup,
+        Row,
+        "Copies to",
+        "Folders that get a copy of every backup, one per line: a pen drive, Google Drive, \
+         OneDrive, a share.",
+        [
+            "backup",
+            "copy",
+            "pen drive",
+            "usb",
+            "network",
+            "google drive",
+            "onedrive"
+        ],
+        4000,
+        Free,
+        backup.copies
+    ),
+    pick_text!(
+        "backup.schedule",
+        Backup,
+        Row,
+        "Schedule",
+        "When a backup is taken without anybody pressing the button.",
+        ["backup", "schedule", "when", "daily", "hourly"],
+        BACKUP_SCHEDULES,
+        backup.schedule
+    ),
+    Entry {
+        key: "backup.daily_at_minutes",
+        group: Group::Backup,
+        storage: Storage::Row,
+        label: "Every day at",
+        help: "The daily backup's time. A counter that was off at that time takes it when it \
+               next opens.",
+        synonyms: &["backup", "time", "daily"],
+        kind: Kind::Time,
+        read: |c| Value::Int(i64::from(c.backup.daily_at_minutes)),
+        write: |c, v| {
+            c.backup.daily_at_minutes = u32::try_from(v.as_int()?)
+                .map_err(|_| Invalid::new("That is not a time of day."))?;
+            Ok(())
+        },
+    },
     flag!(
         "receipt.bill_barcode",
         Receipt,
@@ -2085,44 +2167,43 @@ pub fn short_for(entry: &Entry) -> &'static str {
     }
 }
 
-/// A shop that says it is registered has to be able to prove it on the bill.
-pub fn check_registration(config: &ShopConfig) -> Result<(), Invalid> {
-    let registration = config.store.registration();
-    if registration.needs_gstin() && config.store.gstin.trim().is_empty() {
-        return Err(Invalid::new(
-            "Type your GST number, or choose \"Not registered\" — a bill may not show GST \
-             without one.",
-        )
+/// What a GST number looks like: state code, PAN, entity number, Z, check character.
+const GSTIN_SHAPE: &str = "^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$";
+
+/// A GST number judged against its shape and the shop's state. Advice for the screen, never a
+/// refusal: what prints is the shop's own decision. `Ok` says it looks right.
+pub fn judge_gstin(gstin: &str, state: &str) -> Result<(), Invalid> {
+    let gstin = gstin.trim().to_ascii_uppercase();
+    let state = state.trim();
+    let shape = regex::Regex::new(GSTIN_SHAPE).ok();
+    if gstin.len() != 15 || !shape.is_some_and(|s| s.is_match(&gstin)) {
+        return Err(
+            Invalid::new("A GST number is 15 characters, like 29ABCDE1234F1Z5.")
+                .about("store.gstin"),
+        );
+    }
+    let code = &gstin[..2];
+    let named = STATES.iter().find(|c| c.value == code).map(|c| c.label);
+    let Some(named) = named else {
+        return Err(Invalid::new(format!("No state has the code {code}.")).about("store.gstin"));
+    };
+    if state.is_empty() {
+        return Err(
+            Invalid::new(format!("Choose your state: this number is {named}'s."))
+                .about("store.state_code"),
+        );
+    }
+    if code != state {
+        let chosen = STATES
+            .iter()
+            .find(|c| c.value == state)
+            .map_or("another state", |c| c.label);
+        return Err(Invalid::new(format!(
+            "This number is {named}'s, but the state chosen is {chosen}."
+        ))
         .about("store.gstin"));
     }
-    if registration.needs_gstin() && config.store.state_code.trim().is_empty() {
-        return Err(Invalid::new(
-            "Choose your state — it decides whether the bill says SGST or UTGST.",
-        )
-        .about("store.state_code"));
-    }
     Ok(())
-}
-
-/// The GSTIN's state code must be the shop's own state.
-pub fn check_gstin_against_state(config: &ShopConfig) -> Result<(), Invalid> {
-    let (gstin, state) = (&config.store.gstin, &config.store.state_code);
-    if gstin.is_empty() || state.is_empty() {
-        return Ok(());
-    }
-    if gstin.starts_with(state.as_str()) {
-        return Ok(());
-    }
-    let named = STATES
-        .iter()
-        .find(|c| c.value == &gstin[..gstin.len().min(2)])
-        .map_or("another state", |c| c.label);
-    Err(Invalid::new(format!(
-        "That GST number starts with {}, which is {named} — but you have chosen \
-         a different state. One of the two is wrong.",
-        &gstin[..gstin.len().min(2)]
-    ))
-    .about("store.gstin"))
 }
 
 /// Money crosses this file only as a type; the import is honest about it.

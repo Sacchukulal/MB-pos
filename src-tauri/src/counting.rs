@@ -83,6 +83,8 @@ pub struct StockCountView {
     pub may_approve: bool,
     /// The threshold above which the screen asks for a reason.
     pub reason_above: MoneyView,
+    /// Whether the person looking may change that threshold.
+    pub may_set_rule: bool,
     /// "Nobody has ever counted this store.".
     pub note: String,
 }
@@ -499,6 +501,7 @@ fn view_of(
             history,
             may_approve,
             reason_above: MoneyView::from(threshold),
+            may_set_rule: may_approve,
             note,
         };
     };
@@ -584,6 +587,7 @@ fn view_of(
         history,
         may_approve: may_approve && count.state == CountState::Draft,
         reason_above: MoneyView::from(threshold),
+        may_set_rule: may_approve,
         note,
     }
 }

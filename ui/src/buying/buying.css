@@ -17,6 +17,12 @@
   min-height: 0;
 }
 
+/* The count rule sits at the right end of the top row. */
+.mb-count__rule {
+  margin-left: auto;
+  align-items: flex-end;
+}
+
 .mb-buying__top {
   display: flex;
   flex-direction: row;

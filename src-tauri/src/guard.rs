@@ -114,7 +114,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("bill_detail", Access::Needs(Permission::ReportsView)),
     // Taking a paid bill back to the counter; a manager signs it off afterwards.
     ("revert_bill", Access::Needs(Permission::BillRevert)),
-    ("approve_revert", Access::Needs(Permission::BillRevertApprove)),
+    (
+        "approve_revert",
+        Access::Needs(Permission::BillRevertApprove),
+    ),
     // The reason list itself is not sensitive; being unable to read it would make every
     // correction dialog open empty.
     ("reasons", Access::Needs(Permission::BillCreate)),
@@ -129,7 +132,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("save_menu_item", Access::Needs(Permission::MenuManage)),
     ("set_item_available", Access::Needs(Permission::MenuManage)),
     ("delete_menu_item", Access::Needs(Permission::MenuManage)),
-    ("delete_menu_category", Access::Needs(Permission::MenuManage)),
+    (
+        "delete_menu_category",
+        Access::Needs(Permission::MenuManage),
+    ),
     ("save_menu_category", Access::Needs(Permission::MenuManage)),
     ("change_menu_prices", Access::Needs(Permission::MenuManage)),
     ("plan_menu_import", Access::Needs(Permission::MenuManage)),
@@ -140,6 +146,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // wrong is a notice rather than a bad price.
     ("set_shop_tax_rate", Access::Needs(Permission::SettingsTax)),
     ("tax_page", Access::Needs(Permission::MenuManage)),
+    ("judge_gstin_typed", Access::Needs(Permission::MenuManage)),
     ("set_items_tax", Access::Needs(Permission::SettingsTax)),
     ("set_category_tax", Access::Needs(Permission::SettingsTax)),
     // What an item is made of.
@@ -339,10 +346,11 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("verify_backup", Access::Needs(Permission::BackupRun)),
     ("request_restore", Access::Needs(Permission::BackupRun)),
     ("cancel_restore", Access::Needs(Permission::BackupRun)),
-    (
-        "set_second_backup_folder",
-        Access::Needs(Permission::BackupRun),
-    ),
+    ("set_backup_folder", Access::Needs(Permission::BackupRun)),
+    ("add_backup_copy", Access::Needs(Permission::BackupRun)),
+    ("remove_backup_copy", Access::Needs(Permission::BackupRun)),
+    ("set_backup_schedule", Access::Needs(Permission::BackupRun)),
+    ("save_backup_to", Access::Needs(Permission::BackupRun)),
     // The reports.
     ("report_list", Access::Needs(Permission::ReportsView)),
     ("report", Access::Needs(Permission::ReportsView)),
@@ -407,6 +415,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("write_diagnostics", Access::Needs(Permission::BackupRun)),
     // Looking for an update is reading.
     ("look_for_an_update", Access::Needs(Permission::ReportsView)),
+    ("check_for_update", Access::Needs(Permission::ReportsView)),
     (
         "go_back_a_version",
         Access::Needs(Permission::SettingsStore),
@@ -553,6 +562,8 @@ pub const SETTINGS_PERMISSIONS: &[Permission] = &[
     Permission::SettingsTax,
     Permission::SettingsPrinter,
     Permission::BackupRun,
+    // The stock count rule is saved through the same door, from the Stock screen.
+    Permission::StockAdjust,
 ];
 
 /// Refuse unless this person has at least one of these — see `Access::NeedsAny`.

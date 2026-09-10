@@ -263,7 +263,29 @@ unsafe extern "system" {
     pub fn SetCommState(file: Handle, dcb: *const Dcb) -> Bool;
 
     pub fn SetCommTimeouts(file: Handle, timeouts: *const CommTimeouts) -> Bool;
+
+    /// One bit per drive letter, A at bit 0.
+    pub fn GetLogicalDrives() -> Dword;
+
+    /// `DRIVE_REMOVABLE` and friends for a root like `E:\`.
+    pub fn GetDriveTypeW(root: *const u16) -> Dword;
+
+    pub fn GetVolumeInformationW(
+        root: *const u16,
+        volume_name: *mut u16,
+        volume_name_size: Dword,
+        serial: *mut Dword,
+        max_component: *mut Dword,
+        flags: *mut Dword,
+        file_system: *mut u16,
+        file_system_size: Dword,
+    ) -> Bool;
 }
+
+/// `GetDriveTypeW` answers.
+pub const DRIVE_REMOVABLE: Dword = 2;
+pub const DRIVE_FIXED: Dword = 3;
+pub const DRIVE_REMOTE: Dword = 4;
 
 /// A NUL-terminated UTF-16 copy of `s`, which is what every `…W` function wants.
 pub fn wide(s: &str) -> Option<Vec<u16>> {

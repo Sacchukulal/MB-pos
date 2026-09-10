@@ -9,6 +9,7 @@ import {
   EmptyState,
   Input,
   Modal,
+  MoneyInput,
   Select,
   Table,
   useToast,
@@ -28,6 +29,8 @@ export function Count() {
   const [sheet, setSheet] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [explaining, setExplaining] = useState<CountLineView | null>(null);
+  /** The rule as typed: how far out a line may be before it wants a reason. */
+  const [ruleAbove, setRuleAbove] = useState('');
   /** The same finding as Buying's: a screen that cannot load says so here. */
   const [refused, setRefused] = useState<string | null>(null);
   const toast = useToast();
@@ -43,6 +46,7 @@ export function Count() {
     call('stock_count', { id: null })
       .then((fresh) => {
         setView(fresh);
+        setRuleAbove(fresh.reasonAbove.text);
         setRefused(null);
       })
       .catch((cause) => {
@@ -61,6 +65,17 @@ export function Count() {
     );
   }
   if (!view) return <div className="mb-count" />;
+
+  /** The rule is a shop setting, saved through the one door every setting goes through. */
+  const saveRule = () => {
+    if (ruleAbove === '' || ruleAbove === view.reasonAbove.text) return;
+    call('save_settings', { edits: [{ key: 'stock.count_reason_above', value: ruleAbove }] })
+      .then(() => {
+        toast.show('ok', 'Saved.');
+        load();
+      })
+      .catch(report);
+  };
 
   const chosen = view.remaining.find((m) => m.materialId === material);
   /** Whether anything on this sheet may still be changed. */
@@ -166,6 +181,25 @@ export function Count() {
         )}
         {/* A sealed count says so, and the only thing offered is a NEW one. */}
         {view.id !== null && !open ? <Badge tone="neutral">{view.state}</Badge> : null}
+        {view.maySetRule ? (
+          <div className="mb-row mb-count__rule">
+            <MoneyInput
+              label="Ask why when a line is out by more than"
+              value={ruleAbove}
+              onChange={setRuleAbove}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveRule();
+              }}
+            />
+            <Button
+              variant="secondary"
+              disabled={ruleAbove === '' || ruleAbove === view.reasonAbove.text}
+              onClick={saveRule}
+            >
+              Save
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {view.id === null ? (

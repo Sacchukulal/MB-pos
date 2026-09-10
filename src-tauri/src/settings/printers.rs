@@ -44,11 +44,19 @@ pub struct KitchenRouting {
 
 impl KitchenRouting {
     const fn mode_word(self) -> &'static str {
-        if self.separate_printers { "other" } else { "same" }
+        if self.separate_printers {
+            "other"
+        } else {
+            "same"
+        }
     }
 
     const fn style_word(self) -> &'static str {
-        if self.per_category { "category" } else { "combined" }
+        if self.per_category {
+            "category"
+        } else {
+            "combined"
+        }
     }
 }
 
@@ -212,7 +220,12 @@ fn row_for_windows_printer(existing: &[Printer], windows_name: &str) -> Option<P
 }
 
 /// A fresh row for a Windows printer: named after it, on the paper the bill printer uses.
-fn windows_printer_edit(existing: &[Printer], windows_name: &str, role: &str, is_default: bool) -> PrinterEdit {
+fn windows_printer_edit(
+    existing: &[Printer],
+    windows_name: &str,
+    role: &str,
+    is_default: bool,
+) -> PrinterEdit {
     let paper = existing
         .iter()
         .find(|p| p.is_default)
@@ -272,7 +285,10 @@ pub fn choose_bill_printer_on(app: &App, windows_name: String) -> UiResult<Print
                 set_default_printer_on(app, row.id)
             }
         }
-        None => save_printer_on(app, windows_printer_edit(&existing, &windows_name, "both", true)),
+        None => save_printer_on(
+            app,
+            windows_printer_edit(&existing, &windows_name, "both", true),
+        ),
     }
 }
 
@@ -281,7 +297,10 @@ pub fn set_drawer_on(app: &App, on: bool) -> UiResult<PrintersView> {
     guard::require(app, Permission::SettingsPrinter)?;
     let target = crate::flows::default_printer(app)?.id;
     let Some(row) = all_printers(app)?.into_iter().find(|p| p.id == target) else {
-        return Err(UiError::new("printer.unknown", "That printer is not set up any more."));
+        return Err(UiError::new(
+            "printer.unknown",
+            "That printer is not set up any more.",
+        ));
     };
     save_printer_on(
         app,

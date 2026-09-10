@@ -15,14 +15,6 @@ closingSays: string,
  */
 dayRunsSays: string, 
 /**
- * When a new day starts, as the clock box shows it: "05:00".
- */
-startsAt: string, 
-/**
- * Whether the person looking may change when the day starts.
- */
-maySetDay: boolean, 
-/**
  * What closing today will leave in the drawer, in words — or empty.
  */
 carrySays: string, 

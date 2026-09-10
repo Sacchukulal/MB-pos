@@ -292,11 +292,11 @@ fn disk_row(app: &App) -> HealthRow {
             format!(
                 "Only {} free on the drive the shop's data is on. Magic Bill \
                  needs about 1 GB for a year of bills — delete something, or \
-                 move the shop's data to another drive in Settings.",
+                 move the shop's folder to another drive under Account.",
                 megabytes(free)
             ),
         )
-        .go("settings");
+        .go("account");
     }
     if free < A_YEAR {
         return HealthRow::warn(
@@ -328,11 +328,10 @@ fn log_row() -> HealthRow {
             format!(
                 "Today's log is already {} — something is repeating itself. \
                  Check the print queue and the phones, and press Copy \
-                 diagnostics in Settings so we can look.",
+                 diagnostics so we can look.",
                 megabytes(today)
             ),
-        )
-        .go("settings");
+        );
     }
     HealthRow::ok(
         "log",
@@ -354,13 +353,11 @@ fn crashes_row() -> HealthRow {
         "crashes",
         "Stability",
         format!(
-            "The counter stopped unexpectedly {}. Press Copy diagnostics in \
-             Settings and send it to us — the reports are already saved on this \
-             computer.",
+            "The counter stopped unexpectedly {}. Press Copy diagnostics and send it \
+             to us — the reports are already saved on this computer.",
             crate::words::count(i64::try_from(reports.len()).unwrap_or(0), "once", "times",),
         ),
     )
-    .go("settings")
 }
 
 /// The photographs.
@@ -413,7 +410,7 @@ fn photos_row(app: &App) -> HealthRow {
                 )
             ),
         )
-        .go("settings");
+        .go("account");
     }
     if total > crate::buying::PHOTO_FOLDER_WARN_BYTES {
         return HealthRow::warn(
@@ -483,7 +480,7 @@ mod tests {
                 "Log",
                 "Today's log is already 7 MB — something is repeating itself. \
                  Check the print queue and the phones, and press Copy \
-                 diagnostics in Settings so we can look.",
+                 diagnostics so we can look.",
             ),
         ];
         for row in &faults {

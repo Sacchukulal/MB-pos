@@ -269,7 +269,8 @@
 
   /* A fact's column on a page of facts, and the label column of a folder row. */
   --fact-column: 12rem;
-  --account-folder-label: 7rem;
+  --account-label: 8rem;
+  --account-side: 22rem;
 
   --qr-dot: 6px;
   /* The "whose phone" dropdown on a phone asking to join. */
@@ -555,3 +556,4 @@ textarea {
     --motion-normal: 0ms;
   }
 }
+

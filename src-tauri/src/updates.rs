@@ -373,8 +373,12 @@ pub fn health_row(state: &UpdateState) -> HealthRow {
             "Version",
             format!(
                 "Version {available} is {} — you are on {}. \
-                 Open Settings and press Install after closing.",
-                if state.downloaded { "downloaded and checked" } else { "ready to install" },
+                 Open Account and press Install after the last bill.",
+                if state.downloaded {
+                    "downloaded and checked"
+                } else {
+                    "ready to install"
+                },
                 state.running
             ),
         );
@@ -384,8 +388,8 @@ pub fn health_row(state: &UpdateState) -> HealthRow {
             "update",
             "Version",
             format!(
-                "You have been on version {} for {}. Check for an update in \
-                 Settings — a counter left on an old version misses fixes.",
+                "You have been on version {} for {}. Check for an update on \
+                 Account — a counter left on an old version misses fixes.",
                 state.running,
                 crate::words::count(i64::from(state.days_on_this_version), "day", "days"),
             ),
@@ -400,16 +404,27 @@ pub fn health_row(state: &UpdateState) -> HealthRow {
 
 // The bodies, and the seats.
 
-pub fn look_for_one_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> {
+/// What the counter already knows. No network, so a screen draws at once.
+pub fn known_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> {
+    crate::guard::require(app, mb_auth::Permission::ReportsView)?;
+    let mut state = app.updates();
+    state.previous =
+        Previous::load(&crate::config::AppConfig::directory()).map(|p| p.version.to_string());
+    Ok(state)
+}
+
+/// Ask the shelf now. Slow, so only ever off the thread that paints.
+pub fn check_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> {
     crate::guard::require(app, mb_auth::Permission::ReportsView)?;
     Ok(check_now(app))
 }
 
-/// The manifest the last licence check carried, judged against this build and this shop's
-/// place in the rollout. Called after every licence check, so Health is right without anybody
-/// opening Settings.
+/// The shelf read and judged against this build and this shop's place in the rollout. Runs
+/// after every licence check (start-up, then daily) and on the button. A version seen for the
+/// first time is told to the window, so the bell rings without the screen being open.
 pub fn check_now(app: &crate::state::App) -> UpdateState {
     let mut state = app.updates();
+    let before = state.available.clone();
     let dir = crate::config::AppConfig::directory();
     state.previous = Previous::load(&dir).map(|p| p.version.to_string());
 
@@ -433,6 +448,11 @@ pub fn check_now(app: &crate::state::App) -> UpdateState {
     }
 
     app.set_updates(state.clone());
+    if state.available != before {
+        app.push(crate::state::Pushed::Version {
+            available: state.available.clone(),
+        });
+    }
     state
 }
 
@@ -456,11 +476,17 @@ fn manifest_for(app: &crate::state::App) -> Option<Manifest> {
     let shop = app
         .with_licence(|l| l.snapshot().and_then(|s| s.licence.restaurant_id))
         .unwrap_or_default();
-    manifest.rollout.includes(&machine, &shop).then_some(manifest)
+    manifest
+        .rollout
+        .includes(&machine, &shop)
+        .then_some(manifest)
 }
 
 /// How far a download has got, 0 to 100; nought until the size is known.
-#[allow(clippy::integer_division, reason = "a percentage for a progress bar, not money")]
+#[allow(
+    clippy::integer_division,
+    reason = "a percentage for a progress bar, not money"
+)]
 fn percent_of(bytes: u64, total: u64) -> u32 {
     bytes
         .saturating_mul(100)
@@ -479,7 +505,10 @@ fn incoming(dir: &Path, manifest: &Manifest) -> PathBuf {
 
 /// Download, check, keep the way back, hand the installer to Windows. The counter closes so
 /// the installer can replace it; the shop's data is not touched.
-pub fn install_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) -> crate::words::UiResult<String> {
+pub fn install_on(
+    app: &crate::state::App,
+    handle: Option<&tauri::AppHandle>,
+) -> crate::words::UiResult<String> {
     use crate::words::UiError;
     crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
     let dir = crate::config::AppConfig::directory();
@@ -493,7 +522,10 @@ pub fn install_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) ->
     if manifest.version <= Version::running() {
         return Err(UiError::new(
             "update.none",
-            format!("You are already on version {} — there is nothing newer.", Version::running()),
+            format!(
+                "You are already on version {} — there is nothing newer.",
+                Version::running()
+            ),
         )
         .quietly());
     }
@@ -545,7 +577,9 @@ pub fn install_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) ->
         if let Some(parent) = kept.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if std::fs::rename(&current.installer, &kept).is_ok() || std::fs::copy(&current.installer, &kept).is_ok() {
+        if std::fs::rename(&current.installer, &kept).is_ok()
+            || std::fs::copy(&current.installer, &kept).is_ok()
+        {
             let _ = Previous {
                 version: current.version,
                 installer: kept,
@@ -582,8 +616,12 @@ pub fn install_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) ->
 /// program is started again from where it was installed — so from the counter's side, pressing
 /// the button ends with Magic Bill open on the new version. All of that is one `cmd` line,
 /// detached from this process, because this process is about to exit.
-fn run_installer(installer: &Path, handle: Option<&tauri::AppHandle>) -> crate::words::UiResult<()> {
-    let exe = std::env::current_exe().map_err(|e| crate::words::from_io("Finding the program", &e))?;
+fn run_installer(
+    installer: &Path,
+    handle: Option<&tauri::AppHandle>,
+) -> crate::words::UiResult<()> {
+    let exe =
+        std::env::current_exe().map_err(|e| crate::words::from_io("Finding the program", &e))?;
     cmd_line(&relaunch_line(installer, &exe))
         .spawn()
         .map_err(|e| crate::words::from_io("Starting the installer", &e))?;
@@ -667,7 +705,10 @@ impl Releases for GitHubReleases {
 }
 
 /// Go back to the version before this one — and run its installer.
-pub fn go_back_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) -> crate::words::UiResult<String> {
+pub fn go_back_on(
+    app: &crate::state::App,
+    handle: Option<&tauri::AppHandle>,
+) -> crate::words::UiResult<String> {
     crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
     let dir = crate::config::AppConfig::directory();
     let Some(previous) = Previous::load(&dir) else {
@@ -689,7 +730,15 @@ pub fn go_back_on(app: &crate::state::App, handle: Option<&tauri::AppHandle>) ->
 pub fn look_for_an_update(
     app: tauri::State<'_, crate::state::App>,
 ) -> crate::words::UiResult<UpdateState> {
-    look_for_one_on(&app)
+    known_on(&app)
+}
+
+/// `async`: the shelf is on the network, and Tauri runs an async command off the UI thread.
+#[tauri::command]
+pub async fn check_for_update(
+    app: tauri::State<'_, crate::state::App>,
+) -> crate::words::UiResult<UpdateState> {
+    check_on(&app)
 }
 
 #[tauri::command]
@@ -752,7 +801,10 @@ mod tests {
     /// The release shelf publishes "1.2.0", and that is what crosses.
     #[test]
     fn a_version_is_a_string_on_the_wire() {
-        assert_eq!(serde_json::to_string(&Version::new(1, 2, 0)).expect("json"), "\"1.2.0\"");
+        assert_eq!(
+            serde_json::to_string(&Version::new(1, 2, 0)).expect("json"),
+            "\"1.2.0\""
+        );
         let back: Version = serde_json::from_str("\"1.10.3\"").expect("parses");
         assert_eq!(back, Version::new(1, 10, 3));
         assert!(serde_json::from_str::<Version>("\"latest\"").is_err());
@@ -941,8 +993,14 @@ mod github_tests {
             Path::new(r"C:\data\updates\incoming\MagicBill-0.4.0.exe"),
             Path::new(r"C:\Program Files\Magic Bill\magic-bill.exe"),
         );
-        assert!(line.contains(r#"/wait "C:\data\updates\incoming\MagicBill-0.4.0.exe" /S"#), "{line}");
-        assert!(line.ends_with(r#"start "" "C:\Program Files\Magic Bill\magic-bill.exe""#), "{line}");
+        assert!(
+            line.contains(r#"/wait "C:\data\updates\incoming\MagicBill-0.4.0.exe" /S"#),
+            "{line}"
+        );
+        assert!(
+            line.ends_with(r#"start "" "C:\Program Files\Magic Bill\magic-bill.exe""#),
+            "{line}"
+        );
         // The wait comes first: the installer must not start while this process still holds the exe.
         assert!(line.starts_with("ping"), "{line}");
     }
@@ -981,7 +1039,10 @@ mod github_tests {
     #[test]
     fn the_shelf_is_the_latest_release_and_never_the_api() {
         let url = GitHubReleases::asset_url("manifest.json");
-        assert_eq!(url, "https://github.com/Sacchukulal/MB-pos/releases/latest/download/manifest.json");
+        assert_eq!(
+            url,
+            "https://github.com/Sacchukulal/MB-pos/releases/latest/download/manifest.json"
+        );
         assert!(!url.contains("api.github.com"));
     }
 
@@ -1001,6 +1062,9 @@ mod github_tests {
             dir,
             fallback: Box::new(Shelf),
         };
-        assert_eq!(releases.latest(), Ok(("shelf".to_owned(), "sig".to_owned())));
+        assert_eq!(
+            releases.latest(),
+            Ok(("shelf".to_owned(), "sig".to_owned()))
+        );
     }
 }

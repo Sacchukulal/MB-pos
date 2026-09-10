@@ -65,8 +65,7 @@ pub enum Shape {
     Free,
     /// Ten digits. India, no country code — the bill has 32 columns.
     Phone,
-    /// Fifteen characters, and the state code has to match the shop's own state, which is the
-    /// check nobody does and everybody needs.
+    /// Stored as typed. Its shape and state are judged for the Tax page's mark, not here.
     Gstin,
     /// Fourteen digits.
     Fssai,

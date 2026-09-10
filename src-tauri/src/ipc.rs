@@ -55,11 +55,14 @@ pub struct AppStatus {
     pub licence_tone: String,
     /// Orders go to a Kitchen screen, so the shell shows one.
     pub kitchen_screen: bool,
+    /// The version waiting to be installed, if the last shelf read found one.
+    pub update: Option<String>,
 }
 
 #[tauri::command]
 pub fn app_status(app: tauri::State<'_, App>) -> AppStatus {
     AppStatus {
+        update: app.updates().available,
         has_shop: app.has_shop(),
         shop_path: app
             .with_shop(|shop| Ok(shop.path.display().to_string()))
@@ -473,6 +476,7 @@ macro_rules! commands {
             // Settings › Tax — the one screen for tax.
             $crate::tax::set_shop_tax_rate,
             $crate::tax::tax_page,
+            $crate::tax::judge_gstin_typed,
             $crate::tax::set_items_tax,
             $crate::tax::set_category_tax,
             $crate::menu::item_composition,
@@ -619,7 +623,11 @@ macro_rules! commands {
             $crate::settings::backup::verify_backup,
             $crate::settings::backup::request_restore,
             $crate::settings::backup::cancel_restore,
-            $crate::settings::backup::set_second_backup_folder,
+            $crate::settings::backup::set_backup_folder,
+            $crate::settings::backup::add_backup_copy,
+            $crate::settings::backup::remove_backup_copy,
+            $crate::settings::backup::set_backup_schedule,
+            $crate::settings::backup::save_backup_to,
             $crate::settings::numbering::numbering,
             $crate::settings::numbering::save_counter,
             // Thirteen reports behind three commands, for the same reason the settings screen
@@ -665,6 +673,7 @@ macro_rules! commands {
             $crate::diagnostics::write_diagnostics,
             // The update, and the way back.
             $crate::updates::look_for_an_update,
+            $crate::updates::check_for_update,
             $crate::updates::go_back_a_version,
             $crate::updates::install_update,
             // The cloud copy, and what comes back down it.

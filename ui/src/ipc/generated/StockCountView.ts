@@ -34,6 +34,10 @@ history: Array<CountSummaryView>, mayApprove: boolean,
  */
 reasonAbove: MoneyView, 
 /**
+ * Whether the person looking may change that threshold.
+ */
+maySetRule: boolean, 
+/**
  * "Nobody has ever counted this store.".
  */
 note: string, };

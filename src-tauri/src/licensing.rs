@@ -748,8 +748,11 @@ pub fn account(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
     account_on(&app)
 }
 
+// The seats that reach the cloud are `async`: Tauri runs those off the thread that paints, so
+// a slow line never freezes the window.
+
 #[tauri::command]
-pub fn licence_shops(
+pub async fn licence_shops(
     app: tauri::State<'_, App>,
     email: String,
     password: String,
@@ -758,7 +761,7 @@ pub fn licence_shops(
 }
 
 #[tauri::command]
-pub fn change_licence(
+pub async fn change_licence(
     app: tauri::State<'_, App>,
     door: LicenceDoor,
     move_here: bool,
@@ -768,12 +771,12 @@ pub fn change_licence(
 }
 
 #[tauri::command]
-pub fn sign_out_licence(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
+pub async fn sign_out_licence(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
     sign_out_on(&app)
 }
 
 #[tauri::command]
-pub fn bring_licence_here(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
+pub async fn bring_licence_here(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
     bring_here_on(&app)
 }
 
@@ -783,6 +786,6 @@ pub fn use_emergency_code(app: tauri::State<'_, App>, code: String) -> UiResult<
 }
 
 #[tauri::command]
-pub fn refresh_licence(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
+pub async fn refresh_licence(app: tauri::State<'_, App>) -> UiResult<LicenceView> {
     refresh_on(&app)
 }

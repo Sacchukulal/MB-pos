@@ -8,8 +8,8 @@ import {
   Card,
   Checkbox,
   Choice,
+  Icon,
   Input,
-  Notice,
   plural,
   SectionHeader,
   Select,
@@ -20,6 +20,7 @@ import {
   type Column,
 } from '../kit';
 import { call, inApp, isUiError } from '../ipc/call';
+import type { GstinCheckView } from '../ipc/generated/GstinCheckView';
 import type { TaxItemView } from '../ipc/generated/TaxItemView';
 import type { TaxPageView } from '../ipc/generated/TaxPageView';
 
@@ -40,6 +41,23 @@ const BASES = [
   { value: 'exclusive', label: 'Added on top' },
   { value: 'inclusive', label: 'Inside the price' },
 ];
+
+/** How long after the last keystroke the GST number is judged. */
+const JUDGE_AFTER_MS = 250;
+
+/** The tick or the cross under the GST number box. Advice: the shop may save either way. */
+function GstinMark({ mark }: { mark: GstinCheckView | null }) {
+  if (!mark) return null;
+  return (
+    <span
+      className={mark.fine ? 'mb-tax__mark mb-tax__mark--fine' : 'mb-tax__mark mb-tax__mark--off'}
+      role="status"
+    >
+      <Icon name={mark.fine ? 'check' : 'x'} size="sm" />
+      {mark.says}
+    </span>
+  );
+}
 
 /** The word in the "Set by" column. */
 const FROM_WORDS: Record<string, string> = {
@@ -98,6 +116,26 @@ export function Tax() {
   useEffect(() => {
     load();
   }, [load]);
+
+  /**
+   * The mark beside the GST number: Rust judges what is typed, a moment after the typing
+   * stops. The saved page carries the mark for what is saved; the live one replaces it.
+   */
+  const [mark, setMark] = useState<GstinCheckView | null | undefined>(undefined);
+  useEffect(() => {
+    if (!page || !shop) return undefined;
+    if (shop.gstin === page.gstin && shop.stateCode === page.stateCode) {
+      setMark(undefined);
+      return undefined;
+    }
+    if (!inApp()) return undefined;
+    const timer = window.setTimeout(() => {
+      call('judge_gstin_typed', { gstin: shop.gstin, stateCode: shop.stateCode })
+        .then(setMark)
+        .catch(() => setMark(undefined));
+    }, JUDGE_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [page, shop]);
 
   const slabOptions = useMemo(
     () => (page?.slabs ?? []).map((s) => ({ value: s.id, label: s.name })),
@@ -241,8 +279,6 @@ export function Tax() {
 
   return (
     <div className="mb-tax">
-      {page.registrationNote ? <Notice tone="warn">{page.registrationNote}</Notice> : null}
-
       <Card>
         <SectionHeader title="GST" />
         <Choice
@@ -253,12 +289,15 @@ export function Tax() {
         />
         {registered ? (
           <div className="mb-tax__fields">
-            <Input
-              label="GST number"
-              value={shop.gstin}
-              maxLength={32}
-              onChange={(event) => setShop({ ...shop, gstin: event.target.value })}
-            />
+            <div className="mb-tax__gstin">
+              <Input
+                label="GST number"
+                value={shop.gstin}
+                maxLength={32}
+                onChange={(event) => setShop({ ...shop, gstin: event.target.value })}
+              />
+              <GstinMark mark={mark === undefined ? page.gstinCheck : mark} />
+            </div>
             <Select
               label="State"
               value={shop.stateCode}

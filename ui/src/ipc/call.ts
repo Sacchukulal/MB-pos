@@ -28,6 +28,7 @@ import type { MenuRowView } from './generated/MenuRowView';
 import type { MenuEdit } from './generated/MenuEdit';
 import type { CategoryView } from './generated/CategoryView';
 import type { TaxPageView } from './generated/TaxPageView';
+import type { GstinCheckView } from './generated/GstinCheckView';
 import type { ImportPlanView } from './generated/ImportPlanView';
 import type { ItemComposition } from './generated/ItemComposition';
 import type { ModifierGroupView } from './generated/ModifierGroupView';
@@ -279,6 +280,11 @@ export interface Commands {
   // Settings › Tax — the one screen for tax. The shop rate is typed as a percentage; a
   // category or a ticked item picks a slab by id, or "follow" to go back up the ladder.
   tax_page: { args: void; returns: TaxPageView };
+  /** The mark beside the GST number box, as it is typed. Null for an empty box. */
+  judge_gstin_typed: {
+    args: { gstin: string; stateCode: string };
+    returns: GstinCheckView | null;
+  };
   set_shop_tax_rate: { args: { percent: string }; returns: TaxPageView };
   set_items_tax: {
     args: { itemIds: string[]; slabId: string | null; basis: string | null };
@@ -621,7 +627,13 @@ export interface Commands {
   verify_backup: { args: { path: string }; returns: VerifyView };
   request_restore: { args: { path: string }; returns: BackupView };
   cancel_restore: { args: void; returns: BackupView };
-  set_second_backup_folder: { args: { folder: string | null }; returns: BackupView };
+  /** Where backups are kept; null is the shop folder's own `backups`. */
+  set_backup_folder: { args: { folder: string | null }; returns: BackupView };
+  add_backup_copy: { args: { folder: string }; returns: BackupView };
+  remove_backup_copy: { args: { folder: string }; returns: BackupView };
+  set_backup_schedule: { args: { schedule: string; dailyAt: string }; returns: BackupView };
+  /** A fresh backup, saved into a folder picked just now. */
+  save_backup_to: { args: { folder: string }; returns: BackupView };
 
   // The whole configuration, out and in — a dealer sets up the second shop by copying one file.
 
@@ -694,7 +706,10 @@ export interface Commands {
   kitchen_recall: { args: { id: string }; returns: KitchenView };
   kitchen_acknowledge: { args: { id: string }; returns: KitchenView };
   kitchen_fire: { args: { orderId: string; course: string }; returns: KitchenView };
+  /** What is already known: no network. */
   look_for_an_update: { args: void; returns: UpdateState };
+  /** Ask the shelf now. */
+  check_for_update: { args: void; returns: UpdateState };
   go_back_a_version: { args: void; returns: string };
   install_update: { args: void; returns: string };
   // The cloud copy, and what comes back down it.

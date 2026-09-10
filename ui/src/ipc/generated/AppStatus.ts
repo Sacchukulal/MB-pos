@@ -21,4 +21,8 @@ licenceTone: string,
 /**
  * Orders go to a Kitchen screen, so the shell shows one.
  */
-kitchenScreen: boolean, };
+kitchenScreen: boolean, 
+/**
+ * The version waiting to be installed, if the last shelf read found one.
+ */
+update: string | null, };

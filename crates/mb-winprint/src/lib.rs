@@ -6,11 +6,47 @@ use std::fmt;
 use std::io::Write;
 
 #[cfg(windows)]
+mod drives;
+#[cfg(windows)]
 pub mod serial;
 #[cfg(windows)]
 mod spooler;
 #[cfg(windows)]
 mod sys;
+
+/// What a drive letter is, as far as a backup cares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriveKind {
+    /// A pen drive or a card.
+    Removable,
+    /// A disk inside the machine.
+    Fixed,
+    /// A share on another computer.
+    Network,
+}
+
+/// One drive letter Windows has mounted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriveInfo {
+    /// `E:\`.
+    pub root: String,
+    /// The volume's label, empty when it has none.
+    pub label: String,
+    pub kind: DriveKind,
+}
+
+/// Every mounted drive that is removable, fixed or on the network. Empty off Windows.
+#[must_use]
+pub fn drives() -> Vec<DriveInfo> {
+    #[cfg(windows)]
+    {
+        drives::list()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
 
 /// What the operating system refused to do, in words a shopkeeper can act on.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

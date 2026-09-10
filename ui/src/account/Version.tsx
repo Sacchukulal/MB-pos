@@ -5,25 +5,21 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   ConfirmDialog,
-  Fact,
-  Facts,
   Icon,
   Modal,
   Notice,
   Panel,
-  Row,
   Spinner,
   plural,
   useToast,
 } from '../kit';
-import { call, inApp, isUiError, subscribe } from '../ipc/call';
+import { call, isUiError, subscribe } from '../ipc/call';
 import type { Pushed } from '../ipc/generated/Pushed';
 import type { UpdateState } from '../ipc/generated/UpdateState';
+import { Line, Lines } from './Lines';
 
-/** The one dialog every step of an update happens in. */
+/** The one dialog an update happens in, once one is found. */
 type Dialog =
-  | { kind: 'checking' }
-  | { kind: 'newest' }
   | { kind: 'found'; version: string; notes: string; downloaded: boolean }
   | { kind: 'busy'; version: string; stage: string; percent: number; bytes: number; total: number }
   | { kind: 'closing'; says: string }
@@ -37,6 +33,7 @@ function megabytes(bytes: number): string {
 export function Version() {
   const [view, setView] = useState<UpdateState | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [checking, setChecking] = useState(false);
   const [confirmingBack, setConfirmingBack] = useState(false);
   const toast = useToast();
 
@@ -47,16 +44,19 @@ export function Version() {
     [toast],
   );
 
+  // What is already known: no network, so the panel draws at once.
   useEffect(() => {
-    if (!inApp()) return;
     call('look_for_an_update').then(setView).catch(complain);
   }, [complain]);
 
-  // Rust says how far the download has got; the dialog draws it.
+  // Rust says how far the download has got; the dialog draws it. A shelf read elsewhere
+  // (the daily licence check) lands here too.
   useEffect(() => {
-    if (!inApp()) return undefined;
     let stop: (() => void) | undefined;
     subscribe((message: Pushed) => {
+      if (message.kind === 'version') {
+        call('look_for_an_update').then(setView).catch(complain);
+      }
       if (message.kind !== 'update') return;
       setDialog({
         kind: 'busy',
@@ -72,7 +72,7 @@ export function Version() {
       })
       .catch(() => undefined);
     return () => stop?.();
-  }, []);
+  }, [complain]);
 
   if (!view) {
     return (
@@ -82,28 +82,33 @@ export function Version() {
     );
   }
 
+  const found = (fresh: UpdateState): Dialog | null =>
+    fresh.available
+      ? {
+          kind: 'found',
+          version: fresh.available,
+          notes: fresh.notes,
+          downloaded: fresh.downloaded,
+        }
+      : null;
+
+  /** Ask the shelf. The button carries the spinner; the page stays alive. */
   const check = () => {
-    setDialog({ kind: 'checking' });
-    call('look_for_an_update')
+    setChecking(true);
+    call('check_for_update')
       .then((fresh) => {
         setView(fresh);
-        setDialog(
-          fresh.available
-            ? {
-                kind: 'found',
-                version: fresh.available,
-                notes: fresh.notes,
-                downloaded: fresh.downloaded,
-              }
-            : { kind: 'newest' },
-        );
+        const dialogFound = found(fresh);
+        if (dialogFound) setDialog(dialogFound);
+        else toast.show('ok', `This is the newest version, ${fresh.running}.`);
       })
       .catch((cause: unknown) => {
-        setDialog({
-          kind: 'failed',
-          says: isUiError(cause) ? cause.message : 'Magic Bill could not check for updates.',
-        });
-      });
+        toast.show(
+          'danger',
+          isUiError(cause) ? cause.message : 'Magic Bill could not reach the update shelf.',
+        );
+      })
+      .finally(() => setChecking(false));
   };
 
   const install = (version: string) => {
@@ -145,28 +150,24 @@ export function Version() {
         view.available ? (
           <Button
             variant="primary"
-            onClick={() =>
-              setDialog({
-                kind: 'found',
-                version: view.available ?? '',
-                notes: view.notes,
-                downloaded: view.downloaded,
-              })
-            }
+            onClick={() => {
+              const dialogFound = found(view);
+              if (dialogFound) setDialog(dialogFound);
+            }}
           >
             <Icon name="download" size="sm" />
             Install {view.available}
           </Button>
         ) : (
-          <Button variant="secondary" onClick={check}>
-            <Icon name="refresh" size="sm" />
+          <Button variant="secondary" disabled={checking} onClick={check}>
+            {checking ? <Spinner label="Checking" /> : <Icon name="refresh" size="sm" />}
             Check for updates
           </Button>
         )
       }
     >
       {view.available ? (
-        <Notice tone="info" icon="download">
+        <Notice tone="accent" icon="download">
           Version {view.available} is ready to install.
           {view.notes ? ` ${view.notes}` : ''}
         </Notice>
@@ -175,28 +176,24 @@ export function Version() {
         <Notice tone="warn">This is a development build. It is not updated.</Notice>
       ) : null}
 
-      <Facts>
-        <Fact label="Running" code>
-          {view.running}
-        </Fact>
-        <Fact label="Installed">
+      <div className="mb-account__version">
+        <span className="mb-account__number">{view.running}</span>
+        <span className="mb-muted">
           {view.daysOnThisVersion === 0
-            ? 'today'
-            : `${plural(view.daysOnThisVersion, 'day')} ago`}
-        </Fact>
-        {view.previous ? (
-          <Fact label="Before this" code>
-            {view.previous}
-          </Fact>
-        ) : null}
-      </Facts>
+            ? 'Installed today'
+            : `Installed ${plural(view.daysOnThisVersion, 'day')} ago`}
+        </span>
+      </div>
 
       {view.previous ? (
-        <Row end>
-          <Button variant="quiet" onClick={() => setConfirmingBack(true)}>
-            Go back to {view.previous}
-          </Button>
-        </Row>
+        <Lines>
+          <Line label="Before this">
+            <span className="mb-code">{view.previous}</span>
+            <Button size="sm" variant="quiet" onClick={() => setConfirmingBack(true)}>
+              Go back
+            </Button>
+          </Line>
+        </Lines>
       ) : null}
 
       <ConfirmDialog
@@ -224,7 +221,7 @@ const STAGE_WORDS: Record<string, string> = {
   installing: 'Installing',
 };
 
-/** Every step of an update in one place: checking, what was found, the download, the hand-over. */
+/** Every step of an update in one place: what was found, the download, the hand-over. */
 function UpdateDialog({
   dialog,
   onInstall,
@@ -239,34 +236,6 @@ function UpdateDialog({
   const stay = () => {
     if (closable) onClose();
   };
-
-  if (dialog.kind === 'checking') {
-    return (
-      <Modal open title="Checking for updates" onClose={stay}>
-        <div className="mb-account__wait">
-          <Spinner label="Checking" />
-          <span>Asking magicbill.in for the newest version.</span>
-        </div>
-      </Modal>
-    );
-  }
-
-  if (dialog.kind === 'newest') {
-    return (
-      <Modal
-        open
-        title="Up to date"
-        onClose={stay}
-        actions={
-          <Button variant="primary" onClick={onClose}>
-            OK
-          </Button>
-        }
-      >
-        <p>This is the newest version of Magic Bill.</p>
-      </Modal>
-    );
-  }
 
   if (dialog.kind === 'found') {
     return (

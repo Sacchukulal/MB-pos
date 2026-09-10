@@ -1,4 +1,4 @@
-/* The Account page: three panels down the page, each a run of facts and a row of buttons. */
+/* The Account page: the licence across the top, then backup beside the version. */
 
 .mb-account {
   /* The page margin is the SHELL's. */
@@ -16,62 +16,154 @@
   gap: var(--gap-group);
 }
 
-.mb-account__label {
-  font-size: var(--type-caption);
-  font-weight: var(--type-label-weight);
-  color: var(--text-muted);
+/* Each panel settles into place as it arrives. */
+.mb-account .mb-panel {
+  animation: mb-account-in var(--motion-normal) var(--ease) both;
 }
 
-/* The key and its Copy button on one line. */
+@keyframes mb-account-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-1));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Backup takes the room; the version stands beside it. */
+.mb-account__two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--account-side);
+  gap: var(--gap-group);
+  align-items: start;
+}
+
+@media (max-width: 1100px) { /* mb-tokens-allow: media queries cannot use var() */
+  .mb-account__two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The licence facts: four to a row, every row the same four columns. */
+.mb-account__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--gap-field) var(--gap-group);
+  margin: 0;
+}
+
+/* The key and its copy button on one line. */
 .mb-account__key {
   display: inline-flex;
   align-items: center;
   gap: var(--gap-inline);
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.mb-account__included {
+/* Label beside value, every label the same width, every value starting on the same line. */
+.mb-account__lines {
+  display: grid;
+  grid-template-columns: var(--account-label) minmax(0, 1fr);
+  gap: var(--gap-field) var(--gap-group);
+  align-items: center;
+  margin: 0;
+}
+
+.mb-account__lines > div {
+  display: contents;
+}
+
+.mb-account__lines dt {
+  font-size: var(--type-caption);
+  font-weight: var(--type-label-weight);
+  color: var(--text-muted);
+  align-self: center;
+}
+
+.mb-account__lines dd {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--gap-inline);
+  gap: var(--gap-inline) var(--gap-field);
+  margin: 0;
+  min-width: 0;
+  font-size: var(--type-body);
+  color: var(--text);
 }
 
-/* The cloud copy: its state as a chip, then the sentence. */
-.mb-account__cloud,
-.mb-account__last {
+/* A folder path: one line, the end of it kept, the whole of it on hover. */
+.mb-account__path {
+  font-family: var(--font-mono);
+  font-size: var(--type-cell);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* The last backup and the schedule, on one line. */
+.mb-account__status {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--gap-inline) var(--gap-field);
   font-size: var(--type-body);
-  color: var(--text);
 }
 
-/* The folders: label, path, buttons, one line each. */
-.mb-account__folders {
+.mb-account__status .mb-muted {
+  font-size: var(--type-cell);
+}
+
+/* The folders that get a copy: kind, path, when, and the way off the list. */
+.mb-account__copies {
   display: flex;
   flex-direction: column;
-  gap: var(--gap-field);
+  gap: var(--space-1);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.mb-account__folder {
+.mb-account__copy {
   display: grid;
-  grid-template-columns: var(--account-folder-label) minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--gap-field);
+  min-height: var(--control-sm);
 }
 
-.mb-account__path {
-  font-family: var(--font-mono);
-  font-size: var(--type-cell);
-  color: var(--text);
-  overflow-wrap: anywhere;
-}
-
-.mb-account__folderactions {
-  display: flex;
+.mb-account__copykind {
+  display: inline-flex;
+  align-items: center;
   gap: var(--gap-inline);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.mb-account__copywhen {
+  font-size: var(--type-cell);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* The version this counter runs, big, and how long it has been on it. */
+.mb-account__version {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-field);
+  flex-wrap: wrap;
+}
+
+.mb-account__number {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
 }
 
 /* Colour AND a word, never colour alone. */
@@ -120,4 +212,10 @@
   display: flex;
   justify-content: space-between;
   font-weight: var(--weight-medium);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mb-account .mb-panel {
+    animation: none;
+  }
 }

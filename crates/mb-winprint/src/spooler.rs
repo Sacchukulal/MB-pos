@@ -356,7 +356,8 @@ pub fn trouble(printer: &str) -> Result<Option<String>, WinPrintError> {
     let level = 2;
     let mut needed: Dword = 0;
     // SAFETY: the documented sizing call — a null buffer with a zero size.
-    let _ = unsafe { sys::GetPrinterW(printer_handle.0, level, ptr::null_mut(), 0, &raw mut needed) };
+    let _ =
+        unsafe { sys::GetPrinterW(printer_handle.0, level, ptr::null_mut(), 0, &raw mut needed) };
     if needed == 0 {
         return Err(last_error("GetPrinter (sizing)"));
     }

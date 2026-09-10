@@ -143,6 +143,7 @@ const countView: StockCountView = {
   history: [],
   mayApprove: true,
   reasonAbove: money(50_000, '500.00'),
+  maySetRule: true,
   note: 'Nobody has counted this store yet, so every stock figure is what the software worked out from your recipes and not what is on the shelf.',
 } as StockCountView;
 

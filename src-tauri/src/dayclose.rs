@@ -113,10 +113,6 @@ pub struct DaysView {
     pub closing_says: String,
     /// The shop's day rule as a sentence: "A new day starts at 5:00 am…".
     pub day_runs_says: String,
-    /// When a new day starts, as the clock box shows it: "05:00".
-    pub starts_at: String,
-    /// Whether the person looking may change when the day starts.
-    pub may_set_day: bool,
     /// What closing today will leave in the drawer, in words — or empty.
     pub carry_says: String,
     /// Today and up to thirteen days before it, newest first — never a day before the shop
@@ -386,23 +382,12 @@ fn day_runs_words(starts_at_minutes: u32) -> String {
     format!("A new day starts at {at}: a bill before {at} belongs to the day before.")
 }
 
-/// "05:00" — the day start as the clock box shows it.
-fn starts_at_words(starts_at_minutes: u32) -> String {
-    format!(
-        "{:02}:{:02}",
-        starts_at_minutes.saturating_div(60) % 24,
-        starts_at_minutes % 60
-    )
-}
-
 /// The Day open/close screen.
 pub fn days_on(app: &App) -> UiResult<DaysView> {
     let who = guard::require_any(app, &[Permission::ReportsView, Permission::DayClose])?;
     let closes_days = app.closes_days();
     // A shop that does not close its days has nothing here to press, whoever is looking.
     let may_act = closes_days && who.must(Permission::DayClose).is_ok();
-    // The same authority that saves it under Settings › The day.
-    let may_set_day = who.must(Permission::SettingsTax).is_ok();
     let today = today(now());
     let config = app.shop_config();
     let window = BusinessDay::from_days_since_epoch(
@@ -455,12 +440,10 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                     closing_says: if closes_days {
                         String::new()
                     } else {
-                        "This shop does not close its days. Turn it on under Settings › The day."
+                        "This shop does not close its days. Turn it on under Settings › Closing the day."
                             .to_owned()
                     },
                     day_runs_says: day_runs_words(config.day.starts_at_minutes),
-                    starts_at: starts_at_words(config.day.starts_at_minutes),
-                    may_set_day,
                     carry_says: if closes_days
                         && config.day.carry_float
                         && config.day.float_amount.is_positive()
@@ -580,7 +563,7 @@ fn closing_must_be_on(app: &App) -> UiResult<()> {
     Err(UiError::new(
         "day.closing_off",
         "This shop does not close its days. Turn on \"Close the day every day\" under \
-         Settings › The day first.",
+         Settings › Closing the day first.",
     ))
 }
 
@@ -747,6 +730,7 @@ pub fn close_day_on(
     }
 
     close_one(app, &who, at, day)?;
+    crate::settings::backup::after_day_close(app);
     days_on(app)
 }
 

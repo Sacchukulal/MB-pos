@@ -429,7 +429,31 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
   gap: var(--space-3);
-  align-items: end;
+  align-items: start;
+}
+
+/* The GST number and the mark under it. */
+.mb-tax__gstin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.mb-tax__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--type-caption);
+  font-weight: var(--weight-medium);
+}
+
+.mb-tax__mark--fine {
+  color: var(--ok);
+}
+
+.mb-tax__mark--off {
+  color: var(--danger);
 }
 
 .mb-tax__apply {

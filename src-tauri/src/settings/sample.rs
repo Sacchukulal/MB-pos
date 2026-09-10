@@ -435,8 +435,7 @@ mod tests {
         let paper = Paper::new(PaperKind::Mm80);
         let around = Around::plain(paper);
         // The same registration the preview reads — a shop with no GST number is unregistered.
-        let (bill, order) =
-            sample_order(config.store.registration()).expect("the sample computes");
+        let (bill, order) = sample_order(config.store.registration()).expect("the sample computes");
         let store = config.store.to_print_store();
         let document = mb_print::template::bill_document(
             &around.metrics,

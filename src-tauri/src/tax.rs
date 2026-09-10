@@ -90,11 +90,40 @@ pub struct TaxPageView {
     pub shop_slab_id: String,
     /// Whether bills carry GST at all.
     pub charges_gst: bool,
-    /// Why bills are not what the registration box says — no GST number, no state.
-    pub registration_note: Option<String>,
+    /// The saved GST number judged; none when the box is empty.
+    pub gstin_check: Option<GstinCheckView>,
     /// The live slabs, for picking.
     pub slabs: Vec<TaxSlabView>,
     pub categories: Vec<TaxCategoryView>,
+}
+
+/// The mark beside the GST number box: right, or what is off about it. Advice only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct GstinCheckView {
+    pub fine: bool,
+    pub says: String,
+}
+
+/// The number as typed, judged against its shape and the state. Empty is no mark at all.
+#[must_use]
+pub fn judge_gstin(gstin: &str, state_code: &str) -> Option<GstinCheckView> {
+    if gstin.trim().is_empty() {
+        return None;
+    }
+    Some(
+        match crate::settings::catalog::judge_gstin(gstin, state_code) {
+            Ok(()) => GstinCheckView {
+                fine: true,
+                says: "Looks right.".to_owned(),
+            },
+            Err(wrong) => GstinCheckView {
+                fine: false,
+                says: wrong.message,
+            },
+        },
+    )
 }
 
 /// The item's or slab's say on pricing, in the word the screen sends.
@@ -301,7 +330,7 @@ fn page_in(repos: &mb_db::Repos<'_>) -> Result<TaxPageView, mb_db::DbError> {
         shop_rate,
         shop_slab_id: shop_slab.as_str().to_owned(),
         charges_gst: store.registration().charges_gst(),
-        registration_note: store.registration_note(),
+        gstin_check: judge_gstin(&store.gstin, &store.state_code),
         slabs,
         categories: out,
     })
@@ -625,6 +654,17 @@ fn slab_json(class: &TaxClass) -> serde_json::Value {
 #[tauri::command]
 pub fn tax_page(app: tauri::State<'_, App>) -> UiResult<TaxPageView> {
     page_on(&app)
+}
+
+/// The mark beside the box as the number is typed. Pure judgement, no shop data.
+#[tauri::command]
+pub fn judge_gstin_typed(
+    app: tauri::State<'_, App>,
+    gstin: String,
+    state_code: String,
+) -> UiResult<Option<GstinCheckView>> {
+    guard::require(&app, Permission::MenuManage)?;
+    Ok(judge_gstin(&gstin, &state_code))
 }
 
 #[tauri::command]

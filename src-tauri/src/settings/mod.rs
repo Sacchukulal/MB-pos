@@ -149,31 +149,12 @@ impl Store {
         }
     }
 
-    /// What kind of taxpayer this shop is — the gate on the tax pipeline.
-    /// What the shop IS for the tax pipeline. A shop that says it is registered but has typed
-    /// no GST number is billed as unregistered — a bill may not show GST without one (T2).
+    /// What kind of taxpayer this shop is: the gate on the tax pipeline. The registration box
+    /// alone decides it; the GST number is printed when there is one and judged on the Tax
+    /// page, never a condition for charging GST.
     #[must_use]
     pub fn registration(&self) -> mb_core::Registration {
-        let chosen = registration_from(&self.registration);
-        if chosen.needs_gstin() && self.gstin.trim().is_empty() {
-            return mb_core::Registration::Unregistered;
-        }
-        chosen
-    }
-
-    /// Why the bill is not what the registration box says, if it is not.
-    #[must_use]
-    pub fn registration_note(&self) -> Option<String> {
-        let chosen = registration_from(&self.registration);
-        if chosen.needs_gstin() && self.gstin.trim().is_empty() {
-            return Some(
-                "No GST number typed, so bills print without GST until you add it.".to_owned(),
-            );
-        }
-        if chosen.needs_gstin() && self.state_code.trim().is_empty() {
-            return Some("No state chosen, so the state half of GST prints as SGST.".to_owned());
-        }
-        None
+        registration_from(&self.registration)
     }
 }
 
@@ -281,8 +262,13 @@ impl Billing {
                 if !self.packing_charge.is_zero() {
                     let tax = spec(&self.packing_charge_tax)?;
                     out.push(
-                        Charge::flat(ChargeKind::Packing, "Packing", self.packing_charge, tax.rate)
-                            .with_tax(tax),
+                        Charge::flat(
+                            ChargeKind::Packing,
+                            "Packing",
+                            self.packing_charge,
+                            tax.rate,
+                        )
+                        .with_tax(tax),
                     );
                 }
             }
@@ -351,13 +337,52 @@ impl Day {
     }
 }
 
-/// The one backup choice a shop makes. Backups themselves go into the shop folder, once a
-/// day, thirty kept; see `backup::EVERY_HOURS` and `backup::KEEP`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// How this shop is backed up: where, how often, and which other folders get a copy. The
+/// newest `backup::KEEP` are kept in every folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BackupPolicy {
-    /// A pen drive or a network share that gets a copy of every backup. Empty means none.
-    pub second_folder: String,
+    /// Where the backups are kept. Empty means `backups` inside the shop folder.
+    pub folder: String,
+    /// Folders that get a copy of every backup, one per line: a pen drive, Google Drive,
+    /// OneDrive, a share.
+    pub copies: String,
+    /// `off`, `hourly`, `daily` or `day_close`.
+    pub schedule: String,
+    /// The daily backup's clock time, minutes past midnight.
+    pub daily_at_minutes: u32,
+}
+
+impl BackupPolicy {
+    /// The copy folders, trimmed, in order, without blanks or repeats.
+    #[must_use]
+    pub fn copy_folders(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for line in self.copies.lines() {
+            let line = line.trim();
+            if !line.is_empty() && !out.iter().any(|have| have.eq_ignore_ascii_case(line)) {
+                out.push(line.to_owned());
+            }
+        }
+        out
+    }
+
+    /// The list back into the one setting.
+    #[must_use]
+    pub fn join_copies(folders: &[String]) -> String {
+        folders.join("\n")
+    }
+}
+
+impl Default for BackupPolicy {
+    fn default() -> Self {
+        BackupPolicy {
+            folder: String::new(),
+            copies: String::new(),
+            schedule: "daily".to_owned(),
+            daily_at_minutes: 23 * 60,
+        }
+    }
 }
 
 /// The whole configuration, as one value.

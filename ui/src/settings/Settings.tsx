@@ -34,6 +34,7 @@ import type { SettingView } from '../ipc/generated/SettingView';
 import type { SettingsView } from '../ipc/generated/SettingsView';
 import { Receipt, dotsPerPixel, marginDots } from '../preview/Receipt';
 import { Appearance } from './Appearance';
+import { Devices } from './Devices';
 import { Numbering } from './Numbering';
 import { Logo } from './Logo';
 import { Printers } from './Printers';
@@ -53,6 +54,8 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
   numbering: () => <Numbering />,
   appearance: () => <Appearance />,
   tills: () => <Tills />,
+  // The list of what is plugged in, under the settings that drive each device.
+  devices: () => <Devices />,
 };
 
 /** Sections whose own screen draws their settings, so the generic form stays away. */

@@ -83,8 +83,10 @@ impl App {
         let now = crate::flows::now();
         // A test must not read the licence of whoever is running it — nor reach the cloud.
         #[cfg(test)]
-        let (licensing, link): (mb_license::Licensing, Arc<dyn crate::cloud::Link>) =
-            (crate::licensing::for_tests(), Arc::new(crate::cloud::NoLink));
+        let (licensing, link): (mb_license::Licensing, Arc<dyn crate::cloud::Link>) = (
+            crate::licensing::for_tests(),
+            Arc::new(crate::cloud::NoLink),
+        );
         #[cfg(not(test))]
         let (licensing, link): (mb_license::Licensing, Arc<dyn crate::cloud::Link>) = {
             let (licensing, http) = crate::licensing::start();
@@ -981,6 +983,8 @@ pub enum Pushed {
         #[ts(type = "number")]
         total: u64,
     },
+    /// The shelf was read: the version waiting to be installed, or none any more.
+    Version { available: Option<String> },
 }
 
 /// One line, as the customer sees it.

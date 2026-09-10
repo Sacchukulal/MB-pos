@@ -154,10 +154,20 @@ fn control_for(kind: Kind) -> &'static str {
     }
 }
 
+/// Minutes past midnight as the clock box holds them: "05:00".
+#[must_use]
+#[allow(
+    clippy::integer_division,
+    reason = "a clock: the remainder is the minutes"
+)]
+pub(crate) fn clock_wire(minutes: u32) -> String {
+    format!("{:02}:{:02}", minutes / 60, minutes % 60)
+}
+
 /// A value, as the box shows it. A time of day travels as the clock shows it, "05:00".
 fn on_the_wire(kind: Kind, value: &Value) -> String {
     match (kind, value) {
-        (Kind::Time, Value::Int(n)) => format!("{:02}:{:02}", n / 60, n % 60),
+        (Kind::Time, Value::Int(n)) => clock_wire(u32::try_from(*n).unwrap_or(0)),
         (_, Value::Bool(true)) => "1".to_owned(),
         (_, Value::Bool(false)) => "0".to_owned(),
         (_, Value::Int(n)) => n.to_string(),
@@ -387,18 +397,6 @@ pub fn save_on(app: &App, edits: Vec<SettingEdit>) -> UiResult<SavedView> {
         let value = off_the_wire(entry, &edit.value)?;
         (entry.write)(&mut wanted, &value).map_err(|e| UiError::from(e.about(entry.key)))?;
     }
-    catalog::check_gstin_against_state(&wanted).map_err(UiError::from)?;
-    // The registration rule bites when the registration is what is being saved — changing a
-    // typeface must not be refused for a tax problem. Until it is fixed, the bill is a plain one
-    // (`Store::registration`) and Settings › Tax says so.
-    if edits.iter().any(|e| {
-        matches!(
-            e.key.as_str(),
-            "store.registration" | "store.gstin" | "store.state_code"
-        )
-    }) {
-        catalog::check_registration(&wanted).map_err(UiError::from)?;
-    }
     check_slabs(&wanted)?;
 
     let at = crate::flows::now();
@@ -494,7 +492,10 @@ fn check_slabs(config: &ShopConfig) -> UiResult<()> {
         if !live {
             return Err(UiError::new(
                 "settings.invalid",
-                format!("\"{}\" names a tax slab this shop no longer has. Pick another.", entry.label),
+                format!(
+                    "\"{}\" names a tax slab this shop no longer has. Pick another.",
+                    entry.label
+                ),
             )
             .with_detail(format!("setting {} = {id}", entry.key)));
         }
@@ -588,4 +589,3 @@ pub fn settings_defaults_for(
 ) -> UiResult<Vec<SettingEdit>> {
     defaults_for_on(&app, group)
 }
-

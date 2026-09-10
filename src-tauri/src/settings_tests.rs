@@ -1099,7 +1099,8 @@ fn a_kitchen_only_printer_does_not_get_the_bills() {
     );
 }
 
-/// The schedule takes a backup when the newest one is old, and leaves a fresh one alone.
+/// The schedule takes a backup when the newest one is older than its rule, and leaves a fresh
+/// one alone.
 #[test]
 fn the_schedule_backs_up_when_the_newest_one_is_old() {
     let scratch = Scratch::new("backup_schedule");
@@ -1122,4 +1123,113 @@ fn the_schedule_backs_up_when_the_newest_one_is_old() {
         "the backup was not checked when taken"
     );
     assert!(view.last.ends_with(", checked"), "{}", view.last);
+    assert!(view.folder_is_default);
+    assert_eq!(view.schedule, "daily");
+    assert_eq!(view.daily_at, "23:00");
+    assert_eq!(view.schedule_says, "Every day at 11:00 pm");
+}
+
+/// Each schedule's rule, on the clock alone.
+#[test]
+fn each_schedule_knows_when_it_is_due() {
+    use crate::settings::BackupPolicy;
+    use crate::settings::backup::is_due;
+    use mb_core::{Timestamp, UtcOffset};
+
+    // A Tuesday, 9:00 pm in the shop's own time.
+    let nine_pm = Timestamp::from_local_parts(20_000, 21 * 3600, UtcOffset::INDIA).expect("time");
+    let hour = 3_600_000_i64;
+    let daily = BackupPolicy {
+        schedule: "daily".to_owned(),
+        daily_at_minutes: 23 * 60,
+        ..BackupPolicy::default()
+    };
+    // At 9 pm today's 11 pm has not come: yesterday's is the mark. A backup after it is fresh.
+    assert!(!is_due(&daily, nine_pm.millis() - 2 * hour, nine_pm));
+    assert!(
+        is_due(&daily, nine_pm.millis() - 30 * hour, nine_pm),
+        "older than yesterday 11 pm"
+    );
+    assert!(is_due(&daily, 0, nine_pm), "never backed up");
+    // At 11:30 pm today's 11 pm has passed: a backup from 9 pm is stale.
+    let late = Timestamp::from_millis(nine_pm.millis() + 2 * hour + 30 * 60_000);
+    assert!(is_due(&daily, nine_pm.millis(), late));
+
+    let hourly = BackupPolicy {
+        schedule: "hourly".to_owned(),
+        ..BackupPolicy::default()
+    };
+    assert!(!is_due(&hourly, nine_pm.millis() - 30 * 60_000, nine_pm));
+    assert!(is_due(&hourly, nine_pm.millis() - hour, nine_pm));
+
+    for quiet in ["off", "day_close"] {
+        let policy = BackupPolicy {
+            schedule: quiet.to_owned(),
+            ..BackupPolicy::default()
+        };
+        assert!(
+            !is_due(&policy, 0, nine_pm),
+            "{quiet} took a backup by the clock"
+        );
+    }
+}
+
+/// Two presses inside a minute are one backup, and a copy folder gets every backup.
+#[test]
+fn a_second_press_is_the_same_backup_and_copies_reach_every_folder() {
+    let scratch = Scratch::new("backup_copies");
+    let app = a_shop(&scratch, "copies");
+    let folder = crate::settings::backup::folder_for(&app);
+    let copy = scratch.dir().join("pen-drive").join("Magic Bill backups");
+
+    crate::settings::backup::back_up_now_on(&app).expect("taken");
+    crate::settings::backup::back_up_now_on(&app).expect("answered");
+    assert_eq!(
+        mb_db::backup::list(&folder).expect("list").len(),
+        1,
+        "a second press inside a minute grew the list"
+    );
+
+    let view =
+        crate::settings::backup::add_copy_on(&app, copy.display().to_string()).expect("added");
+    assert_eq!(view.copies.len(), 1);
+    assert!(view.copies[0].reachable);
+    assert!(
+        !view.copies[0].last.is_empty(),
+        "the newest backup was not copied at once"
+    );
+    assert_eq!(mb_db::backup::list(&copy).expect("list").len(), 1);
+
+    let view =
+        crate::settings::backup::set_schedule_on(&app, "hourly".to_owned(), "21:30".to_owned())
+            .expect("set");
+    assert_eq!(view.schedule, "hourly");
+    assert_eq!(view.daily_at, "21:30");
+    assert!(
+        crate::settings::backup::set_schedule_on(&app, "sometimes".to_owned(), "21:30".to_owned())
+            .is_err()
+    );
+
+    let view =
+        crate::settings::backup::remove_copy_on(&app, copy.display().to_string()).expect("removed");
+    assert!(view.copies.is_empty());
+}
+
+/// Moving the backup folder carries the backups already taken with it.
+#[test]
+fn moving_the_backup_folder_carries_the_backups_over() {
+    let scratch = Scratch::new("backup_folder");
+    let app = a_shop(&scratch, "folder");
+    crate::settings::backup::back_up_now_on(&app).expect("taken");
+
+    let elsewhere = scratch.dir().join("D-drive").join("backups");
+    let view = crate::settings::backup::set_folder_on(&app, Some(elsewhere.display().to_string()))
+        .expect("moved");
+    assert!(!view.folder_is_default);
+    assert_eq!(view.folder, elsewhere.display().to_string());
+    assert_eq!(view.backups.len(), 1, "the backup did not come along");
+    assert_eq!(crate::settings::backup::folder_for(&app), elsewhere);
+
+    let view = crate::settings::backup::set_folder_on(&app, None).expect("back");
+    assert!(view.folder_is_default);
 }

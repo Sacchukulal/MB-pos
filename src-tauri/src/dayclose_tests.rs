@@ -1102,7 +1102,6 @@ fn the_day_screen_says_when_the_shops_day_starts() {
         "the standard rule is not said: {}",
         view.day_runs_says
     );
-    assert_eq!(view.starts_at, "00:00");
 
     let mut config = app.shop_config();
     config.day.starts_at_minutes = 390; // 06:30
@@ -1114,7 +1113,6 @@ fn the_day_screen_says_when_the_shops_day_starts() {
             .contains("6:30 am"),
         "the shop's rule is not the one said"
     );
-    assert_eq!(days_on(&app).expect("the days").starts_at, "06:30");
 
     let mut config = app.shop_config();
     config.day.starts_at_minutes = 0;
@@ -1429,8 +1427,7 @@ fn the_day_start_is_the_owners_and_reaches_the_screen() {
     let app = a_shop(&scratch, "start_owner");
 
     let view = days_on(&app).expect("the days");
-    assert!(view.may_set_day, "the stand-in owner may set the day");
-    assert_eq!(view.starts_at, "00:00");
+    assert!(view.day_runs_says.contains("calendar date"), "{}", view.day_runs_says);
 
     let edit = |value: &str| {
         crate::settings::ipc::save_on(
@@ -1443,7 +1440,6 @@ fn the_day_start_is_the_owners_and_reaches_the_screen() {
     };
     edit("05:00").expect("saved");
     let view = days_on(&app).expect("the days");
-    assert_eq!(view.starts_at, "05:00");
     assert!(
         view.day_runs_says.contains("5:00 am"),
         "{}",

@@ -31,7 +31,6 @@ import { Stock } from '../stock/Stock';
 import { Buying } from '../buying/Buying';
 import { Floor } from '../floor/Floor';
 import { Delivery } from '../delivery/Delivery';
-import { Devices } from '../devices/Devices';
 import { Menu } from '../menu/Menu';
 import { Phones } from '../phones/Phones';
 import { Days } from '../reports/Days';
@@ -167,6 +166,15 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'licence.manage',
   },
   {
+    // In the bar, after Account: every setting is one press away, and never behind More.
+    id: 'settings',
+    daily: true,
+    label: 'Settings',
+    icon: 'settings',
+    render: (_go, sub) => <Settings initial={sub} />,
+    needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
+  },
+  {
     id: 'menu',
     label: 'Menu',
     icon: 'book',
@@ -188,15 +196,6 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needs: 'audit.view',
   },
   {
-    // Last but one, and below Menu: settings are what an owner opens once a month, so they must
-    // not sit where a cashier's hand goes.
-    id: 'settings',
-    label: 'Settings',
-    icon: 'settings',
-    render: (_go, sub) => <Settings initial={sub} />,
-    needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
-  },
-  {
     // On the counter it is a screen like any other, so a shop with one machine can run the
     // kitchen from it.
     id: 'kitchen',
@@ -204,15 +203,6 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     icon: 'flame',
     render: () => <Kitchen />,
     needs: 'bill.create',
-  },
-  {
-    // Beside Health, because they are the same question about the two halves of one counter: is
-    // the software all right, and is the hardware.
-    id: 'devices',
-    label: 'Devices',
-    icon: 'plug',
-    render: () => <Devices />,
-    needs: 'settings.printer',
   },
   {
     // Beside Account, because the two answer "is my counter all right?" from the two directions
@@ -267,6 +257,8 @@ export function Shell() {
   const [alertsOpen, setAlertsOpen] = useState(false);
   /** Notices from Magic Bill, and how many are unread — the bell's other half. */
   const [notices, setNotices] = useState<NoticesView>({ unseen: 0, notices: [] });
+  /** The version waiting to be installed, if the last shelf read found one. */
+  const [update, setUpdate] = useState<string | null>(null);
   const { theme, toggle } = useTheme();
   const toast = useToast();
 
@@ -392,6 +384,7 @@ export function Shell() {
       if (message.kind === 'licence') {
         setStatus((was) => (was ? { ...was, licence: message.says, licenceTone: message.tone } : was));
       }
+      if (message.kind === 'version') setUpdate(message.available);
     })
       .then((unlisten) => {
         stop = unlisten;
@@ -502,6 +495,19 @@ export function Shell() {
 
   /** Everything the shop should know, in one list. */
   const alerts: Alert[] = [];
+  // The shelf is read after each licence check; the bell says so, and Account installs it.
+  const waiting = update ?? status?.update ?? null;
+  if (waiting) {
+    alerts.push({
+      id: 'update',
+      tone: 'accent',
+      icon: 'download',
+      title: 'Update ready',
+      says: `Version ${waiting} is ready to install.`,
+      goTo: 'account',
+      goLabel: 'Open Account',
+    });
+  }
   if (status?.licence) {
     alerts.push({
       id: 'licence',

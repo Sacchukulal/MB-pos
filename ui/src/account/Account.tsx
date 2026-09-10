@@ -1,4 +1,4 @@
-/** The owner's page: the licence, the backups and the version, each on its own panel. */
+/** The owner's page: the licence across the top, then the backups beside the version. */
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -7,7 +7,6 @@ import {
   Button,
   ConfirmDialog,
   Fact,
-  Facts,
   Icon,
   Input,
   Modal,
@@ -16,6 +15,7 @@ import {
   PageHeader,
   Panel,
   Row,
+  Spinner,
   useToast,
   type BadgeTone,
 } from '../kit';
@@ -23,6 +23,7 @@ import { call, isUiError } from '../ipc/call';
 import type { LicenceView } from '../ipc/generated/LicenceView';
 import { Backup } from './Backup';
 import { ChangeLicence } from './ChangeLicence';
+import { Line, Lines } from './Lines';
 import { Version } from './Version';
 
 import './account.css';
@@ -34,6 +35,16 @@ const TONES: Record<string, BadgeTone> = {
   danger: 'danger',
 };
 
+/** The cloud copy's state in one word, beside Rust's sentence. */
+const CLOUD_WORDS: Record<string, string> = {
+  ok: 'Up to date',
+  warn: 'Waiting',
+  danger: 'Behind',
+};
+
+/** How long the copy button shows its tick. */
+const COPIED_FOR_MS = 1500;
+
 type Dialog = 'change' | 'sign-out' | 'code' | null;
 
 export function Account() {
@@ -41,6 +52,8 @@ export function Account() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [copied, setCopied] = useState(false);
   const toast = useToast();
 
   const report = useCallback(
@@ -53,6 +66,12 @@ export function Account() {
   useEffect(() => {
     call('account').then(setView).catch(report);
   }, [report]);
+
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = window.setTimeout(() => setCopied(false), COPIED_FOR_MS);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
 
   /** Run a licence command, take the whole view back, and close whatever was open. */
   const run = (work: () => Promise<LicenceView>, done?: string) => {
@@ -68,11 +87,23 @@ export function Account() {
       .finally(() => setBusy(false));
   };
 
+  /** Ask magicbill.in now. The button carries its own spinner; the page stays alive. */
+  const checkNow = () => {
+    setChecking(true);
+    call('refresh_licence')
+      .then((fresh) => {
+        setView(fresh);
+        toast.show('ok', 'Checked with magicbill.in.');
+      })
+      .catch(report)
+      .finally(() => setChecking(false));
+  };
+
   const copyKey = () => {
     if (!view) return;
     navigator.clipboard
       .writeText(view.key)
-      .then(() => toast.show('ok', 'Copied.'))
+      .then(() => setCopied(true))
       .catch(() => toast.show('danger', 'The key could not be copied.'));
   };
 
@@ -92,12 +123,8 @@ export function Account() {
         actions={
           view.hasLicence ? (
             <>
-              <Button
-                variant="secondary"
-                disabled={busy}
-                onClick={() => run(() => call('refresh_licence'), 'Checked with magicbill.in.')}
-              >
-                <Icon name="refresh" size="sm" />
+              <Button variant="secondary" disabled={busy || checking} onClick={checkNow}>
+                {checking ? <Spinner label="Checking" /> : <Icon name="refresh" size="sm" />}
                 Check now
               </Button>
               <Button
@@ -152,44 +179,49 @@ export function Account() {
 
         {view.hasLicence && (
           <>
-            <Facts>
+            <dl className="mb-account__grid">
               <Fact label="Owner">{view.ownerName || '—'}</Fact>
               <Fact label="Mobile">{view.ownerPhone || '—'}</Fact>
-              <Fact label="Shop">{view.shopName || '—'}</Fact>
               <Fact label="Plan">{view.planName}</Fact>
-              {view.dateLabel !== '' && <Fact label={view.dateLabel}>{view.date || '—'}</Fact>}
-              <Fact label="Last checked">{view.checked}</Fact>
-              {view.key !== '' && (
+              <Fact label={view.dateLabel || 'Valid'}>{view.date || '—'}</Fact>
+              {view.key !== '' ? (
                 <Fact label="Licence key" code>
                   <span className="mb-account__key">
                     {view.key}
-                    <Button size="sm" variant="quiet" onClick={copyKey} aria-label="Copy the key">
-                      <Icon name="copy" size="sm" />
-                      Copy
+                    <Button
+                      size="sm"
+                      variant="quiet"
+                      iconOnly
+                      title={copied ? 'Copied' : 'Copy the key'}
+                      aria-label="Copy the key"
+                      onClick={copyKey}
+                    >
+                      <Icon name={copied ? 'check' : 'copy'} size="sm" />
                     </Button>
                   </span>
                 </Fact>
-              )}
+              ) : null}
               <Fact label="Shop code for phones" code>
                 {view.restaurantCode || '—'}
               </Fact>
               <Fact label="Phones">{view.phonesAllowed}</Fact>
               <Fact label="Tills">{view.tillsAllowed}</Fact>
-            </Facts>
+            </dl>
 
-            {view.included.length > 0 && (
-              <div className="mb-account__included">
-                <span className="mb-account__label">Includes</span>
-                {view.included.map((feature) => (
-                  <Badge key={feature}>{feature}</Badge>
-                ))}
-              </div>
-            )}
-
-            <div className="mb-account__cloud" role="status">
-              <Badge tone={cloudTone}>Cloud copy</Badge>
-              <span>{view.cloudCopy}</span>
-            </div>
+            <Lines>
+              {view.included.length > 0 ? (
+                <Line label="Includes">
+                  {view.included.map((feature) => (
+                    <Badge key={feature}>{feature}</Badge>
+                  ))}
+                </Line>
+              ) : null}
+              <Line label="Cloud copy">
+                <Badge tone={cloudTone}>{CLOUD_WORDS[view.cloudTone] ?? 'Cloud copy'}</Badge>
+                <span>{view.cloudCopy}</span>
+              </Line>
+              <Line label="Last checked">{view.checked}</Line>
+            </Lines>
 
             <Row end>
               <Button variant="quiet" disabled={busy} onClick={() => setDialog('sign-out')}>
@@ -203,8 +235,10 @@ export function Account() {
         )}
       </Panel>
 
-      <Backup />
-      <Version />
+      <div className="mb-account__two">
+        <Backup />
+        <Version />
+      </div>
 
       <ChangeLicence
         open={dialog === 'change'}

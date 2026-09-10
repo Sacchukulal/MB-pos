@@ -41,7 +41,7 @@ const page: TaxPageView = {
   shopRate: '5',
   shopSlabId: 'tax_food_5',
   chargesGst: true,
-  registrationNote: null,
+  gstinCheck: { fine: true, says: 'Looks right.' },
   slabs: [
     {
       id: 'tax_food_5',
