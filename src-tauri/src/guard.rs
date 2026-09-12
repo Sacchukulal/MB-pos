@@ -61,14 +61,9 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("cart_set_order_type", Access::Needs(Permission::BillCreate)),
     ("cart_clear_payments", Access::Needs(Permission::BillCreate)),
     ("cart_cash_given", Access::Needs(Permission::BillCreate)),
-    (
-        "cart_set_discount",
-        Access::Needs(Permission::BillDiscountBill),
-    ),
-    (
-        "cart_clear_discount",
-        Access::Needs(Permission::BillDiscountBill),
-    ),
+    // One line or the whole bill: `line` says which, and the command checks that one.
+    ("cart_set_discount", Access::NeedsAny(DISCOUNT_PERMISSIONS)),
+    ("cart_clear_discount", Access::NeedsAny(DISCOUNT_PERMISSIONS)),
     ("open_orders", Access::Needs(Permission::BillCreate)),
     ("menu_items", Access::Needs(Permission::BillCreate)),
     ("search_items", Access::Needs(Permission::BillCreate)),
@@ -202,10 +197,12 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("merge_orders", Access::Needs(Permission::BillCreate)),
     ("split_order", Access::Needs(Permission::BillCreate)),
     // Customers and what they owe.
-    ("customers", Access::Needs(Permission::CustomersManage)),
+    // The customer list and one account open to whoever may take a repayment too: a cashier
+    // taking money against an account has to find the account first.
+    ("customers", Access::NeedsAny(CREDIT_PERMISSIONS)),
     (
         "customer_account",
-        Access::Needs(Permission::CustomersManage),
+        Access::NeedsAny(CREDIT_PERMISSIONS),
     ),
     ("save_customer", Access::Needs(Permission::CustomersManage)),
     // Taking money IN is a cashier's job — `credit.collect` exists for exactly this and nothing
@@ -242,7 +239,9 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ),
     ("export_expenses", Access::Needs(Permission::ExpensesManage)),
     // The employment side.
-    ("employees", Access::Needs(Permission::StaffManage)),
+    // The list of people opens to anybody with a Staff-screen job — marking attendance, approving
+    // leave, reading pay — not only to whoever may hire.
+    ("employees", Access::NeedsAny(STAFF_PERMISSIONS)),
     // Reading attendance: your own needs nothing beyond being signed in, and anybody ELSE's
     // needs the permission.
     ("attendance", Access::SignedIn),
@@ -354,8 +353,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // The reports.
     ("report_list", Access::Needs(Permission::ReportsView)),
     ("report", Access::Needs(Permission::ReportsView)),
-    ("report_csv", Access::Needs(Permission::ReportsView)),
-    ("report_pdf", Access::Needs(Permission::ReportsView)),
+    // Saving a report is taking it out of the building, which is its own permission on top of
+    // reading it — `report_on` still checks the read.
+    ("report_csv", Access::Needs(Permission::ReportsExport)),
+    ("report_pdf", Access::Needs(Permission::ReportsExport)),
     // The dashboard is the day's takings on a screen, like every other report.
     ("dashboard", Access::Needs(Permission::ReportsView)),
     // Closing the day.
@@ -455,7 +456,9 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("kitchen_acknowledge", Access::Needs(Permission::BillCreate)),
     ("kitchen_fire", Access::Needs(Permission::BillCreate)),
     // The stock book.
-    ("inventory", Access::Needs(Permission::InventoryView)),
+    // The stock screen opens to anybody with a stock job — a cook recording wastage, a helper
+    // counting — not only to whoever may read the whole book.
+    ("inventory", Access::NeedsAny(STOCK_PERMISSIONS)),
     ("recipe", Access::Needs(Permission::InventoryView)),
     ("stock_variance", Access::Needs(Permission::InventoryView)),
     ("buy_list_text", Access::Needs(Permission::InventoryView)),
@@ -475,11 +478,11 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
         Access::Needs(Permission::StockAdjust),
     ),
     // Buying, and the count.
-    ("buying", Access::Needs(Permission::PurchasesManage)),
+    ("buying", Access::NeedsAny(BUYING_PERMISSIONS)),
     ("purchase", Access::Needs(Permission::PurchasesManage)),
     (
         "supplier_account",
-        Access::Needs(Permission::PurchasesManage),
+        Access::NeedsAny(BUYING_PERMISSIONS),
     ),
     ("save_purchase", Access::Needs(Permission::PurchasesManage)),
     (
@@ -505,7 +508,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
         "save_supplier_adjustment",
         Access::Needs(Permission::SuppliersManage),
     ),
-    ("stock_count", Access::Needs(Permission::InventoryView)),
+    ("stock_count", Access::NeedsAny(COUNT_PERMISSIONS)),
     ("open_stock_count", Access::Needs(Permission::StockCount)),
     ("record_count_line", Access::Needs(Permission::StockCount)),
     ("explain_count_line", Access::Needs(Permission::StockCount)),
@@ -524,9 +527,9 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("join_master", Access::Needs(Permission::SettingsStore)),
     // Pressing "send now" only drains a queue that would have drained itself.
     ("send_waiting_bills", Access::Needs(Permission::BillCreate)),
-    // Sharing a report is reading it, so it is the report's own permission and nothing weaker
-    // â `report_on` checks it again anyway.
-    ("share_report", Access::Needs(Permission::ReportsView)),
+    // Sending a report out is exporting it, on top of reading it; `report_on` checks the read
+    // again anyway.
+    ("share_report", Access::Needs(Permission::ReportsExport)),
 ];
 
 /// Refuse, or hand back who is doing this.
@@ -575,6 +578,54 @@ pub fn require_owner(app: &App) -> UiResult<Actor> {
     Ok(session.actor)
 }
 
+/// The two discounts: one line, or the whole bill.
+pub const DISCOUNT_PERMISSIONS: &[Permission] =
+    &[Permission::BillDiscountLine, Permission::BillDiscountBill];
+
+/// Which of the two a discount request needs: `line` says which.
+#[must_use]
+pub const fn discount_permission(line: Option<usize>) -> Permission {
+    if line.is_some() {
+        DISCOUNT_PERMISSIONS[0]
+    } else {
+        DISCOUNT_PERMISSIONS[1]
+    }
+}
+
+/// The permissions that open the Credit screen: managing customers, or taking their money.
+pub const CREDIT_PERMISSIONS: &[Permission] =
+    &[Permission::CustomersManage, Permission::CreditCollect];
+
+/// The permissions that open the Staff screen — every job that lives there.
+pub const STAFF_PERMISSIONS: &[Permission] = &[
+    Permission::StaffManage,
+    Permission::AttendanceMark,
+    Permission::AttendanceCorrect,
+    Permission::LeaveApprove,
+    Permission::SalaryView,
+    Permission::SalaryManage,
+];
+
+/// The permissions that open the Stock screen.
+pub const STOCK_PERMISSIONS: &[Permission] = &[
+    Permission::InventoryView,
+    Permission::InventoryManage,
+    Permission::StockWaste,
+    Permission::StockCount,
+    Permission::StockAdjust,
+];
+
+/// The permissions that open the count sheet: reading the book, or holding the clipboard.
+pub const COUNT_PERMISSIONS: &[Permission] = &[
+    Permission::InventoryView,
+    Permission::StockCount,
+    Permission::StockAdjust,
+];
+
+/// The permissions that open the Buying screen.
+pub const BUYING_PERMISSIONS: &[Permission] =
+    &[Permission::PurchasesManage, Permission::SuppliersManage];
+
 /// The four permissions the settings screen is built out of.
 pub const SETTINGS_PERMISSIONS: &[Permission] = &[
     Permission::SettingsStore,
@@ -609,11 +660,12 @@ pub fn require_any(app: &App, needs: &[Permission]) -> UiResult<Actor> {
         // cannot drift from it.
         return require(app, *first);
     }
+    // The first permission in the list is the everyday one, so it is the one the sentence names.
+    let what = needs.first().map_or("do this", |need| need.what());
     Err(UiError::new(
         "auth.denied",
         format!(
-            "{}, you cannot change any of this shop's settings. Ask somebody \
-             who can.",
+            "You do not have permission to {what}, {}. Ask somebody who can.",
             session.actor.name
         ),
     )

@@ -1,9 +1,10 @@
-/** Money off a bill. */
+/** Money off a bill, or off one line of it. */
 
 import { useState } from 'react';
 
 import { Button, Input, Modal, Select, onlyAmount } from '../kit';
 import { call, isUiError } from '../ipc/call';
+import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { CartView } from '../ipc/generated/CartView';
 
 const KINDS = [
@@ -13,10 +14,13 @@ const KINDS = [
 
 export function DiscountDialog({
   cart,
+  line = null,
   onClose,
   onChanged,
 }: {
   cart: CartView;
+  /** One line of the bill, when the money comes off that line alone. */
+  line?: CartLineView | null;
   onClose: () => void;
   /** The whole recomputed cart, straight from Rust. */
   onChanged: (cart: CartView) => void;
@@ -27,7 +31,9 @@ export function DiscountDialog({
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const has = cart.bill.billDiscount.paise > 0n;
+  // What is already off: this line's own discount, or the bill's.
+  const already = line ? line.lineDiscount : cart.bill.billDiscount;
+  const has = already.paise > 0n;
 
   const apply = async () => {
     setBusy(true);
@@ -38,6 +44,7 @@ export function DiscountDialog({
           kind,
           value,
           reason: reason.trim() === '' ? null : reason.trim(),
+          line: line ? line.index : null,
         }),
       );
       onClose();
@@ -54,7 +61,7 @@ export function DiscountDialog({
     setBusy(true);
     setProblem(null);
     try {
-      onChanged(await call('cart_clear_discount'));
+      onChanged(await call('cart_clear_discount', { line: line ? line.index : null }));
       onClose();
     } catch (cause) {
       setProblem(isUiError(cause) ? cause.message : String(cause));
@@ -66,7 +73,7 @@ export function DiscountDialog({
   return (
     <Modal
       open
-      title="Money off this bill"
+      title={line ? `Money off ${line.name}` : 'Money off this bill'}
       onClose={onClose}
       actions={
         <>
@@ -90,12 +97,14 @@ export function DiscountDialog({
       }
     >
       {/*
-        What the bill is before anything comes off it — the number the percentage is a
+        What the money comes off before anything comes off it — the number the percentage is a
         percentage OF, so a cashier can check the answer.
       */}
       <p className="mb-muted">
-        This bill is {cart.bill.subtotal.text} before tax
-        {has ? `, with ${cart.bill.billDiscount.text} already off` : ''}.
+        {line
+          ? `${line.qty} × ${line.name} is ${line.gross.text} before tax`
+          : `This bill is ${cart.bill.subtotal.text} before tax`}
+        {has ? `, with ${already.text} already off` : ''}.
       </p>
 
       <Select
@@ -107,14 +116,16 @@ export function DiscountDialog({
           setProblem(null);
         }}
       />
-{/* Money and a percentage are the same characters and not the same thing. */}
+      {/* Money and a percentage are the same characters and not the same thing. */}
       <Input
         label={kind === 'percent' ? 'Per cent' : 'Rupees'}
         prefix={kind === 'percent' ? undefined : '₹'}
         hint={
           kind === 'percent'
             ? 'Like 10, or 12.5. It comes off before tax, so the tax on the bill stays correct.'
-            : 'Like 50, or 50.00. It is spread across the lines before tax.'
+            : line
+              ? 'Like 50, or 50.00. It comes off this line before tax.'
+              : 'Like 50, or 50.00. It is spread across the lines before tax.'
         }
         value={value}
         autoFocus

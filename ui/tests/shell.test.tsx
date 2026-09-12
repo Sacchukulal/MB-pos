@@ -29,8 +29,10 @@ vi.mock('../src/ipc/call', () => ({
 
 /** How many people are signed in, from the shell's point of view. */
 let signedInAs: string | null = null;
+/** What the signed-in person may do — an owner's everything, unless a test says otherwise. */
+let held: readonly string[] = ['bill.create', 'menu.manage', 'staff.manage', 'reports.view'];
 
-const { Shell, PrintQueuePanel } = await import('../src/shell/Shell');
+const { Shell, PrintQueuePanel, moreTarget, SHIPPED_SCREENS } = await import('../src/shell/Shell');
 const { ToastProvider } = await import('../src/kit');
 const { ThemeProvider } = await import('../src/theme/ThemeProvider');
 
@@ -41,6 +43,10 @@ function answer(command: string): Promise<unknown> {
       return Promise.resolve({
         signedInAs,
         role: signedInAs === null ? null : 'Owner',
+        // Rust lists what the person may open; the rail and the screens read it.
+        permissions: signedInAs === null ? [] : held,
+        nobodyHasAPin: false,
+        lastSignedIn: null,
         people: [
           {
             id: 'staff_1',
@@ -114,6 +120,7 @@ function answer(command: string): Promise<unknown> {
 
 beforeEach(() => {
   signedInAs = null;
+  held = ['bill.create', 'menu.manage', 'staff.manage', 'reports.view'];
   call.mockReset();
   call.mockImplementation((command: string) => answer(command));
 });
@@ -166,6 +173,41 @@ it('mounts the screen with a session behind it, so its data arrives', { timeout:
     target: { value: 'dosa' },
   });
   expect(await screen.findByRole('option', { name: /Masala Dosa/ })).toBeTruthy();
+});
+
+/** A role with nothing ticked is a page that says so, not the billing screen. */
+it('shows a person with no screens an honest empty page instead of Billing', { timeout: 20_000 }, async () => {
+  held = [];
+  show();
+  await screen.findByText('Who is at the counter?');
+  fireEvent.click(await screen.findByRole('button', { name: /Meena/ }));
+  for (const digit of ['4', '8', '2', '9']) {
+    fireEvent.click(await screen.findByRole('button', { name: digit }));
+  }
+  await screen.findByText('Nothing to open here');
+  // And the billing screen was never mounted: not one of its commands went out.
+  expect(call).not.toHaveBeenCalledWith('menu_items');
+  expect(screen.queryByRole('button', { name: /More/ })).toBeNull();
+});
+
+/**
+ * The More button remembers the More page last opened. When the next person may not open it,
+ * More goes to the first page THEY may — never back to Billing, which is what a stale memory
+ * used to fall through to (cashier and manager, 2026-09-12).
+ */
+it("sends More to a page this person may open, never the last person's", () => {
+  const byId = (id: string) => SHIPPED_SCREENS.find((s) => s.id === id)!;
+  // A cashier's More: the two non-daily screens a bill.create holder gets.
+  const cashiersMore = [byId('delivery'), byId('kitchen')];
+  // The owner left it on Staff, which the cashier cannot open.
+  expect(moreTarget(cashiersMore, null, 'staff', 'billing')).toBe('delivery');
+  // Their own last page comes back.
+  expect(moreTarget(cashiersMore, null, 'kitchen', 'billing')).toBe('kitchen');
+  // Already on a More page: stay.
+  expect(moreTarget(cashiersMore, byId('kitchen'), 'delivery', 'kitchen')).toBe('kitchen');
+  // Nothing behind More at all: the button is not drawn, but the answer is still not Billing
+  // by accident — it is the current screen.
+  expect(moreTarget([], null, 'staff', 'floor')).toBe('floor');
 });
 
 /** Two jobs or more get one press to give up on all of them; one does not need it. */

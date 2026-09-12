@@ -1050,14 +1050,17 @@ pub fn cart_cash_given(
 
 // Money off a bill.
 
-/// Take money off this bill.
+/// Take money off this bill — or, with `line`, off one line of it. The two are two
+/// permissions: a cashier who may knock a little off one dosa is not the person who may
+/// discount a banquet.
 pub fn cart_set_discount_on(
     app: &App,
     kind: String,
     value: String,
     reason: Option<String>,
+    line: Option<usize>,
 ) -> UiResult<CartView> {
-    let who = guard::require(app, Permission::BillDiscountBill)?;
+    let who = guard::require(app, guard::discount_permission(line))?;
     let config = app.shop_config();
 
     let discount = match kind.as_str() {
@@ -1101,22 +1104,46 @@ pub fn cart_set_discount_on(
     entry = entry.authorised_by(who.staff_id.clone());
 
     app.with_cart_mut(|state| {
-        // The base a percentage is taken off.
-        let base = state.bill(&config)?.subtotal;
+        let bill = state.bill(&config)?;
+        // The base a percentage is taken off: the line's own price, or the whole bill's.
+        let base = match line {
+            Some(index) => {
+                bill.lines
+                    .get(index)
+                    .ok_or_else(|| {
+                        UiError::new("discount.line", "That line is no longer on the bill.")
+                    })?
+                    .gross
+            }
+            None => bill.subtotal,
+        };
         who.discount_policy()
             .check(&entry, base)
             .map_err(|e| UiError::new("discount.refused", e.to_string()))?;
-        state.bill_discount = Some(entry);
+        match line {
+            Some(index) => state
+                .cart
+                .set_line_discount(index, Some(entry))
+                .map_err(|e| UiError::new("discount.line", e.to_string()))?,
+            None => state.bill_discount = Some(entry),
+        }
         cart_view(state, &config)
     })
 }
 
-/// Clear the discount. Separate from setting one so that "no discount" is never expressed as "a
-/// discount of zero", which would print a zero line on the bill and read as a mistake.
-pub fn cart_clear_discount_on(app: &App) -> UiResult<CartView> {
-    guard::require(app, Permission::BillDiscountBill)?;
+/// Clear the discount — the bill's, or one line's. Separate from setting one so that "no
+/// discount" is never expressed as "a discount of zero", which would print a zero line on the
+/// bill and read as a mistake.
+pub fn cart_clear_discount_on(app: &App, line: Option<usize>) -> UiResult<CartView> {
+    guard::require(app, guard::discount_permission(line))?;
     app.with_cart_mut(|state| {
-        state.bill_discount = None;
+        match line {
+            Some(index) => state
+                .cart
+                .set_line_discount(index, None)
+                .map_err(|e| UiError::new("discount.line", e.to_string()))?,
+            None => state.bill_discount = None,
+        }
         cart_view(state, &app.shop_config())
     })
 }
@@ -1154,13 +1181,14 @@ pub fn cart_set_discount(
     kind: String,
     value: String,
     reason: Option<String>,
+    line: Option<usize>,
 ) -> UiResult<CartView> {
-    cart_set_discount_on(&app, kind, value, reason)
+    cart_set_discount_on(&app, kind, value, reason, line)
 }
 
 #[tauri::command]
-pub fn cart_clear_discount(app: tauri::State<'_, App>) -> UiResult<CartView> {
-    cart_clear_discount_on(&app)
+pub fn cart_clear_discount(app: tauri::State<'_, App>, line: Option<usize>) -> UiResult<CartView> {
+    cart_clear_discount_on(&app, line)
 }
 
 /// The floor — the only view of open orders.
@@ -1738,13 +1766,55 @@ pub fn list_staff_on(app: &App) -> UiResult<Vec<PersonView>> {
     })
 }
 
-pub fn list_permissions_on(app: &App) -> UiResult<Vec<(String, String)>> {
+/// One box on the roles screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionView {
+    pub code: String,
+    /// The short name beside the box.
+    pub label: String,
+    /// What the box really lets somebody do — behind the info button.
+    pub hint: String,
+}
+
+/// One section of the roles screen, with its boxes in order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionGroupView {
+    pub name: String,
+    pub permissions: Vec<PermissionView>,
+}
+
+pub fn list_permissions_on(app: &App) -> UiResult<Vec<PermissionGroupView>> {
     guard::require(app, Permission::StaffManage)?;
-    app.with_shop(|shop| {
+    // The words and the order are Rust's; the database says which codes exist, so the screen
+    // can only ever offer a permission there is a row for.
+    let exists: std::collections::BTreeSet<String> = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).people().permission_codes())
             .map_err(|e| words::from_db(&e))
-    })
+    })?
+    .into_iter()
+    .map(|(code, _)| code)
+    .collect();
+    Ok(mb_auth::PermissionGroup::ALL
+        .iter()
+        .map(|group| PermissionGroupView {
+            name: group.name().to_owned(),
+            permissions: group
+                .permissions()
+                .filter(|p| p.shown() && exists.contains(p.code()))
+                .map(|p| PermissionView {
+                    code: p.code().to_owned(),
+                    label: p.label().to_owned(),
+                    hint: p.hint().to_owned(),
+                })
+                .collect(),
+        })
+        .filter(|group| !group.permissions.is_empty())
+        .collect())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1754,10 +1824,16 @@ pub struct RoleView {
     pub id: String,
     pub name: String,
     pub is_builtin: bool,
+    /// The owner's role holds everything and is shown locked: it cannot be edited from the
+    /// screen, so nobody can lock the shop out of itself.
+    pub is_owner: bool,
     pub permissions: Vec<String>,
     /// A percentage as text, both ways — `"12.5%"` out, whatever was typed back in.
     pub max_discount_percent: Option<String>,
     pub max_discount: Option<MoneyView>,
+    /// The rupee cap as text, both ways — `"200.00"` out, whatever was typed back in. Empty
+    /// means no cap.
+    pub max_discount_rupees: Option<String>,
 }
 
 pub fn list_roles_on(app: &App) -> UiResult<Vec<RoleView>> {
@@ -1775,6 +1851,7 @@ fn role_view(role: &RoleShape) -> RoleView {
         id: role.id.clone(),
         name: role.name.clone(),
         is_builtin: role.is_builtin,
+        is_owner: role.id == mb_auth::RolePreset::Owner.id(),
         permissions: role
             .permissions
             .iter()
@@ -1782,6 +1859,8 @@ fn role_view(role: &RoleShape) -> RoleView {
             .collect(),
         max_discount_percent: role.percent_label(),
         max_discount: role.max_discount.map(MoneyView::from),
+        // Digits only, so the box can be edited as typed: "200.00", not "₹200.00".
+        max_discount_rupees: role.max_discount.map(|m| m.to_string()),
     }
 }
 
@@ -1798,16 +1877,32 @@ pub fn save_role_on(app: &App, role: RoleView) -> UiResult<Vec<RoleView>> {
         RoleShape::parse_percent(role.max_discount_percent.as_deref().unwrap_or_default())
             .map_err(|e| UiError::new("role.percent", e.to_string()))?;
 
+    if role.id == mb_auth::RolePreset::Owner.id() {
+        return Err(UiError::new(
+            "role.owner",
+            "The owner's role always allows everything, so it cannot be changed.",
+        ));
+    }
+
+    // The rupee cap, typed as text. Empty means no cap.
+    let max_discount = match role.max_discount_rupees.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(typed) => Some(mb_core::Money::parse(typed).map_err(|e| {
+            UiError::new(
+                "role.rupees",
+                "Type the biggest rupee discount, like 200 or 200.00, or leave it empty.",
+            )
+            .with_detail(e.to_string())
+        })?),
+    };
+
     let shape = RoleShape {
         id: role.id.clone(),
         name: role.name.clone(),
         is_builtin: role.is_builtin,
         permissions,
         max_discount_bp,
-        max_discount: role
-            .max_discount
-            .as_ref()
-            .map(|m| mb_core::Money::from_paise(m.paise)),
+        max_discount,
     };
 
     app.with_shop(|shop| {
@@ -2454,7 +2549,7 @@ pub fn list_staff(app: tauri::State<'_, App>) -> UiResult<Vec<PersonView>> {
 }
 
 #[tauri::command]
-pub fn list_permissions(app: tauri::State<'_, App>) -> UiResult<Vec<(String, String)>> {
+pub fn list_permissions(app: tauri::State<'_, App>) -> UiResult<Vec<PermissionGroupView>> {
     list_permissions_on(&app)
 }
 

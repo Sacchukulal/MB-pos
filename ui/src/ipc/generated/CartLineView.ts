@@ -9,7 +9,15 @@ qty: string,
 /**
  * "5%", "18%", "Non-GST", "Exempt" — a label, never a number to compute with.
  */
-rateLabel: string, unitPrice: MoneyView, gross: MoneyView, discount: MoneyView, 
+rateLabel: string, unitPrice: MoneyView, gross: MoneyView, 
+/**
+ * Money off this line from both directions: its own discount and its share of the bill's.
+ */
+discount: MoneyView, 
+/**
+ * This line's own discount alone, so the screen knows there is one to take off.
+ */
+lineDiscount: MoneyView, 
 /**
  * What this line adds to the bill, tax included.
  */

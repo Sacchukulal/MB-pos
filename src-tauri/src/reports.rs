@@ -2258,6 +2258,8 @@ pub fn report_csv(
     id: String,
     period: PeriodArg,
 ) -> UiResult<SavedFileView> {
+    // Taking a report out of the building is its own permission, on top of reading it.
+    guard::require(&app, Permission::ReportsExport)?;
     let report = report_on(&app, id, period)?;
     let name = file_name(&report, "csv");
     save(&name, csv_of(&report).as_bytes())
@@ -2269,6 +2271,7 @@ pub fn report_pdf(
     id: String,
     period: PeriodArg,
 ) -> UiResult<SavedFileView> {
+    guard::require(&app, Permission::ReportsExport)?;
     let report = report_on(&app, id, period)?;
     let laid = mb_print::layout::layout(&to_document(&report)).map_err(|e| {
         UiError::new(

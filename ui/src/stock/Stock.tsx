@@ -26,6 +26,7 @@ import {
 } from '../kit';
 import { Count } from '../buying/Count';
 import { call, isLicenceRefusal, isUiError } from '../ipc/call';
+import { useMay } from '../shell/permissions';
 import type { BuyGroupView } from '../ipc/generated/BuyGroupView';
 import type { DishCostView } from '../ipc/generated/DishCostView';
 import type { InventoryView } from '../ipc/generated/InventoryView';
@@ -58,6 +59,7 @@ const KINDS = [
 type Editing = { material: MaterialView | null; isNew: boolean };
 
 export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
+  const may = useMay();
   const [view, setView] = useState<InventoryView | null>(null);
   /** The licence saying no, held rather than flashed. */
   const [locked, setLocked] = useState<string>('');
@@ -228,7 +230,10 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           { id: 'moves', label: 'Movements' },
           { id: 'problems', label: `Needs a look${view.problems.length > 0 ? ` (${view.problems.length})` : ''}` },
           { id: 'variance', label: 'What went missing' },
-          { id: 'count', label: 'Count' },
+          // The count sheet opens to whoever may read the book, count, or approve a count.
+          ...(may('inventory.view') || may('stock.count') || may('stock.adjust')
+            ? [{ id: 'count', label: 'Count' }]
+            : []),
         ]}
       />
 

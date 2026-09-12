@@ -233,13 +233,6 @@
   background: var(--surface-2);
 }
 
-.mb-permissions {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--permission-min), 1fr));
-  gap: var(--space-2);
-  margin: var(--space-3) 0;
-}
-
 /* The history. */
 
 .mb-audit__alarm {
@@ -301,4 +294,58 @@
 /* The old and new values are words, not code: the UI face, in a sentence. */
 .mb-audit__change code {
   font-family: inherit;
+}
+
+/* The role editor: the three caps in a row, then the permissions section by section. */
+
+.mb-roles__locked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.mb-roles__caps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--permission-min), 1fr));
+  gap: var(--space-3);
+}
+
+.mb-permissions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+}
+
+.mb-permissions__group {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* The section's own tick and its count, on a shaded strip. */
+.mb-permissions__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  background: var(--surface-2);
+  border-bottom: var(--border-width) solid var(--border);
+  font-weight: var(--weight-medium);
+}
+
+.mb-permissions__count {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+  font-variant-numeric: tabular-nums;
+}
+
+.mb-permissions__boxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--permission-min), 1fr));
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
 }

@@ -28,7 +28,9 @@ import {
   useToast,
 } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
+import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { CartView } from '../ipc/generated/CartView';
+import { useMay } from '../shell/permissions';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
 import { useTick } from '../clock';
@@ -56,6 +58,8 @@ const ARROWS_KEY = 'mb.billing.arrows';
 
 export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const toast = useToast();
+  /** What this person may do — a button they may not press is not drawn. */
+  const may = useMay();
   const [cart, setCart] = useState<CartView | null>(null);
   const [tables, setTables] = useState<readonly TableView[]>([]);
   const [menu, setMenu] = useState<readonly MenuItemView[]>([]);
@@ -75,8 +79,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
    * still needs a screen.
    */
   const [splitting, setSplitting] = useState(false);
-  /** Money off this bill. */
-  const [discounting, setDiscounting] = useState(false);
+  /** Money off this bill — or off the one line named. */
+  const [discounting, setDiscounting] = useState<{ line: CartLineView | null } | null>(null);
   // The customer picker for a bill going on an account.
   const [onAccount, setOnAccount] = useState(false);
   /** Which way this bill is being paid. */
@@ -280,11 +284,18 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
     await setQty(typed.index, typed.text.trim());
   }, [cart?.lines, setQty, typingQty]);
 
+  /** Once the kitchen has been told, taking a line off is a void, which is its own permission. */
+  const mayVoidLine = may('order.item.void');
+
   const step = useCallback(
     async (line: { index: number; qty: string; name: string }, by: number) => {
       // One less than one is a removal, and a removal after the kitchen has been told is a
       // void.
       if (by < 0 && cart?.kitchenTold && line.qty === '1') {
+        if (!mayVoidLine) {
+          toast.show('warn', 'The kitchen has this already. Ask somebody who may void an item.');
+          return;
+        }
         setVoidingLine({ index: line.index, name: line.name });
         return;
       }
@@ -294,19 +305,23 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
         report(cause);
       }
     },
-    [cart?.kitchenTold, report],
+    [cart?.kitchenTold, mayVoidLine, report, toast],
   );
 
   /** ✕ — and what ✕ means changes the moment the kitchen has been told. */
   const takeOffTheBill = useCallback(
     async (line: { index: number; name: string }) => {
       if (cart?.kitchenTold) {
+        if (!mayVoidLine) {
+          toast.show('warn', 'The kitchen has this already. Ask somebody who may void an item.');
+          return;
+        }
         setVoidingLine({ index: line.index, name: line.name });
         return;
       }
       await removeLine(line.index);
     },
-    [cart?.kitchenTold, removeLine],
+    [cart?.kitchenTold, mayVoidLine, removeLine, toast],
   );
 
   /**
@@ -1008,15 +1023,30 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                   </button>
                 ) : null}
                 <span className="mb-cartline__amount">{line.amount.text}</span>
-                <button
-                  type="button"
-                  className="mb-cartline__tool mb-cartline__tool--remove"
-                  title={`Remove ${line.name}`}
-                  aria-label={`Remove ${line.name}`}
-                  onClick={() => void takeOffTheBill(line)}
-                >
-                  <Icon name="x" size="sm" />
-                </button>
+                {/* Money off this one line — only for whoever may give it. */}
+                {may('bill.discount.line') ? (
+                  <button
+                    type="button"
+                    className="mb-cartline__tool"
+                    title={`Money off ${line.name}`}
+                    aria-label={`Money off ${line.name}`}
+                    onClick={() => setDiscounting({ line })}
+                  >
+                    <Icon name="tag" size="sm" />
+                  </button>
+                ) : null}
+                {/* ✕ is a void once the kitchen has been told, and a void is a permission. */}
+                {!cart.kitchenTold || mayVoidLine ? (
+                  <button
+                    type="button"
+                    className="mb-cartline__tool mb-cartline__tool--remove"
+                    title={`Remove ${line.name}`}
+                    aria-label={`Remove ${line.name}`}
+                    onClick={() => void takeOffTheBill(line)}
+                  >
+                    <Icon name="x" size="sm" />
+                  </button>
+                ) : null}
               </div>
             ))
           ) : (
@@ -1111,9 +1141,16 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
               Label
             </Button>
           ) : null}
-          <Button size="sm" disabled={!cart || cart.isEmpty} onClick={() => setDiscounting(true)}>
-            {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
-          </Button>
+          {/* The whole bill's discount; a line's own is on the line. */}
+          {may('bill.discount.bill') ? (
+            <Button
+              size="sm"
+              disabled={!cart || cart.isEmpty}
+              onClick={() => setDiscounting({ line: null })}
+            >
+              {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
+            </Button>
+          ) : null}
           <Button
             size="sm"
             disabled={!cart || cart.isEmpty || !cart.orderId}
@@ -1121,14 +1158,19 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           >
             Separate bill
           </Button>
-          {/* A parked order is cancelled with a reason; a typed one simply goes. */}
-          <Button
-            size="sm"
-            disabled={!cart || cart.isEmpty}
-            onClick={() => (cart?.orderId ? setCancelReason(true) : void newOrder())}
-          >
-            Cancel order
-          </Button>
+          {/*
+            A parked order is cancelled with a reason, and cancelling is a permission; a typed
+            one simply goes, which anybody at the counter may do.
+          */}
+          {!cart?.orderId || may('order.cancel') ? (
+            <Button
+              size="sm"
+              disabled={!cart || cart.isEmpty}
+              onClick={() => (cart?.orderId ? setCancelReason(true) : void newOrder())}
+            >
+              Cancel order
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -1166,7 +1208,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       {discounting && cart ? (
         <DiscountDialog
           cart={cart}
-          onClose={() => setDiscounting(false)}
+          line={discounting.line}
+          onClose={() => setDiscounting(null)}
           onChanged={setCart}
         />
       ) : null}

@@ -18,6 +18,6 @@ pub use audit::{AuditAction, AuditEntry, AuditRow, Broken, chain_hash, sha256, v
 pub use device::{DeviceSecret, new_device_secret, random_token, short_code, verify_device_secret};
 pub use error::AuthError;
 pub use lockout::{LOCKOUT_FREE_ATTEMPTS, lockout_after};
-pub use permission::{Permission, PermissionSet};
+pub use permission::{Permission, PermissionGroup, PermissionSet};
 pub use pin::{PIN_DIGITS, Pin, PinHash, hash_pin, hash_secret, verify_pin, verify_secret};
 pub use role::{RolePreset, RoleShape};

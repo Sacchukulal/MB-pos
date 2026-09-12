@@ -308,7 +308,10 @@ pub struct CartLineView {
     pub rate_label: String,
     pub unit_price: MoneyView,
     pub gross: MoneyView,
+    /// Money off this line from both directions: its own discount and its share of the bill's.
     pub discount: MoneyView,
+    /// This line's own discount alone, so the screen knows there is one to take off.
+    pub line_discount: MoneyView,
     /// What this line adds to the bill, tax included.
     pub amount: MoneyView,
     pub modifiers: Vec<String>,
@@ -461,6 +464,7 @@ pub(crate) fn bill_lines(bill: &Bill) -> Vec<CartLineView> {
                 .add(billed.bill_discount_share)
                 .unwrap_or(Money::ZERO)
                 .into(),
+            line_discount: billed.line_discount.into(),
             // What the line adds before its tax, so the lines add up to the Subtotal on the
             // same screen — for a tax-in price this IS the price paid.
             amount: billed.net.into(),

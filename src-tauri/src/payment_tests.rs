@@ -319,7 +319,7 @@ fn a_percentage_comes_off_the_bill_before_the_tax() {
     as_owner(&app, "staff_meena", "Meena");
     let full = one_dosa(&app);
 
-    let view = crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "10".to_owned(), None)
+    let view = crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "10".to_owned(), None, None)
         .expect("the discount is given");
 
     // 120.00 of dosa, 10% off is 12.00, and the 5% GST is charged on 108.00.
@@ -344,7 +344,7 @@ fn a_percentage_comes_off_the_bill_before_the_tax() {
 
     // And taking it away puts the bill back exactly where it was — a discount is not a payment
     // and must not leave a trace in the money.
-    let back = crate::ipc::cart_clear_discount_on(&app).expect("cleared");
+    let back = crate::ipc::cart_clear_discount_on(&app, None).expect("cleared");
     assert_eq!(back.bill.grand_total.paise, full.paise());
     assert_eq!(back.bill.bill_discount.paise, 0);
 }
@@ -358,7 +358,7 @@ fn a_discount_is_parsed_without_a_float() {
     one_dosa(&app);
 
     // Half a per cent of 120.00 is 0.60.
-    let view = crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "0.5".to_owned(), None)
+    let view = crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "0.5".to_owned(), None, None)
         .expect("half a per cent");
     assert_eq!(
         view.bill.bill_discount.text, "0.60",
@@ -368,7 +368,7 @@ fn a_discount_is_parsed_without_a_float() {
 
     // 12.5% of 120.00 is 15.00 — and "12.5" must be 1250bp, not 125bp.
     let view =
-        crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "12.5".to_owned(), None)
+        crate::ipc::cart_set_discount_on(&app, "percent".to_owned(), "12.5".to_owned(), None, None)
             .expect("twelve and a half");
     assert_eq!(
         view.bill.bill_discount.text, "15.00",
@@ -377,7 +377,7 @@ fn a_discount_is_parsed_without_a_float() {
     );
 
     // And rupees off.
-    let view = crate::ipc::cart_set_discount_on(&app, "amount".to_owned(), "50".to_owned(), None)
+    let view = crate::ipc::cart_set_discount_on(&app, "amount".to_owned(), "50".to_owned(), None, None)
         .expect("fifty rupees");
     assert_eq!(
         view.bill.bill_discount.text, "50.00",
@@ -403,7 +403,7 @@ fn a_discount_that_makes_no_sense_is_refused_in_words() {
         ("nonsense", "10"),    // neither kind
     ] {
         assert!(
-            crate::ipc::cart_set_discount_on(&app, kind.to_owned(), value.to_owned(), None)
+            crate::ipc::cart_set_discount_on(&app, kind.to_owned(), value.to_owned(), None, None)
                 .is_err(),
             "{kind} {value:?} was accepted"
         );

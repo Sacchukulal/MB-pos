@@ -16,6 +16,7 @@ import type { UiError } from './generated/UiError';
 import type { LockState } from './generated/LockState';
 import type { OwnerProof } from './generated/OwnerProof';
 import type { PersonView } from './generated/PersonView';
+import type { PermissionGroupView } from './generated/PermissionGroupView';
 import type { RoleView } from './generated/RoleView';
 import type { StaffEdit } from './generated/StaffEdit';
 import type { AuditView } from './generated/AuditView';
@@ -166,11 +167,12 @@ export interface Commands {
   cart_clear_payments: { args: void; returns: CartView };
   cart_cash_given: { args: { amount: string }; returns: CartView };
   /** Money off this bill. */
+  /** `line` is one line of the bill; without it the discount is the whole bill's. */
   cart_set_discount: {
-    args: { kind: string; value: string; reason: string | null };
+    args: { kind: string; value: string; reason: string | null; line: number | null };
     returns: CartView;
   };
-  cart_clear_discount: { args: void; returns: CartView };
+  cart_clear_discount: { args: { line: number | null }; returns: CartView };
   open_orders: { args: void; returns: TableView[] };
   menu_items: { args: void; returns: MenuItemView[] };
   /** Ranked search — the rule lives in Rust. */
@@ -216,7 +218,7 @@ export interface Commands {
   staff_details: { args: { staffId: string }; returns: StaffDetailView };
   list_roles: { args: void; returns: RoleView[] };
   save_role: { args: { role: RoleView }; returns: RoleView[] };
-  list_permissions: { args: void; returns: [string, string][] };
+  list_permissions: { args: void; returns: PermissionGroupView[] };
   audit_trail: {
     args: {
       staffId: string | null;

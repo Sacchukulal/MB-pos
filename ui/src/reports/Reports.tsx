@@ -17,6 +17,7 @@ import {
   type Column,
 } from '../kit';
 import { call, isLicenceRefusal, isUiError } from '../ipc/call';
+import { useMay } from '../shell/permissions';
 import { Bills } from './Bills';
 import { Dashboard } from './Dashboard';
 import { Days } from './Days';
@@ -42,6 +43,8 @@ export function Reports({
   initial?: string | null;
 }) {
   const [list, setList] = useState<ReportListView | null>(null);
+  /** Taking a report out of the building is its own permission on top of reading it. */
+  const mayExport = useMay()('reports.export');
   /** The licence saying no, held rather than flashed. */
   const [locked, setLocked] = useState<string>('');
   /**
@@ -223,26 +226,28 @@ export function Reports({
               title={report.title}
               note={report.subtitle}
               action={
-                <div className="mb-reports__exports">
-                  {/*
-                    Sending it first, saving it second: an owner looking at this at 11 p.m.
-                  */}
-                  <Button size="sm" variant="quiet" onClick={() => share('copy')}>
-                    Copy
-                  </Button>
-                  <Button size="sm" variant="quiet" onClick={() => share('whats_app')}>
-                    WhatsApp
-                  </Button>
-                  <Button size="sm" variant="quiet" onClick={() => share('email')}>
-                    Email
-                  </Button>
-                  <Button size="sm" variant="quiet" onClick={() => save('report_csv')}>
-                    Save as CSV
-                  </Button>
-                  <Button size="sm" variant="quiet" onClick={() => save('report_pdf')}>
-                    Save as PDF
-                  </Button>
-                </div>
+                mayExport ? (
+                  <div className="mb-reports__exports">
+                    {/*
+                      Sending it first, saving it second: an owner looking at this at 11 p.m.
+                    */}
+                    <Button size="sm" variant="quiet" onClick={() => share('copy')}>
+                      Copy
+                    </Button>
+                    <Button size="sm" variant="quiet" onClick={() => share('whats_app')}>
+                      WhatsApp
+                    </Button>
+                    <Button size="sm" variant="quiet" onClick={() => share('email')}>
+                      Email
+                    </Button>
+                    <Button size="sm" variant="quiet" onClick={() => save('report_csv')}>
+                      Save as CSV
+                    </Button>
+                    <Button size="sm" variant="quiet" onClick={() => save('report_pdf')}>
+                      Save as PDF
+                    </Button>
+                  </div>
+                ) : undefined
               }
             />
 

@@ -375,7 +375,7 @@ fn verdict_words(verdict: employment::DayVerdict) -> (String, &'static str) {
 
 /// The People tab, with the employment side filled in.
 pub fn people_on(app: &App) -> UiResult<Vec<EmployeeView>> {
-    guard::require(app, Permission::StaffManage)?;
+    guard::require_any(app, guard::STAFF_PERMISSIONS)?;
     let may_see_pay = guard::require(app, Permission::SalaryView).is_ok();
 
     app.with_shop(|shop| {

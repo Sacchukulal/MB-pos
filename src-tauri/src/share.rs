@@ -38,6 +38,8 @@ pub fn share_report_on(
     period: crate::reports::PeriodArg,
     channel: Channel,
 ) -> UiResult<ShareView> {
+    // Sending a report out is exporting it, on top of reading it.
+    crate::guard::require(app, mb_auth::Permission::ReportsExport)?;
     let report = crate::reports::report_on(app, id, period)?;
     let text = summarise(&report);
     hand_over(&text, &report.title, channel)

@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Badge,
   Button,
-  Checkbox,
   Fact,
   Facts,
   Fields,
@@ -32,12 +31,15 @@ import type { StaffEdit } from '../ipc/generated/StaffEdit';
 import { PIN_DIGITS } from './keyboard';
 import { Attendance, Leave, Payroll, Salary } from './Employment';
 import { blankPerson, editOf } from './person';
+import { Roles } from './Roles';
+import { useMay } from '../shell/permissions';
 import type { EmployeeView } from '../ipc/generated/EmployeeView';
 
 import './auth.css';
 
 export function Staff() {
-  const [tab, setTab] = useState('people');
+  const may = useMay();
+  const [chosen, setChosen] = useState<string | null>(null);
   const [people, setPeople] = useState<readonly EmployeeView[]>([]);
 
   // The employment tabs need the list of people to choose between, and the salary tab needs it
@@ -52,24 +54,26 @@ export function Staff() {
       });
   }, []);
 
+  // Only the tabs this person may use. Attendance and Leave are everybody's — clocking in and
+  // asking for leave need no permission — and the page inside hides the manager's half.
+  const seesPay = may('salary.view') || may('salary.manage');
+  const tabs = [
+    { id: 'people', label: 'People', shown: may('staff.manage') },
+    { id: 'attendance', label: 'Attendance', shown: true },
+    { id: 'leave', label: 'Leave', shown: true },
+    { id: 'salary', label: 'Salary', shown: seesPay },
+    { id: 'payroll', label: 'Payroll', shown: seesPay },
+    { id: 'roles', label: 'Roles', shown: may('staff.manage') },
+  ].filter((t) => t.shown);
+  const tab = tabs.some((t) => t.id === chosen) ? chosen : tabs[0]?.id;
+
   return (
     <Page className="mb-screen">
       <PageHeader
         title="Staff"
         note="Nobody is ever deleted. Somebody who leaves is marked as having left, so their name stays on their bills and in the history."
       />
-      <Tabs
-        tabs={[
-          { id: 'people', label: 'People' },
-          { id: 'attendance', label: 'Attendance' },
-          { id: 'leave', label: 'Leave' },
-          { id: 'salary', label: 'Salary' },
-          { id: 'payroll', label: 'Payroll' },
-          { id: 'roles', label: 'Roles' },
-        ]}
-        active={tab}
-        onChange={setTab}
-      />
+      <Tabs tabs={tabs} active={tab ?? ''} onChange={setChosen} />
       {tab === 'people' ? <People /> : null}
       {tab === 'attendance' ? <Attendance /> : null}
       {tab === 'leave' ? <Leave /> : null}
@@ -459,127 +463,3 @@ function EditPerson({
   );
 }
 
-function Roles() {
-  const [roles, setRoles] = useState<readonly RoleView[]>([]);
-  const [permissions, setPermissions] = useState<readonly [string, string][]>([]);
-  const [editing, setEditing] = useState<RoleView | null>(null);
-  const toast = useToast();
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        setRoles(await call('list_roles'));
-        // The grid is built from the permissions that exist, never from a list typed into this
-        // file — so it can only ever offer a permission the database has a row for.
-        setPermissions(await call('list_permissions'));
-      } catch (cause) {
-        if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
-      }
-    })();
-  }, [toast]);
-
-  return (
-    <>
-      <div className="mb-roles">
-        {roles.map((role) => (
-          <div key={role.id} className="mb-roles__role">
-            <div className="mb-stack">
-              <strong>{role.name}</strong>
-              <span className="mb-muted">
-                {role.permissions.length} of {permissions.length} things allowed
-                {role.maxDiscountPercent === null
-                  ? ''
-                  : ` · up to ${role.maxDiscountPercent} off`}
-              </span>
-            </div>
-            <Button size="sm" onClick={() => setEditing(role)}>
-              Edit
-            </Button>
-          </div>
-        ))}
-      </div>
-
-      {editing ? (
-        <EditRole
-          role={editing}
-          permissions={permissions}
-          onClose={() => setEditing(null)}
-          onSaved={(saved) => {
-            setRoles(saved);
-            setEditing(null);
-          }}
-        />
-      ) : null}
-    </>
-  );
-}
-
-function EditRole({
-  role,
-  permissions,
-  onClose,
-  onSaved,
-}: {
-  role: RoleView;
-  permissions: readonly [string, string][];
-  onClose: () => void;
-  onSaved: (roles: readonly RoleView[]) => void;
-}) {
-  const [name, setName] = useState(role.name);
-  const [granted, setGranted] = useState<readonly string[]>(role.permissions);
-  // The text Rust formatted, edited as text and sent back as text.
-  const [percent, setPercent] = useState(role.maxDiscountPercent ?? '');
-  const toast = useToast();
-
-  const save = async () => {
-    try {
-      const saved = await call('save_role', {
-        role: {
-          ...role,
-          name,
-          permissions: [...granted],
-          maxDiscountPercent: percent.trim() === '' ? null : percent,
-        },
-      });
-      onSaved(saved);
-    } catch (cause) {
-      if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
-    }
-  };
-
-  return (
-    <Modal open title={role.name} onClose={onClose} wide>
-      <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-      <Input
-        label="Biggest discount"
-        hint="Per cent. Leave it empty for no limit."
-        value={percent}
-        onChange={(e) => setPercent(e.target.value.replace(/[^0-9.]/g, ''))}
-      />
-      <div className="mb-permissions">
-        {permissions.map(([code, description]) => (
-          <Checkbox
-            key={code}
-            label={description}
-            checked={granted.includes(code)}
-            onChange={(e) =>
-              setGranted(
-                e.target.checked
-                  ? [...granted, code]
-                  : granted.filter((c) => c !== code),
-              )
-            }
-          />
-        ))}
-      </div>
-      <div className="mb-row mb-row--end">
-        <Button variant="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button variant="primary" onClick={() => void save()}>
-          Save
-        </Button>
-      </div>
-    </Modal>
-  );
-}

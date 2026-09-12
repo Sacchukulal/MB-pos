@@ -270,7 +270,7 @@ pub struct PhotoView {
 
 /// The buying screen.
 pub fn buying_on(app: &App, supplier: Option<String>) -> UiResult<BuyingView> {
-    let who = guard::require(app, Permission::PurchasesManage)?;
+    let who = guard::require_any(app, guard::BUYING_PERMISSIONS)?;
     crate::licensing::gate(app, Feature::Inventory)?;
     let at = now();
     let day = today(at);
@@ -400,7 +400,7 @@ pub fn buying_on(app: &App, supplier: Option<String>) -> UiResult<BuyingView> {
 
 /// One supplier's ledger.
 pub fn supplier_account_on(app: &App, id: String) -> UiResult<SupplierAccountView> {
-    guard::require(app, Permission::PurchasesManage)?;
+    guard::require_any(app, guard::BUYING_PERMISSIONS)?;
     crate::licensing::gate(app, Feature::Inventory)?;
     let day = today(now());
 

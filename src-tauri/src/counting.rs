@@ -115,7 +115,7 @@ pub struct CountEdit {
 }
 
 pub fn stock_count_on(app: &App, id: Option<String>) -> UiResult<StockCountView> {
-    guard::require(app, Permission::InventoryView)?;
+    guard::require_any(app, guard::COUNT_PERMISSIONS)?;
     crate::licensing::gate(app, Feature::Inventory)?;
     let who = app.sessions().current();
     let may_approve = who

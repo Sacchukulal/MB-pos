@@ -334,7 +334,7 @@ pub struct RecipeLineEdit {
 // Reading it.
 
 pub fn inventory_on(app: &App, material: Option<String>) -> UiResult<InventoryView> {
-    let who = guard::require(app, Permission::InventoryView)?;
+    let who = guard::require_any(app, guard::STOCK_PERMISSIONS)?;
     crate::licensing::gate(app, Feature::Inventory)?;
     let at = now();
 

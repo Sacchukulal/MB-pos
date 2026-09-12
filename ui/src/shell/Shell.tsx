@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { Button, Icon, Logo, Modal, plural, useToast, type IconName } from '../kit';
+import { Button, EmptyState, Icon, Logo, Modal, plural, useToast, type IconName } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
@@ -18,6 +18,7 @@ import { FirstRun } from '../setup/FirstRun';
 import { AlertsPanel, loudest, type Alert } from './Alerts';
 import { DayGate } from './DayGate';
 import { More } from './More';
+import { MayProvider } from './permissions';
 import { Billing } from '../billing/Billing';
 import { SettleDesk } from '../billing/SettleDesk';
 import { Health } from '../health/Health';
@@ -72,6 +73,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     icon: 'receipt',
     // `go` so an empty shop's counter can open the menu, the floor and the printers.
     render: (go) => <Billing onGoTo={go} />,
+    needs: 'bill.create',
   },
   {
     // The floor answers a different question from the billing grid: not "which table am I
@@ -81,6 +83,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     label: 'Floor',
     icon: 'grid',
     render: () => <Floor />,
+    needs: 'bill.create',
   },
   {
     // Watched all day, and given to whoever may let a phone on — a manager as much as the
@@ -97,7 +100,8 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     label: 'Credit',
     icon: 'wallet',
     render: () => <Credit />,
-    needs: 'customers.manage',
+    // Taking a repayment is done here too, so whoever may take one gets in.
+    needsAny: ['customers.manage', 'credit.collect'],
   },
   {
     // "Spends", not "Expenses": the rail is read at a glance and the shorter word is the one a
@@ -115,7 +119,15 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     label: 'Stock',
     icon: 'boxes',
     render: (go) => <Stock onGoTo={go} />,
-    needs: 'inventory.view',
+    // A cook recording wastage and a helper counting shelves both work here — the same list
+    // as Rust's `STOCK_PERMISSIONS`.
+    needsAny: [
+      'inventory.view',
+      'inventory.manage',
+      'stock.waste',
+      'stock.count',
+      'stock.adjust',
+    ],
   },
   {
     // Next to Stock, because they are the same shelf from two ends: what came in, and what is
@@ -124,7 +136,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     label: 'Buying',
     icon: 'truck',
     render: () => <Buying />,
-    needs: 'purchases.manage',
+    needsAny: ['purchases.manage', 'suppliers.manage'],
   },
   {
     // Beside the floor, because it is the same question asked about the food that has left the
@@ -133,6 +145,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     label: 'Delivery',
     icon: 'bike',
     render: () => <Delivery />,
+    needsAny: ['bill.create', 'delivery.dispatch'],
   },
   {
     // Bills and Day open/close live inside Reports: "what did that customer pay?", "how did
@@ -178,7 +191,16 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     label: 'Staff',
     icon: 'users',
     render: () => <Staff />,
-    needs: 'staff.manage',
+    // Attendance, leave and pay live here too, so every one of those jobs opens it — the same
+    // list as Rust's `STAFF_PERMISSIONS`. The tabs inside hide what the person may not do.
+    needsAny: [
+      'staff.manage',
+      'attendance.mark',
+      'attendance.correct',
+      'leave.approve',
+      'salary.view',
+      'salary.manage',
+    ],
   },
   {
     id: 'history',
@@ -216,6 +238,9 @@ const SCREENS: readonly Screen[] = import.meta.env.DEV
         label: 'Kit',
         icon: 'tag',
         render: () => <Gallery />,
+        // A developer's screen, so it opens for whoever may manage the shop's staff — which
+        // keeps it out of the way when a test signs in a role with nothing ticked.
+        needs: 'staff.manage',
       },
     ]
   : SHIPPED_SCREENS;
@@ -231,6 +256,8 @@ export function Shell() {
     setSub(slash < 0 ? null : id.slice(slash + 1));
     setScreenOnly(slash < 0 ? id : id.slice(0, slash));
   }, []);
+  /** Whose screen this is. A different person signing in starts from the front. */
+  const lastPerson = useRef<string | null>(null);
   /** The phones: live now, and asking to join. */
   const [phones, setPhones] = useState<PhonesView>({ connected: 0, waiting: 0 });
   const [status, setStatus] = useState<AppStatus | null>(null);
@@ -482,6 +509,21 @@ export function Shell() {
     if (behindMore && active) setLastMore(active.id);
   }, [behindMore, active]);
 
+  // Somebody else signing in gets the front screen, not the last person's page — which they
+  // may not be allowed to open, and which More would otherwise keep trying to go back to.
+  const signedInAs = lock?.signedInAs ?? null;
+  useEffect(() => {
+    if (signedInAs === null) return;
+    if (lastPerson.current !== null && lastPerson.current !== signedInAs) {
+      setScreenOnly(allowed[0]?.id ?? 'billing');
+      setSub(null);
+      setLastMore(null);
+    }
+    lastPerson.current = signedInAs;
+    // `allowed` is derived from the same lock state, so the person is the only real trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedInAs]);
+
   // Locked = there is nobody signed in.
   const locked = inApp() && lock !== null && lock.signedInAs === null;
 
@@ -596,7 +638,8 @@ export function Shell() {
         shopPath={status?.shopPath ?? null}
         // Behind the lock there is no navigation: the bar shows the brand and the tools only.
         screens={locked ? [] : allowed}
-        current={screen}
+        // The screen actually drawn, which is the first allowed one when `screen` is not.
+        current={active?.id ?? screen}
         onGo={setScreen}
         lastMore={lastMore}
         themeIcon={theme.icon}
@@ -620,12 +663,23 @@ export function Shell() {
       <div className="mb-body">
         <main className="mb-main">
           {/* Nothing is rendered behind the lock. */}
-          {locked || !active ? null : behindMore ? (
-            <More screens={inMore} current={active.id} onGo={setScreen}>
-              {active.render(setScreen, active.id === screen ? sub : null)}
-            </More>
+          {locked ? null : !active ? (
+            // A role with no screen at all. The counter still locks, so the next person can
+            // sign in; the owner fixes the role.
+            <EmptyState
+              title="Nothing to open here"
+              hint="This role has no screens on the counter yet. The owner can change what it may do under Staff, on the Roles tab."
+            />
           ) : (
-            active.render(setScreen, active.id === screen ? sub : null)
+            <MayProvider held={held}>
+              {behindMore ? (
+                <More screens={inMore} current={active.id} onGo={setScreen}>
+                  {active.render(setScreen, active.id === screen ? sub : null)}
+                </More>
+              ) : (
+                active.render(setScreen, active.id === screen ? sub : null)
+              )}
+            </MayProvider>
           )}
         </main>
       </div>
@@ -684,6 +738,22 @@ export function Shell() {
   );
 }
 /** The top bar. */
+/**
+ * Where the More button goes: the More page already up, else the one last opened — only if THIS
+ * person may open it — else the first one they may. The last person's page is not this
+ * person's, and pressing More must never land on the bar's first screen.
+ */
+export function moreTarget(
+  inMore: readonly Screen[],
+  elsewhere: Screen | null,
+  lastMore: string | null,
+  current: string,
+): string {
+  return (
+    elsewhere?.id ?? inMore.find((s) => s.id === lastMore)?.id ?? inMore[0]?.id ?? current
+  );
+}
+
 /** How the thirteen screens divide between the bar and the More sheet. */
 export function splitScreens(
   screens: readonly Screen[],
@@ -851,7 +921,7 @@ function TopBar({
             type="button"
             className="mb-nav__item mb-nav__item--more"
             aria-current={elsewhere ? 'page' : undefined}
-            onClick={() => go(elsewhere?.id ?? lastMore ?? inMore[0]?.id ?? current)}
+            onClick={() => go(moreTarget(inMore, elsewhere, lastMore, current))}
           >
             {/* Always "More": the page names itself, so the bar never reflows. */}
             <Icon name="more" size="md" />

@@ -147,7 +147,7 @@ pub fn who_owes_on(app: &App) -> UiResult<Vec<CustomerView>> {
 /// Everybody, whether they owe anything or not — the picker on the billing screen needs this
 /// one.
 pub fn customers_on(app: &App) -> UiResult<Vec<CustomerView>> {
-    guard::require(app, Permission::CustomersManage)?;
+    guard::require_any(app, guard::CREDIT_PERMISSIONS)?;
     let day = today(now());
 
     app.with_shop(|shop| {

@@ -68,48 +68,238 @@ pub enum Permission {
 }
 
 impl Permission {
-    /// Every permission, in the order the roles screen shows them.
+    /// Every permission, in the order the roles screen shows them: group by group, and inside
+    /// a group from the everyday thing to the rare one.
     pub const ALL: &'static [Permission] = &[
+        // Billing.
         Permission::BillCreate,
         Permission::BillDiscountLine,
         Permission::BillDiscountBill,
+        Permission::BillReprint,
         Permission::BillVoid,
         Permission::BillRevert,
         Permission::BillRevertApprove,
-        Permission::BillReprint,
+        // Orders.
         Permission::OrderCancel,
         Permission::OrderItemVoid,
+        // Cash and the day.
+        Permission::DayClose,
+        Permission::ExpensesManage,
         Permission::DrawerOpen,
-        Permission::MenuManage,
-        Permission::TablesManage,
+        // Customers and credit.
         Permission::CustomersManage,
         Permission::CreditCollect,
-        Permission::ExpensesManage,
-        Permission::ReportsView,
-        Permission::ReportsExport,
-        Permission::DayClose,
-        Permission::SettingsStore,
-        Permission::SettingsPrinter,
-        Permission::SettingsTax,
-        Permission::StaffManage,
-        Permission::AuditView,
-        Permission::BackupRun,
-        Permission::DevicesPair,
-        Permission::LicenceManage,
+        // Delivery.
+        Permission::DeliveryDispatch,
+        // Menu and tables.
+        Permission::MenuManage,
+        Permission::TablesManage,
+        // Stock.
         Permission::InventoryView,
         Permission::InventoryManage,
         Permission::StockWaste,
-        Permission::StockAdjust,
-        Permission::SuppliersManage,
-        Permission::PurchasesManage,
         Permission::StockCount,
+        Permission::StockAdjust,
+        // Buying.
+        Permission::PurchasesManage,
+        Permission::SuppliersManage,
+        // Staff.
+        Permission::StaffManage,
         Permission::AttendanceMark,
         Permission::AttendanceCorrect,
         Permission::LeaveApprove,
         Permission::SalaryView,
         Permission::SalaryManage,
-        Permission::DeliveryDispatch,
+        // Reports and history.
+        Permission::ReportsView,
+        Permission::ReportsExport,
+        Permission::AuditView,
+        // Settings.
+        Permission::SettingsStore,
+        Permission::SettingsPrinter,
+        Permission::SettingsTax,
+        // Account, backup and phones.
+        Permission::BackupRun,
+        Permission::DevicesPair,
+        Permission::LicenceManage,
     ];
+
+    /// Which section of the roles screen this sits in.
+    #[must_use]
+    pub const fn group(self) -> PermissionGroup {
+        match self {
+            Permission::BillCreate
+            | Permission::BillDiscountLine
+            | Permission::BillDiscountBill
+            | Permission::BillReprint
+            | Permission::BillVoid
+            | Permission::BillRevert
+            | Permission::BillRevertApprove => PermissionGroup::Billing,
+            Permission::OrderCancel | Permission::OrderItemVoid => PermissionGroup::Orders,
+            Permission::DayClose | Permission::ExpensesManage | Permission::DrawerOpen => {
+                PermissionGroup::Cash
+            }
+            Permission::CustomersManage | Permission::CreditCollect => PermissionGroup::Customers,
+            Permission::DeliveryDispatch => PermissionGroup::Delivery,
+            Permission::MenuManage | Permission::TablesManage => PermissionGroup::Menu,
+            Permission::InventoryView
+            | Permission::InventoryManage
+            | Permission::StockWaste
+            | Permission::StockCount
+            | Permission::StockAdjust => PermissionGroup::Stock,
+            Permission::PurchasesManage | Permission::SuppliersManage => PermissionGroup::Buying,
+            Permission::StaffManage
+            | Permission::AttendanceMark
+            | Permission::AttendanceCorrect
+            | Permission::LeaveApprove
+            | Permission::SalaryView
+            | Permission::SalaryManage => PermissionGroup::Staff,
+            Permission::ReportsView | Permission::ReportsExport | Permission::AuditView => {
+                PermissionGroup::Reports
+            }
+            Permission::SettingsStore | Permission::SettingsPrinter | Permission::SettingsTax => {
+                PermissionGroup::Settings
+            }
+            Permission::BackupRun | Permission::DevicesPair | Permission::LicenceManage => {
+                PermissionGroup::Shop
+            }
+        }
+    }
+
+    /// Whether the roles screen offers this box. A permission with nothing behind it yet stays
+    /// in the vocabulary, so a role that holds it keeps it, but it is not offered.
+    #[must_use]
+    pub const fn shown(self) -> bool {
+        // The drawer opens itself on a cash sale when the Printers page says so; there is no
+        // separate "open the drawer" button for this to guard (owner, 2026-09-12).
+        !matches!(self, Permission::DrawerOpen)
+    }
+
+    /// The short name beside the box on the roles screen.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Permission::BillCreate => "Take orders and settle bills",
+            Permission::BillDiscountLine => "Discount one line",
+            Permission::BillDiscountBill => "Discount the whole bill",
+            Permission::BillVoid => "Void a settled bill",
+            Permission::BillRevert => "Take a paid bill back",
+            Permission::BillRevertApprove => "Approve a corrected bill",
+            Permission::BillReprint => "Reprint a bill",
+            Permission::OrderCancel => "Cancel an open order",
+            Permission::OrderItemVoid => "Void a kitchen item",
+            Permission::DrawerOpen => "Open the cash drawer",
+            Permission::MenuManage => "Edit the menu",
+            Permission::TablesManage => "Arrange tables",
+            Permission::CustomersManage => "Manage customers",
+            Permission::CreditCollect => "Take credit repayments",
+            Permission::ExpensesManage => "Record expenses",
+            Permission::ReportsView => "See reports",
+            Permission::ReportsExport => "Export and share reports",
+            Permission::DayClose => "Open and close the day",
+            Permission::SettingsStore => "Shop details and bill design",
+            Permission::SettingsPrinter => "Printers",
+            Permission::SettingsTax => "Tax and numbering",
+            Permission::StaffManage => "Manage staff and roles",
+            Permission::AuditView => "Read the history",
+            Permission::BackupRun => "Backups",
+            Permission::DevicesPair => "Phones",
+            Permission::LicenceManage => "Account and licence",
+            Permission::InventoryView => "See stock",
+            Permission::InventoryManage => "Edit materials and recipes",
+            Permission::StockWaste => "Record wastage",
+            Permission::StockAdjust => "Adjust stock by hand",
+            Permission::SuppliersManage => "Manage suppliers",
+            Permission::PurchasesManage => "Enter purchases",
+            Permission::StockCount => "Count stock",
+            Permission::AttendanceMark => "Mark attendance",
+            Permission::AttendanceCorrect => "Correct clock times",
+            Permission::LeaveApprove => "Approve leave",
+            Permission::SalaryView => "See salaries",
+            Permission::SalaryManage => "Set salaries and run payroll",
+            Permission::DeliveryDispatch => "Send deliveries out",
+        }
+    }
+
+    /// The explanation behind the info button: what the box really lets somebody do.
+    #[must_use]
+    pub const fn hint(self) -> &'static str {
+        match self {
+            Permission::BillCreate => "Take an order, send it to the kitchen, and settle the bill.",
+            Permission::BillDiscountLine => {
+                "Give a discount on one item of a bill, up to this role's limit."
+            }
+            Permission::BillDiscountBill => {
+                "Give a discount on the whole bill, up to this role's limit."
+            }
+            Permission::BillVoid => {
+                "Cancel a bill that was already paid. Needs a reason, and goes in the history."
+            }
+            Permission::BillRevert => {
+                "Bring a paid bill back to the counter, fix it, and bill it again under the same \
+                 number."
+            }
+            Permission::BillRevertApprove => "Sign off a bill that was taken back and billed again.",
+            Permission::BillReprint => "Print a settled bill again. Every reprint is counted.",
+            Permission::OrderCancel => "Cancel an order that has not been billed yet. Needs a reason.",
+            Permission::OrderItemVoid => {
+                "Take one item off after the kitchen ticket went out. Needs a reason."
+            }
+            Permission::DrawerOpen => "Open the cash drawer without a sale.",
+            Permission::MenuManage => "Add, edit and price menu items and categories.",
+            Permission::TablesManage => "Add, move and remove tables and sections on the floor.",
+            Permission::CustomersManage => "Add customers, edit their details, and set credit limits.",
+            Permission::CreditCollect => "Receive money against a customer's account.",
+            Permission::ExpensesManage => "Record and edit money paid out of the till.",
+            Permission::ReportsView => "Open the dashboard, the bill list, and the sales reports.",
+            Permission::ReportsExport => "Save a report as CSV or PDF, or send it by WhatsApp or email.",
+            Permission::DayClose => {
+                "Close and lock the business day, count the drawer, and open the next one."
+            }
+            Permission::SettingsStore => "Change the shop's name, address, bill design, and tills.",
+            Permission::SettingsPrinter => "Set up printers, the cash drawer, and the label printer.",
+            Permission::SettingsTax => "Change tax rates and bill numbering.",
+            Permission::StaffManage => {
+                "Add people, set their roles and PINs, and change what each role may do."
+            }
+            Permission::AuditView => {
+                "Read the audit trail: every void, discount, refund and reprint, and who did it."
+            }
+            Permission::BackupRun => "Take a backup, and restore one. Restoring replaces everything.",
+            Permission::DevicesPair => "Let a phone onto this counter, and take it off again.",
+            Permission::LicenceManage => {
+                "Open the Account page: the plan, the licence, and updates. Move or sign out the \
+                 licence."
+            }
+            Permission::InventoryView => "Read stock levels, recipes, and food cost.",
+            Permission::InventoryManage => {
+                "Add materials, set their cost, and change what a dish is made of."
+            }
+            Permission::StockWaste => {
+                "Write down what was thrown away. Wastage is what shows theft, so a cook has to be \
+                 able to record it."
+            }
+            Permission::StockAdjust => {
+                "Change a stock figure with no bill and no bin behind it, and approve stock counts."
+            }
+            Permission::SuppliersManage => "Add suppliers, record what the shop owes them, and pay them.",
+            Permission::PurchasesManage => "Enter deliveries, returns, and purchase orders.",
+            Permission::StockCount => {
+                "Walk the store and write down what is on the shelves. Approving the count needs \
+                 Adjust stock by hand."
+            }
+            Permission::AttendanceMark => "Mark somebody present or absent, and set the roster.",
+            Permission::AttendanceCorrect => {
+                "Change a clock-in or clock-out after the event. Never your own."
+            }
+            Permission::LeaveApprove => "Approve or reject leave, and adjust a leave balance.",
+            Permission::SalaryView => "See what people are paid, and the staff cost.",
+            Permission::SalaryManage => "Set salaries, give advances, and approve a payroll run.",
+            Permission::DeliveryDispatch => {
+                "Assign riders, move deliveries along, and take the cash back off riders."
+            }
+        }
+    }
 
     /// The stored form. This string is a database value: changing one is a migration, not a
     /// rename.
@@ -213,6 +403,65 @@ impl Permission {
             .ok_or_else(|| AuthError::UnknownPermission {
                 code: code.to_owned(),
             })
+    }
+}
+
+/// The sections of the roles screen, in the order they are shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum PermissionGroup {
+    Billing,
+    Orders,
+    Cash,
+    Customers,
+    Delivery,
+    Menu,
+    Stock,
+    Buying,
+    Staff,
+    Reports,
+    Settings,
+    Shop,
+}
+
+impl PermissionGroup {
+    /// Every group, in screen order.
+    pub const ALL: &'static [PermissionGroup] = &[
+        PermissionGroup::Billing,
+        PermissionGroup::Orders,
+        PermissionGroup::Cash,
+        PermissionGroup::Customers,
+        PermissionGroup::Delivery,
+        PermissionGroup::Menu,
+        PermissionGroup::Stock,
+        PermissionGroup::Buying,
+        PermissionGroup::Staff,
+        PermissionGroup::Reports,
+        PermissionGroup::Settings,
+        PermissionGroup::Shop,
+    ];
+
+    /// The section heading.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            PermissionGroup::Billing => "Billing",
+            PermissionGroup::Orders => "Orders",
+            PermissionGroup::Cash => "Cash and the day",
+            PermissionGroup::Customers => "Customers and credit",
+            PermissionGroup::Delivery => "Delivery",
+            PermissionGroup::Menu => "Menu and tables",
+            PermissionGroup::Stock => "Stock",
+            PermissionGroup::Buying => "Buying",
+            PermissionGroup::Staff => "Staff",
+            PermissionGroup::Reports => "Reports and history",
+            PermissionGroup::Settings => "Settings",
+            PermissionGroup::Shop => "Account, backup and phones",
+        }
+    }
+
+    /// The permissions in this section, in screen order.
+    pub fn permissions(self) -> impl Iterator<Item = Permission> {
+        Permission::ALL.iter().copied().filter(move |p| p.group() == self)
     }
 }
 
@@ -325,6 +574,45 @@ mod tests {
         let all = PermissionSet::everything();
         assert_eq!(all.len(), Permission::ALL.len());
         assert!(all.has(Permission::StaffManage));
+    }
+
+    #[test]
+    fn every_group_has_a_box_and_every_box_a_group() {
+        let mut seen = 0;
+        for group in PermissionGroup::ALL {
+            let boxes: Vec<Permission> = group.permissions().collect();
+            assert!(!boxes.is_empty(), "{group:?} has no permission in it");
+            seen += boxes.len();
+        }
+        assert_eq!(seen, Permission::ALL.len(), "a permission sits in no group");
+    }
+
+    #[test]
+    fn all_is_in_group_order() {
+        // The screen draws ALL group by group; a permission out of place would jump sections.
+        let groups: Vec<PermissionGroup> = Permission::ALL.iter().map(|p| p.group()).collect();
+        let mut sorted = groups.clone();
+        sorted.sort();
+        assert_eq!(groups, sorted);
+    }
+
+    #[test]
+    fn a_label_is_short_and_a_hint_is_a_sentence() {
+        for p in Permission::ALL {
+            let label = p.label();
+            assert!(label.len() <= 32, "\"{label}\" is too long for a box");
+            assert!(label.starts_with(|c: char| c.is_uppercase()), "\"{label}\"");
+            assert!(!label.ends_with('.'), "\"{label}\" is a label, not a sentence");
+            let hint = p.hint();
+            assert!(hint.ends_with('.'), "\"{hint}\" must finish");
+            assert_ne!(label, hint, "the tip must say more than the label");
+        }
+    }
+
+    #[test]
+    fn the_drawer_box_is_not_offered() {
+        assert!(!Permission::DrawerOpen.shown());
+        assert_eq!(Permission::ALL.iter().filter(|p| p.shown()).count(), 38);
     }
 
     #[test]
