@@ -96,6 +96,8 @@ pub struct Shared {
     pushes: Arc<tokio::sync::broadcast::Sender<Push>>,
     history: Arc<std::sync::Mutex<std::collections::VecDeque<Push>>>,
     next_seq: Arc<std::sync::atomic::AtomicU64>,
+    /// The first seq of this run: a phone holding a smaller one holds an earlier run's place.
+    first_seq: u64,
 }
 
 impl Shared {
@@ -119,6 +121,7 @@ impl Shared {
             pushes: Arc::new(pushes),
             history: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
             next_seq: Arc::new(std::sync::atomic::AtomicU64::new(first_seq)),
+            first_seq,
         }
     }
 
@@ -155,13 +158,15 @@ impl Shared {
         seq
     }
 
-    /// What a phone missed since `seq`.
+    /// What a phone missed since `seq`. A place from an earlier run is too far behind even
+    /// when this run has pushed nothing yet: an empty answer would tell that phone its floor
+    /// is current when everything may have changed while the counter was down.
     #[must_use]
     pub fn since(&self, seq: u64) -> Missed {
         let history = lock(&self.history);
         let newest = history.back().map_or(0, |p| p.seq);
         let oldest = history.front().map_or(0, |p| p.seq);
-        if seq > 0 && oldest > 0 && seq + 1 < oldest {
+        if seq > 0 && (seq < self.first_seq || (oldest > 0 && seq + 1 < oldest)) {
             return Missed::TooFarBehind { newest };
         }
         Missed::Since {

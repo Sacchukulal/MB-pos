@@ -1110,6 +1110,11 @@ async fn a_counter_restart_never_leaves_a_phone_silently_ahead() {
         identity,
         Arc::new(|| Timestamp::from_millis(87_400_000)),
     );
+    // Before this run has pushed anything at all: still too far behind, never "nothing missed".
+    match today.since(held) {
+        mb_lan::Missed::TooFarBehind { .. } => {}
+        mb_lan::Missed::Since { .. } => panic!("an earlier run's place was answered as current"),
+    }
     today.push("floor", serde_json::json!({ "fresh": true }));
     match today.since(held) {
         mb_lan::Missed::TooFarBehind { newest } => {
