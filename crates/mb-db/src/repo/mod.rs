@@ -59,7 +59,7 @@ pub use counts::{CountLine, CountRepo, CountState, StockCount, Written};
 pub use days::{DayFigures, DayKind, DayRow, DaysRepo};
 pub use floor::FloorRepo;
 pub use menu::MenuRepo;
-pub use menucsv::{ImportPlan, MenuCsvRepo};
+pub use menucsv::{ImportMode, ImportPlan, MenuCsvRepo};
 pub use money::MoneyRepo;
 pub use order::OrderRepo;
 pub use outbox::{Op, OutboxRepo, OutboxRow};

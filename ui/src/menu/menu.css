@@ -169,6 +169,22 @@
   border-radius: var(--radius-md);
 }
 
+/* Which file the plan is about. */
+.mb-import__file {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* What a replace would take away, named before it does. */
+.mb-import__gone {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
 /* Every refused line, by number. */
 .mb-import__refused {
   margin: 0;

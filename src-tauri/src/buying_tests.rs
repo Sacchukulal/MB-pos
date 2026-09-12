@@ -350,9 +350,17 @@ fn the_count_sheet_a_person_carries_has_no_book_quantity_on_it() {
         sheet.contains("______"),
         "there has to be somewhere to write"
     );
+    // The heading carries today's date, and a date has digits in it — on the 12th of a month
+    // it has these very digits. Only the lines with materials on them are the sheet's claim.
+    let lines = sheet
+        .lines()
+        .skip_while(|line| !line.contains("Paneer"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!lines.is_empty(), "the material lines were not found: {sheet}");
     for forbidden in ["12", "12000", "12.0"] {
         assert!(
-            !sheet.contains(forbidden),
+            !lines.contains(forbidden),
             "the sheet printed the book quantity ({forbidden}) — D128, and every \
              variance then goes to zero"
         );

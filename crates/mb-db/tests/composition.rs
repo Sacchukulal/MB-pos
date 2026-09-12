@@ -12,6 +12,7 @@ use common::Scratch;
 use common::shop::{self, OUTLET};
 use mb_core::{ItemId, ModifierId, Money, Qty, Timestamp};
 use mb_db::Repos;
+use mb_db::repo::ImportMode;
 use mb_db::repo::composition::{Combo, ComboPart, Modifier, ModifierGroup, Variant};
 
 fn at(n: i64) -> Timestamp {
@@ -355,7 +356,11 @@ fn a_dry_run_changes_nothing_and_says_what_would_happen() {
                Rasam,4000,GST 5%\r\n";
 
     let plan = db
-        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, csv, ImportMode::Update)
+        })
         .expect("planned");
 
     assert!(plan.is_clean(), "{:?}", plan.refused);
@@ -384,7 +389,7 @@ fn the_import_does_what_the_dry_run_said() {
     let (planned_new, planned_updated, written) = db
         .transaction(|tx| {
             let repos = Repos::new(tx);
-            let plan = repos.menu_csv().plan(OUTLET, csv)?;
+            let plan = repos.menu_csv().plan(OUTLET, csv, ImportMode::Update)?;
             let counts = (plan.new_items.len(), plan.updated_items.len());
             let written = repos.menu_csv().apply(OUTLET, &plan, at(1))?;
             Ok((counts.0, counts.1, written))
@@ -402,10 +407,7 @@ fn the_import_does_what_the_dry_run_said() {
         .find(|i| i.name == "Filter Coffee")
         .expect("the new item is not there");
     assert_eq!(coffee.unit_price, Money::from_paise(3_000));
-    assert_eq!(
-        coffee.tax_class_id,
-        mb_core::TaxClassId::new("tax_food_5")
-    );
+    assert_eq!(coffee.tax_class_id, mb_core::TaxClassId::new("tax_food_5"));
 
     // The dosa was UPDATED, not duplicated.
     let dosas: Vec<_> = items.iter().filter(|i| i.name == "Masala Dosa").collect();
@@ -437,7 +439,11 @@ fn one_bad_row_refuses_the_whole_file_by_line_number() {
                ,5000,GST 5%\r\n";
 
     let plan = db
-        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, csv, ImportMode::Update)
+        })
         .expect("planned");
 
     assert_eq!(plan.refused.len(), 3);
@@ -490,18 +496,31 @@ fn a_menu_survives_a_round_trip_through_a_spreadsheet() {
         .expect("items");
 
     let csv = db
-        .transaction(|tx| Repos::new(tx).menu_csv().export(OUTLET))
+        .transaction(|tx| Repos::new(tx).menu_csv().export(OUTLET, true))
         .expect("exported");
 
     assert!(csv.contains("\r\n"), "RFC 4180 says CRLF, and Excel agrees");
-    assert!(csv.starts_with("id,name,category,price_paise"), "{csv}");
+    assert!(csv.starts_with("category,name,price,tax,"), "{csv}");
 
     let plan = db
-        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, &csv))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, &csv, ImportMode::Update)
+        })
         .expect("planned");
     assert!(plan.is_clean(), "{:?}", plan.refused);
     assert!(plan.new_items.is_empty(), "a round trip invented items");
-    assert_eq!(plan.updated_items.len(), before.len());
+    assert!(
+        plan.updated_items.is_empty(),
+        "a round trip changed items: {:?}",
+        plan.updated_items
+    );
+    assert_eq!(
+        plan.unchanged,
+        before.len(),
+        "every row found its item and matched it"
+    );
 
     db.transaction(|tx| {
         let repos = Repos::new(tx);
@@ -533,20 +552,25 @@ fn an_item_called_chicken_biryani_half_survives() {
     .expect("renamed");
 
     let csv = db
-        .transaction(|tx| Repos::new(tx).menu_csv().export(OUTLET))
+        .transaction(|tx| Repos::new(tx).menu_csv().export(OUTLET, true))
         .expect("exported");
 
     let plan = db
-        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, &csv))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, &csv, ImportMode::Update)
+        })
         .expect("planned");
 
     assert!(plan.is_clean(), "{:?}", plan.refused);
+    // The name came back whole, found its item by id, and matched it — so it is neither new
+    // nor changed. A broken column would have made a refused row or a new item.
     assert!(
-        plan.updated_items
-            .iter()
-            .any(|i| i.name == "Chicken \"Biryani\", Half"),
-        "the comma broke the columns — audit G7"
+        plan.is_empty(),
+        "the comma broke the columns — audit G7: {plan:?}"
     );
+    assert!(csv.contains("\"Chicken \"\"Biryani\"\", Half\""), "{csv}");
 }
 
 /// The reason anybody imports a menu: a shop with nothing in it and a list from the old till.
@@ -566,7 +590,11 @@ fn a_file_naming_new_categories_creates_them_and_says_which() {
                food,Idli,30\r\n";
 
     let plan = db
-        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, csv, ImportMode::Update)
+        })
         .expect("planned");
 
     assert!(plan.is_clean(), "{:?}", plan.refused);
@@ -626,7 +654,7 @@ fn importing_the_same_file_twice_adds_no_second_category() {
     for _ in 0..2 {
         db.transaction(|tx| {
             let repos = Repos::new(tx);
-            let plan = repos.menu_csv().plan(OUTLET, csv)?;
+            let plan = repos.menu_csv().plan(OUTLET, csv, ImportMode::Update)?;
             repos.menu_csv().apply(OUTLET, &plan, at(1))
         })
         .expect("imported");
@@ -660,7 +688,11 @@ fn a_price_may_be_rupees_or_paise_but_never_both() {
                Special Thali,\"Rs 1,250\"\r\n";
 
     let plan = db
-        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, csv, ImportMode::Update)
+        })
         .expect("planned");
     assert!(plan.is_clean(), "{:?}", plan.refused);
 
@@ -677,7 +709,11 @@ fn a_price_may_be_rupees_or_paise_but_never_both() {
     // Both columns at once is a guess about money, and we do not guess about money.
     let both = "name,price,price_paise\r\nLime Soda,60,6000\r\n";
     let plan = db
-        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, both))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, both, ImportMode::Update)
+        })
         .expect("planned");
     assert_eq!(plan.refused.len(), 1);
     assert!(
@@ -703,7 +739,7 @@ fn an_item_with_no_tax_column_falls_back_to_the_shops_rate() {
         .transaction(|tx| {
             Repos::new(tx)
                 .menu_csv()
-                .plan(OUTLET, "name,price\r\nRasam,40\r\n")
+                .plan(OUTLET, "name,price\r\nRasam,40\r\n", ImportMode::Update)
         })
         .expect("planned");
 
@@ -723,7 +759,11 @@ fn a_header_survives_a_byte_order_mark_and_everyday_words() {
                Chicken 65,200,CHINEES\r\n";
 
     let plan = db
-        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, csv, ImportMode::Update)
+        })
         .expect("planned");
 
     assert!(plan.is_clean(), "{:?}", plan.refused);
@@ -745,7 +785,11 @@ fn two_items_that_slug_alike_do_not_overwrite_each_other() {
                Tea?,12\r\n";
 
     let plan = db
-        .transaction(|tx| Repos::new(tx).menu_csv().plan(OUTLET, csv))
+        .transaction(|tx| {
+            Repos::new(tx)
+                .menu_csv()
+                .plan(OUTLET, csv, ImportMode::Update)
+        })
         .expect("planned");
     assert!(plan.is_clean(), "{:?}", plan.refused);
     assert_ne!(

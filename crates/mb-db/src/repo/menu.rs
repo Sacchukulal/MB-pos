@@ -57,9 +57,13 @@ impl MenuItem {
     /// Freeze this item onto a line.
     pub fn snapshot(&self, book: &TaxBook) -> Result<ItemSnapshot, DbError> {
         let tax = self.tax(book)?;
-        let mut snapshot =
-            ItemSnapshot::new(self.id.clone(), self.name.clone(), self.unit_price, tax.rate)
-                .with_tax(tax);
+        let mut snapshot = ItemSnapshot::new(
+            self.id.clone(),
+            self.name.clone(),
+            self.unit_price,
+            tax.rate,
+        )
+        .with_tax(tax);
         if let Some(hsn) = &self.hsn {
             snapshot = snapshot.with_hsn(hsn.clone());
         }
@@ -109,7 +113,10 @@ impl<'a> MenuRepo<'a> {
                 encode::bool_to_sql(category.is_active),
                 encode::timestamp_to_sql(at),
                 category.station,
-                category.default_tax_class_id.as_ref().map(TaxClassId::as_str),
+                category
+                    .default_tax_class_id
+                    .as_ref()
+                    .map(TaxClassId::as_str),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "categories", category.id.as_str(), Op::Upsert, at)
@@ -323,6 +330,21 @@ impl<'a> MenuRepo<'a> {
             Some(id.as_str()),
             at,
         )
+    }
+
+    /// True when something still points at this item: a bill line, a size, a combo, or a
+    /// recipe. Such an item is taken off the menu rather than deleted, so nothing that
+    /// remembers it is left pointing at nothing.
+    pub fn is_in_use(&self, id: &ItemId) -> Result<bool, DbError> {
+        let used: bool = self.tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM order_lines WHERE item_id = ?1)
+                 OR EXISTS (SELECT 1 FROM item_variants WHERE item_id = ?1)
+                 OR EXISTS (SELECT 1 FROM combo_components WHERE item_id = ?1)
+                 OR EXISTS (SELECT 1 FROM recipes WHERE item_id = ?1)",
+            [id.as_str()],
+            |r| r.get(0),
+        )?;
+        Ok(used)
     }
 }
 

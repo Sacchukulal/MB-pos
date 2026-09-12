@@ -30,6 +30,7 @@ import type { CategoryView } from './generated/CategoryView';
 import type { TaxPageView } from './generated/TaxPageView';
 import type { GstinCheckView } from './generated/GstinCheckView';
 import type { ImportPlanView } from './generated/ImportPlanView';
+
 import type { ItemComposition } from './generated/ItemComposition';
 import type { ModifierGroupView } from './generated/ModifierGroupView';
 import type { GroupEdit } from './generated/GroupEdit';
@@ -110,6 +111,9 @@ import type { CounterEdit } from './generated/CounterEdit';
 import type { NoticesView } from './generated/NoticesView';
 import type { OwnerOpenedView } from './generated/OwnerOpenedView';
 import type { OwnerSignInView } from './generated/OwnerSignInView';
+
+/** What a menu file is asked to do: add to and update the menu, or become the menu. */
+export type ImportMode = 'update' | 'replace';
 
 /** Every command, with what it takes and what it gives back. */
 export interface Commands {
@@ -295,9 +299,10 @@ export interface Commands {
     returns: string;
   };
   // The dry run writes nothing; the import then does exactly what it said.
-  plan_menu_import: { args: { csv: string }; returns: ImportPlanView };
-  run_menu_import: { args: { csv: string }; returns: string };
-  export_menu: { args: void; returns: string };
+  pick_menu_file: { args: void; returns: string | null };
+  plan_menu_import: { args: { path: string; mode: ImportMode }; returns: ImportPlanView };
+  run_menu_import: { args: { path: string; mode: ImportMode }; returns: string };
+  export_menu: { args: void; returns: string | null };
 
   item_composition: { args: { itemId: string }; returns: ItemComposition };
   save_item_variant: {

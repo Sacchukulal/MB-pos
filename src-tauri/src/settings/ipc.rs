@@ -552,22 +552,6 @@ pub fn defaults_for_on(app: &App, group: String) -> UiResult<Vec<SettingEdit>> {
         .collect())
 }
 
-/// Re-read from disk, for the moments the configuration may have changed under us — after a
-/// restore, and when a screen wants to be sure.
-/// A file a shop can find: next to its data file.
-pub(crate) fn beside_the_shop(app: &App, file_name: &str) -> std::path::PathBuf {
-    app.with_shop(|shop| {
-        Ok(shop
-            .path
-            .parent()
-            .map_or_else(
-                || std::path::PathBuf::from("."),
-                std::path::Path::to_path_buf,
-            )
-            .join(file_name))
-    })
-    .unwrap_or_else(|_| mb_db::locate::default_config_dir().join(file_name))
-}
 
 // The seats.
 

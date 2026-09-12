@@ -234,6 +234,51 @@ fn escape(value: &str) -> String {
 
 /// The inverse. `None` for an unquoted empty field, `Some("")` for `""`.
 pub(crate) fn parse_csv(text: &str) -> Vec<Vec<Option<String>>> {
+    parse_delimited(text, ',')
+}
+
+/// A spreadsheet somebody else saved. Excel in some locales writes `;` between fields, and a
+/// table pasted out of Excel or Sheets into a text file is tab-separated; the first line says
+/// which, and comma wins a tie.
+pub(crate) fn parse_sheet(text: &str) -> Vec<Vec<Option<String>>> {
+    let first = text.lines().next().unwrap_or("");
+    let count = |wanted: char| first.chars().filter(|c| *c == wanted).count();
+    let commas = count(',');
+    let delimiter = [('\t', count('\t')), (';', count(';'))]
+        .into_iter()
+        .filter(|(_, n)| *n > commas)
+        .max_by_key(|(_, n)| *n)
+        .map_or(',', |(d, _)| d);
+    parse_delimited(text, delimiter)
+}
+
+/// The bytes of a file as text. UTF-8 first — that is what we write and what Excel writes when
+/// asked — and failing that Windows-1252, which is what Excel's plain "CSV" on this platform
+/// still writes for a file with a `é` in it. Left to a UTF-8 decoder those bytes become `�`,
+/// and a menu with `�` in its names is a menu that has to be typed again.
+#[must_use]
+pub fn decode_sheet(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_owned(),
+        Err(_) => bytes.iter().map(|b| windows_1252(*b)).collect(),
+    }
+}
+
+/// One byte of Windows-1252. The upper half differs from Latin-1 only in 0x80–0x9F, where
+/// Windows put the characters a menu is most likely to carry — curly quotes and the `…`.
+fn windows_1252(byte: u8) -> char {
+    const UPPER: [char; 32] = [
+        '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8d}', 'Ž',
+        '\u{8f}', '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9d}',
+        'ž', 'Ÿ',
+    ];
+    match byte {
+        0x80..=0x9f => UPPER[usize::from(byte - 0x80)],
+        _ => char::from(byte),
+    }
+}
+
+fn parse_delimited(text: &str, delimiter: char) -> Vec<Vec<Option<String>>> {
     let mut rows = Vec::new();
     let mut row: Vec<Option<String>> = Vec::new();
     let mut field = String::new();
@@ -266,7 +311,7 @@ pub(crate) fn parse_csv(text: &str) -> Vec<Vec<Option<String>>> {
                 quoted = true;
                 was_quoted = true;
             }
-            ',' => {
+            c if c == delimiter => {
                 row.push(finish(&mut field, &mut was_quoted));
             }
             '\r' => {
@@ -350,6 +395,38 @@ mod tests {
         let parsed = parse_csv(&out);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0], vec![Some(nasty.to_owned())]);
+    }
+
+    #[test]
+    fn a_sheet_says_how_it_is_split() {
+        let tabs = "name\tprice\nTea\t20\n";
+        assert_eq!(
+            parse_sheet(tabs)[1],
+            vec![Some("Tea".to_owned()), Some("20".to_owned())]
+        );
+        let semis = "name;price\nTea;20\n";
+        assert_eq!(
+            parse_sheet(semis)[1],
+            vec![Some("Tea".to_owned()), Some("20".to_owned())]
+        );
+        // A comma inside a quoted name is not a vote against commas.
+        let ours = "name,price\n\"Biryani, Half\",120\n";
+        assert_eq!(
+            parse_sheet(ours)[1],
+            vec![Some("Biryani, Half".to_owned()), Some("120".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_file_excel_saved_as_ansi_still_reads() {
+        // "Café" in Windows-1252: the é is one byte, 0xE9, which is not UTF-8.
+        let ansi = b"name,price\r\nCaf\xe9,40\r\n";
+        assert_eq!(decode_sheet(ansi), "name,price\r\nCafé,40\r\n");
+        // And a curly apostrophe from the 0x80–0x9F block Latin-1 leaves blank.
+        assert_eq!(decode_sheet(b"Chef\x92s"), "Chef’s");
+        // UTF-8 is untouched, byte-order mark and all.
+        let utf8 = "\u{feff}name,price\r\nCafé,40\r\n";
+        assert_eq!(decode_sheet(utf8.as_bytes()), utf8);
     }
 
     #[test]

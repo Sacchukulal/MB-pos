@@ -1,6 +1,7 @@
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
 use mb_core::{CategoryId, ItemId, Money, TaxClassId};
+use mb_db::repo::ImportMode;
 use mb_db::repo::menu::{Category, MenuItem};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -107,7 +108,10 @@ pub fn categories_on(app: &App) -> UiResult<Vec<CategoryView>> {
                         name: c.name,
                         sort_order: c.sort_order,
                         is_active: c.is_active,
-                        default_slab_id: c.default_tax_class_id.as_ref().map(|s| s.as_str().to_owned()),
+                        default_slab_id: c
+                            .default_tax_class_id
+                            .as_ref()
+                            .map(|s| s.as_str().to_owned()),
                     })
                     .collect())
             })
@@ -231,7 +235,9 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                                 mb_db::DbError::invariant("that tax slab is not one this shop has")
                             })?;
                         if !class.is_active {
-                            return Err(mb_db::DbError::invariant("that tax slab has been removed"));
+                            return Err(mb_db::DbError::invariant(
+                                "that tax slab has been removed",
+                            ));
                         }
                         class.id
                     }
@@ -674,54 +680,120 @@ pub fn change_menu_prices(
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct ImportPlanView {
+    /// The file the plan was read from. Sent back with Import, so the counter reads the file
+    /// again and does exactly what it just described.
+    pub path: String,
+    /// `update` or `replace` — what the owner asked the file to do.
+    pub mode: String,
     /// The whole sentence, written in Rust: "312 new item(s) and 88 change(s).".
     pub summary: String,
     pub new_items: i64,
     pub updated_items: i64,
+    /// Rows that say what the menu already has. Not written, and not a reason to import.
+    pub unchanged: i64,
+    /// Every row that landed on an item the menu already has — "Tea (TEA COFFEE)" — changed
+    /// or not. Shown before Import so the owner knows which items the file is about to touch.
+    pub already: Vec<String>,
     /// The names of the categories this file would add to the shop. Created, not refused —
     /// but never without saying which, and never before the owner has read the list.
     pub new_categories: Vec<String>,
+    /// REPLACE: items not in the file that would be deleted, by name.
+    pub removed: Vec<String>,
+    /// REPLACE: items not in the file that would be taken off the menu instead, because a
+    /// bill, a size, a combo or a recipe still needs them.
+    pub taken_off: Vec<String>,
+    /// REPLACE: categories that would be left empty and removed.
+    pub retired_categories: Vec<String>,
     /// "Line 4: there is no category called \"Snaks\"".
     pub refused: Vec<String>,
     /// Nothing may be imported until this is true.
     pub is_clean: bool,
+    /// True when Import would write nothing — every row unchanged, or no rows at all.
+    pub is_empty: bool,
 }
 
-/// Read a file and say what would happen.
-pub fn plan_import_on(app: &App, csv: String) -> UiResult<ImportPlanView> {
+/// The file's text, whatever Excel saved it as.
+pub fn read_menu_file(path: &std::path::Path) -> UiResult<String> {
+    let bytes = std::fs::read(path).map_err(|e| {
+        UiError::new(
+            "menu.import.read",
+            format!("{} could not be read.", path.display()),
+        )
+        .with_detail(e.to_string())
+    })?;
+    Ok(mb_db::export::decode_sheet(&bytes))
+}
+
+/// The mode, as the screen sends it.
+fn mode_from_word(word: &str) -> UiResult<ImportMode> {
+    match word.trim().to_ascii_lowercase().as_str() {
+        "update" => Ok(ImportMode::Update),
+        "replace" => Ok(ImportMode::Replace),
+        _ => Err(UiError::new(
+            "menu.import.mode",
+            "Say whether the file updates the menu or replaces it.",
+        )),
+    }
+}
+
+const fn mode_word(mode: ImportMode) -> &'static str {
+    match mode {
+        ImportMode::Update => "update",
+        ImportMode::Replace => "replace",
+    }
+}
+
+fn names(items: &[MenuItem]) -> Vec<String> {
+    items.iter().map(|i| i.name.clone()).collect()
+}
+
+/// Read a file's text and say what would happen.
+pub fn plan_import_on(app: &App, csv: &str, mode: ImportMode) -> UiResult<ImportPlanView> {
     guard::require(app, Permission::MenuManage)?;
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
-                let plan = mb_db::Repos::new(tx).menu_csv().plan(OUTLET, &csv)?;
+                let plan = mb_db::Repos::new(tx).menu_csv().plan(OUTLET, csv, mode)?;
                 Ok(ImportPlanView {
+                    path: String::new(),
+                    mode: mode_word(mode).to_owned(),
                     summary: plan.summary(),
                     new_items: plan.new_items.len().try_into().unwrap_or(i64::MAX),
                     updated_items: plan.updated_items.len().try_into().unwrap_or(i64::MAX),
+                    unchanged: plan.unchanged.try_into().unwrap_or(i64::MAX),
+                    already: plan.already.clone(),
                     new_categories: plan.new_categories.iter().map(|c| c.name.clone()).collect(),
+                    removed: names(&plan.removed),
+                    taken_off: names(&plan.taken_off),
+                    retired_categories: plan
+                        .retired_categories
+                        .iter()
+                        .map(|c| c.name.clone())
+                        .collect(),
                     refused: plan
                         .refused
                         .iter()
                         .map(|(line, why)| format!("Line {line}: {why}"))
                         .collect(),
                     is_clean: plan.is_clean(),
+                    is_empty: plan.is_empty(),
                 })
             })
             .map_err(|e| words::from_db(&e))
     })
 }
 
-/// Do it.
-pub fn run_import_on(app: &App, csv: String) -> UiResult<String> {
+/// Do it, from the file's text.
+pub fn run_import_on(app: &App, csv: &str, mode: ImportMode) -> UiResult<String> {
     let who = guard::require(app, Permission::MenuManage)?;
     let at = now();
     let day = today(at);
 
-    let (written, categories) = app.with_shop(|shop| {
+    let plan = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                let plan = repos.menu_csv().plan(OUTLET, &csv)?;
+                let plan = repos.menu_csv().plan(OUTLET, csv, mode)?;
                 let written = repos.menu_csv().apply(OUTLET, &plan, at)?;
                 repos.audit().append(
                     OUTLET,
@@ -733,67 +805,158 @@ pub fn run_import_on(app: &App, csv: String) -> UiResult<String> {
                         "menu",
                     )
                     .with_after(serde_json::json!({
+                        "mode": mode_word(mode),
                         "imported": written,
                         "new": plan.new_items.len(),
                         "changed": plan.updated_items.len(),
                         "categories_added": plan.new_categories.len(),
+                        "removed": plan.removed.len(),
+                        "taken_off": plan.taken_off.len(),
+                        "categories_removed": plan.retired_categories.len(),
                     })),
                 )?;
-                Ok((written, plan.new_categories.len()))
+                Ok(plan)
             })
             .map_err(|e| words::from_db(&e))
     })?;
 
+    let written = plan.new_items.len() + plan.updated_items.len();
+    let gone = plan.removed.len() + plan.taken_off.len();
     log_info!(
-        "{} imported {written} menu item(s) and {categories} new category(ies)",
-        who.name
+        "{} imported the menu ({}): {written} item(s) written, {} categor(ies) added, {gone} \
+         item(s) gone",
+        who.name,
+        mode_word(mode),
+        plan.new_categories.len()
     );
-    let mut said = match written {
-        0 => "Nothing was imported — the file had no rows.".to_owned(),
-        1 => "One item imported.".to_owned(),
-        n => format!("{n} items imported."),
+    let mut said = match (written, gone) {
+        (0, 0) => "Nothing was imported — the file had no rows.".to_owned(),
+        (1, _) => "One item imported.".to_owned(),
+        (n, _) => format!("{n} items imported."),
     };
-    match categories {
+    match plan.new_categories.len() {
         0 => {}
         1 => said.push_str(" One category was added."),
         c => said.push_str(&format!(" {c} categories were added.")),
     }
+    // REPLACE: what went, and how — deleted, or only taken off the menu.
+    match (plan.removed.len(), plan.taken_off.len()) {
+        (0, 0) => {}
+        (r, 0) => said.push_str(&format!(" {r} not in the file removed.")),
+        (0, t) => said.push_str(&format!(" {t} not in the file taken off the menu.")),
+        (r, t) => said.push_str(&format!(
+            " {r} not in the file removed and {t} taken off the menu."
+        )),
+    }
     Ok(said)
 }
 
-/// The whole menu as a spreadsheet.
-/// The menu, as a spreadsheet file beside the shop's data. Answers with the path.
-pub fn export_menu_on(app: &App) -> UiResult<String> {
-    guard::require(app, Permission::MenuManage)?;
+/// The file the export is offered as, and the import looks for first.
+const MENU_FILE: &str = "magic-bill-menu.csv";
+
+/// The menu, as a spreadsheet file at `path`. Answers with the path. The cost column follows
+/// the reports permission, as the screen does: whoever may not see margins does not export
+/// them either.
+pub fn export_menu_to(app: &App, path: &std::path::Path) -> UiResult<String> {
+    let who = guard::require(app, Permission::MenuManage)?;
+    let with_cost = who.can(Permission::ReportsView);
     let csv = app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).menu_csv().export(OUTLET))
+            .transaction(|tx| mb_db::Repos::new(tx).menu_csv().export(OUTLET, with_cost))
             .map_err(|e| words::from_db(&e))
     })?;
-    let path = crate::settings::ipc::beside_the_shop(app, "magic-bill-menu.csv");
-    std::fs::write(&path, csv).map_err(|e| {
+    std::fs::write(path, csv).map_err(|e| {
         UiError::new(
             "menu.export",
             format!("The menu could not be written to {}.", path.display()),
         )
         .with_detail(e.to_string())
     })?;
+    log_info!("{} saved the menu as {}", who.name, path.display());
     Ok(path.display().to_string())
 }
 
-#[tauri::command]
-pub fn plan_menu_import(app: tauri::State<'_, App>, csv: String) -> UiResult<ImportPlanView> {
-    plan_import_on(&app, csv)
+/// Where a file dialog opens: the Downloads folder, which is where a spreadsheet somebody
+/// sent on WhatsApp or mail lands, and where a saved one is easy to find again.
+fn downloads(window: &tauri::Window) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    window.path().download_dir().ok().filter(|d| d.is_dir())
 }
 
+/// Ask for a spreadsheet. `None` when the dialog was cancelled. The dialog is the counter's
+/// own, not the page's: a file input in a menu sheet is unmounted the moment the sheet closes,
+/// and a file chosen for an input that is no longer on the page goes nowhere.
 #[tauri::command]
-pub fn run_menu_import(app: tauri::State<'_, App>, csv: String) -> UiResult<String> {
-    run_import_on(&app, csv)
+pub fn pick_menu_file(
+    app: tauri::State<'_, App>,
+    window: tauri::Window,
+) -> UiResult<Option<String>> {
+    guard::require(&app, Permission::MenuManage)?;
+    use tauri_plugin_dialog::DialogExt;
+
+    let mut dialog = window
+        .dialog()
+        .file()
+        .add_filter("Spreadsheets", &["csv", "txt", "tsv"])
+        .set_title("Choose the menu file");
+    if let Some(at) = downloads(&window) {
+        dialog = dialog.set_directory(at);
+    }
+    let Some(picked) = dialog.blocking_pick_file() else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| {
+        UiError::new("menu.import.path", "That file could not be opened.")
+            .with_detail(e.to_string())
+    })?;
+    Ok(Some(path.display().to_string()))
 }
 
+/// Read the file and say what importing it would do, the way the owner asked.
 #[tauri::command]
-pub fn export_menu(app: tauri::State<'_, App>) -> UiResult<String> {
-    export_menu_on(&app)
+pub fn plan_menu_import(
+    app: tauri::State<'_, App>,
+    path: String,
+    mode: String,
+) -> UiResult<ImportPlanView> {
+    let mode = mode_from_word(&mode)?;
+    let csv = read_menu_file(std::path::Path::new(&path))?;
+    let mut plan = plan_import_on(&app, &csv, mode)?;
+    plan.path = path;
+    Ok(plan)
+}
+
+/// Import the file the plan named. Read again and planned again, inside one transaction, so
+/// what is written is what the file says now — not what a screen remembered.
+#[tauri::command]
+pub fn run_menu_import(app: tauri::State<'_, App>, path: String, mode: String) -> UiResult<String> {
+    let mode = mode_from_word(&mode)?;
+    let csv = read_menu_file(std::path::Path::new(&path))?;
+    run_import_on(&app, &csv, mode)
+}
+
+/// Ask where to save the menu, and write it there. `None` when the dialog was cancelled.
+#[tauri::command]
+pub fn export_menu(app: tauri::State<'_, App>, window: tauri::Window) -> UiResult<Option<String>> {
+    guard::require(&app, Permission::MenuManage)?;
+    use tauri_plugin_dialog::DialogExt;
+
+    let mut dialog = window
+        .dialog()
+        .file()
+        .add_filter("Spreadsheet", &["csv"])
+        .set_file_name(MENU_FILE)
+        .set_title("Save the menu as a file");
+    if let Some(at) = downloads(&window) {
+        dialog = dialog.set_directory(at);
+    }
+    let Some(picked) = dialog.blocking_save_file() else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| {
+        UiError::new("menu.export.path", "That place could not be used.").with_detail(e.to_string())
+    })?;
+    export_menu_to(&app, &path).map(Some)
 }
 
 // What one item is made of.

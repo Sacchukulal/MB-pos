@@ -5,14 +5,45 @@
  */
 export type ImportPlanView = { 
 /**
+ * The file the plan was read from. Sent back with Import, so the counter reads the file
+ * again and does exactly what it just described.
+ */
+path: string, 
+/**
+ * `update` or `replace` — what the owner asked the file to do.
+ */
+mode: string, 
+/**
  * The whole sentence, written in Rust: "312 new item(s) and 88 change(s).".
  */
 summary: string, newItems: bigint, updatedItems: bigint, 
+/**
+ * Rows that say what the menu already has. Not written, and not a reason to import.
+ */
+unchanged: bigint, 
+/**
+ * Every row that landed on an item the menu already has — "Tea (TEA COFFEE)" — changed
+ * or not. Shown before Import so the owner knows which items the file is about to touch.
+ */
+already: Array<string>, 
 /**
  * The names of the categories this file would add to the shop. Created, not refused —
  * but never without saying which, and never before the owner has read the list.
  */
 newCategories: Array<string>, 
+/**
+ * REPLACE: items not in the file that would be deleted, by name.
+ */
+removed: Array<string>, 
+/**
+ * REPLACE: items not in the file that would be taken off the menu instead, because a
+ * bill, a size, a combo or a recipe still needs them.
+ */
+takenOff: Array<string>, 
+/**
+ * REPLACE: categories that would be left empty and removed.
+ */
+retiredCategories: Array<string>, 
 /**
  * "Line 4: there is no category called \"Snaks\"".
  */
@@ -20,4 +51,8 @@ refused: Array<string>,
 /**
  * Nothing may be imported until this is true.
  */
-isClean: boolean, };
+isClean: boolean, 
+/**
+ * True when Import would write nothing — every row unchanged, or no rows at all.
+ */
+isEmpty: boolean, };

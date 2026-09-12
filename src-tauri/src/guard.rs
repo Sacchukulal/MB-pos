@@ -138,6 +138,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ),
     ("save_menu_category", Access::Needs(Permission::MenuManage)),
     ("change_menu_prices", Access::Needs(Permission::MenuManage)),
+    ("pick_menu_file", Access::Needs(Permission::MenuManage)),
     ("plan_menu_import", Access::Needs(Permission::MenuManage)),
     ("run_menu_import", Access::Needs(Permission::MenuManage)),
     ("export_menu", Access::Needs(Permission::MenuManage)),

@@ -334,4 +334,155 @@ describe('the menu screen', () => {
       expect(call).toHaveBeenCalledWith('delete_menu_item', { itemId: 'itm_dosa' }),
     );
   });
+
+  const plan = {
+    path: 'C:\Users\owner\Downloads\magic-bill-menu.csv',
+    mode: 'update',
+    summary: '240 new item(s) and 1 change(s). 9 new categories will be added.',
+    newItems: 240n,
+    updatedItems: 1n,
+    unchanged: 0n,
+    already: ['Tea (TEA)'],
+    newCategories: ['CHINEES', 'JUICE'],
+    removed: [],
+    takenOff: [],
+    retiredCategories: [],
+    refused: [],
+    isClean: true,
+    isEmpty: false,
+  };
+
+  function openWithFile(answers: Record<string, unknown>) {
+    open();
+    call.mockImplementation((name: string) => {
+      if (name in answers) return Promise.resolve(answers[name]);
+      switch (name) {
+        case 'menu_categories':
+          return Promise.resolve([tiffin]);
+        case 'menu_rows':
+          return Promise.resolve([dosa]);
+        default:
+          return Promise.resolve([]);
+      }
+    });
+  }
+
+  it('imports through the counter’s own file dialog: pick, choose what the file does, read the plan, one Import', async () => {
+    openWithFile({
+      pick_menu_file: plan.path,
+      plan_menu_import: plan,
+      run_menu_import: '241 items imported. 9 categories were added.',
+    });
+
+    fireEvent.click(await screen.findByLabelText('More for the menu'));
+    fireEvent.click(screen.getByText('Import a file'));
+    // Rust opened the dialog: no file input on the page.
+    expect(document.querySelector('input[type=file]')).toBeNull();
+    await waitFor(() =>
+      expect(call.mock.calls.filter(([n]) => n === 'plan_menu_import')).toHaveLength(1),
+    );
+    // Update is the default; the plan is asked for the mode chosen.
+    expect(call.mock.calls.find(([n]) => n === 'plan_menu_import')![1]).toEqual({
+      path: plan.path,
+      mode: 'update',
+    });
+
+    expect(await screen.findByText(plan.summary)).toBeTruthy();
+    expect(screen.getByText(/New categories: CHINEES, JUICE/)).toBeTruthy();
+    // What the file is about to overwrite is named before anything is written.
+    expect(screen.getByText(/Already on the menu.*Tea \(TEA\)/)).toBeTruthy();
+    expect(screen.getByText(plan.path)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() =>
+      expect(call.mock.calls.filter(([n]) => n === 'run_menu_import')).toHaveLength(1),
+    );
+    expect(call.mock.calls.find(([n]) => n === 'run_menu_import')![1]).toEqual({
+      path: plan.path,
+      mode: 'update',
+    });
+    await waitFor(() => expect(screen.queryByText(plan.summary)).toBeNull());
+  });
+
+  it('replacing the whole menu is its own choice, planned again, named in red, and pressed in red', async () => {
+    const replacing = {
+      ...plan,
+      mode: 'replace',
+      summary: '240 new item(s), 1 change(s), 0 already the same, and 2 item(s) not in the file would go.',
+      removed: ['Masala dosa'],
+      takenOff: ['Idli'],
+      retiredCategories: ['Tiffin'],
+    };
+    openWithFile({
+      pick_menu_file: plan.path,
+      plan_menu_import: plan,
+      run_menu_import: '241 items imported and 2 not in the file removed.',
+    });
+    fireEvent.click(await screen.findByLabelText('More for the menu'));
+    fireEvent.click(screen.getByText('Import a file'));
+    expect(await screen.findByText(plan.summary)).toBeTruthy();
+
+    call.mockImplementation((name: string) =>
+      Promise.resolve(
+        name === 'plan_menu_import' ? replacing : name === 'run_menu_import' ? 'done' : [],
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Replace the whole menu' }));
+    await waitFor(() =>
+      expect(call.mock.calls.filter(([n]) => n === 'plan_menu_import')).toHaveLength(2),
+    );
+    expect(call.mock.calls.filter(([n]) => n === 'plan_menu_import')[1]![1]).toEqual({
+      path: plan.path,
+      mode: 'replace',
+    });
+    expect(await screen.findByText(replacing.summary)).toBeTruthy();
+    expect(screen.getByText(/Removed: Masala dosa/)).toBeTruthy();
+    expect(screen.getByText(/Taken off the menu.*Idli/)).toBeTruthy();
+    expect(screen.getByText(/Categories left empty and removed: Tiffin/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace the menu' }));
+    await waitFor(() =>
+      expect(call.mock.calls.filter(([n]) => n === 'run_menu_import')).toHaveLength(1),
+    );
+    expect(call.mock.calls.find(([n]) => n === 'run_menu_import')![1]).toEqual({
+      path: plan.path,
+      mode: 'replace',
+    });
+  });
+
+  it('a file that would change nothing has no Import to press, and a cancelled dialog opens nothing', async () => {
+    openWithFile({
+      pick_menu_file: 'menu.csv',
+      plan_menu_import: {
+        ...plan,
+        path: 'menu.csv',
+        summary: 'Nothing would change — the menu already has all 3 of these.',
+        newItems: 0n,
+        updatedItems: 0n,
+        unchanged: 3n,
+        already: ['Tea', 'Masala dosa', 'Water bottle'],
+        newCategories: [],
+        isEmpty: true,
+      },
+    });
+    fireEvent.click(await screen.findByLabelText('More for the menu'));
+    fireEvent.click(screen.getByText('Import a file'));
+    expect(await screen.findByText(/Nothing would change/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByText(/Nothing would change/)).toBeNull());
+
+    // Cancelled in the dialog: nothing comes back, nothing opens.
+    call.mockImplementation((name: string) =>
+      Promise.resolve(name === 'pick_menu_file' ? null : name === 'menu_rows' ? [dosa] : [tiffin]),
+    );
+    fireEvent.click(screen.getByLabelText('More for the menu'));
+    fireEvent.click(screen.getByText('Import a file'));
+    await waitFor(() =>
+      expect(call.mock.calls.filter(([n]) => n === 'pick_menu_file')).toHaveLength(2),
+    );
+    expect(screen.queryByText('Import a menu')).toBeNull();
+  });
 });

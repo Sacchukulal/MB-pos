@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  Choice,
   ConfirmDialog,
   EmptyState,
   Foot,
@@ -28,7 +29,7 @@ import {
   useToast,
   type Column,
 } from '../kit';
-import { call, isUiError } from '../ipc/call';
+import { call, isUiError, type ImportMode } from '../ipc/call';
 import type { CategoryView } from '../ipc/generated/CategoryView';
 import type { MenuRowView } from '../ipc/generated/MenuRowView';
 import type { ImportPlanView } from '../ipc/generated/ImportPlanView';
@@ -48,7 +49,7 @@ export function Menu() {
   const [deleting, setDeleting] = useState<MenuRowView | null>(null);
   const [madeOf, setMadeOf] = useState<MenuRowView | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
-  /** The spreadsheet somebody chose, waiting to be looked at. */
+  /** The spreadsheet somebody chose, waiting to be looked at and agreed to. */
   const [importing, setImporting] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('items');
   const toast = useToast();
@@ -168,26 +169,27 @@ export function Menu() {
                 <Icon name="tag" size="sm" />
                 Change prices
               </Button>
-              {/* A label wearing the kit's button, over a hidden file input. */}
-              <label className="mb-button mb-button--quiet">
+              {/* The counter's own file dialog; the file is read and planned in Rust. */}
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  call('pick_menu_file')
+                    .then((path) => {
+                      if (path) setImporting(path);
+                    })
+                    .catch(report);
+                }}
+              >
                 <Icon name="upload" size="sm" />
                 Import a file
-                <input
-                  className="mb-visually-hidden"
-                  type="file"
-                  accept="text/csv,.csv,.txt"
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    event.currentTarget.value = '';
-                    if (file) file.text().then(setImporting).catch(report);
-                  }}
-                />
-              </label>
+              </Button>
               <Button
                 variant="quiet"
                 onClick={() => {
                   call('export_menu')
-                    .then((path) => toast.show('ok', 'The menu was saved as a spreadsheet.', path))
+                    .then((path) => {
+                      if (path) toast.show('ok', 'The menu was saved.', path);
+                    })
                     .catch(report);
                 }}
               >
@@ -296,7 +298,7 @@ export function Menu() {
 
       {importing !== null ? (
         <ImportMenu
-          csv={importing}
+          path={importing}
           onClose={() => setImporting(null)}
           onDone={async (said) => {
             setImporting(null);
@@ -793,42 +795,73 @@ function BulkPrices({
 /** How many refused rows the dialog names before it starts counting them instead. */
 const REFUSALS_SHOWN = 10;
 
-/** The spreadsheet. */
+/** A list of names, the first few in full and the rest as a count. */
+function Named({ label, names, tone }: { label: string; names: readonly string[]; tone?: 'danger' }) {
+  if (names.length === 0) return null;
+  const shown = names.slice(0, REFUSALS_SHOWN);
+  const hidden = names.length - shown.length;
+  return (
+    <p className={tone === 'danger' ? 'mb-import__gone' : 'mb-import__added'}>
+      {label}: {shown.join(', ')}
+      {hidden > 0 ? ` and ${hidden} more` : ''}
+    </p>
+  );
+}
+
+/** The spreadsheet: what the owner wants it to do, what that would do, and one button. */
 function ImportMenu({
-  csv,
+  path,
   onClose,
   onDone,
   onFailed,
 }: {
-  csv: string;
+  path: string;
   onClose: () => void;
   onDone: (said: string) => void | Promise<void>;
   onFailed: (cause: unknown) => void;
 }) {
+  const [mode, setMode] = useState<ImportMode>('update');
   const [plan, setPlan] = useState<ImportPlanView | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // Looked at as soon as it is chosen; nothing is written until Import is pressed.
+  // Planned in Rust for the mode chosen; nothing is written until the button is pressed.
   useEffect(() => {
-    call('plan_menu_import', { csv }).then(setPlan).catch(onFailed);
-  }, [csv, onFailed]);
+    setPlan(null);
+    call('plan_menu_import', { path, mode }).then(setPlan).catch(onFailed);
+  }, [path, mode, onFailed]);
 
   // A bad file is a diagnosis, not a wall: the first few lines say what is wrong, and the
   // count says how far it goes.
   const shown = plan?.refused.slice(0, REFUSALS_SHOWN) ?? [];
   const hidden = (plan?.refused.length ?? 0) - shown.length;
+  const replacing = mode === 'replace';
 
   return (
     <Modal open title="Import a menu" onClose={onClose} wide>
+      <p className="mb-import__file">{path}</p>
+      <Choice
+        label="What should this file do?"
+        value={mode}
+        options={[
+          { value: 'update', label: 'Update the menu' },
+          { value: 'replace', label: 'Replace the whole menu' },
+        ]}
+        onPick={(picked) => setMode(picked as ImportMode)}
+      />
       <p className="mb-import__shape">
-        The shortest file that works is <code>name,price</code>. Add <code>category</code> and a
-        category the shop does not have yet is created. Prices are in rupees.
+        {replacing
+          ? 'The file becomes the menu. Anything not in it is removed — or taken off the menu when old bills still need it.'
+          : 'New items are added and items already on the menu take the file’s price. Nothing is removed.'}
       </p>
+
       {plan ? (
         <div className="mb-import__plan">
           <strong>{plan.summary}</strong>
-          {plan.newCategories.length > 0 ? (
-            <p className="mb-import__added">New categories: {plan.newCategories.join(', ')}</p>
-          ) : null}
+          <Named label="New categories" names={plan.newCategories} />
+          <Named label="Already on the menu, the file’s values win" names={plan.already} />
+          <Named label="Removed" names={plan.removed} tone="danger" />
+          <Named label="Taken off the menu, kept for old bills" names={plan.takenOff} tone="danger" />
+          <Named label="Categories left empty and removed" names={plan.retiredCategories} tone="danger" />
           {shown.length > 0 ? (
             <ul className="mb-import__refused">
               {shown.map((line) => (
@@ -847,15 +880,17 @@ function ImportMenu({
           Cancel
         </Button>
         <Button
-          variant="primary"
-          disabled={!plan?.isClean || plan.newItems + plan.updatedItems === 0n}
+          variant={replacing ? 'danger' : 'primary'}
+          disabled={busy || !plan || !plan.isClean || plan.isEmpty}
           onClick={() => {
-            call('run_menu_import', { csv })
+            setBusy(true);
+            call('run_menu_import', { path, mode })
               .then(onDone)
-              .catch(onFailed);
+              .catch(onFailed)
+              .finally(() => setBusy(false));
           }}
         >
-          Import
+          {replacing ? 'Replace the menu' : 'Import'}
         </Button>
       </div>
     </Modal>

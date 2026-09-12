@@ -480,6 +480,7 @@ macro_rules! commands {
             $crate::menu::delete_menu_category,
             $crate::menu::save_menu_category,
             $crate::menu::change_menu_prices,
+            $crate::menu::pick_menu_file,
             $crate::menu::plan_menu_import,
             $crate::menu::run_menu_import,
             $crate::menu::export_menu,

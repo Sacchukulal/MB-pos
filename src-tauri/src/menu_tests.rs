@@ -7,16 +7,17 @@
 )]
 
 use mb_core::{ItemId, Money, TaxClassId, TaxKind};
+use mb_db::repo::ImportMode;
 use mb_db::{Db, DbConfig, Repos};
 
 use crate::menu::{
     ComboEdit, GroupEdit, MenuEdit, ModifierEdit, attach_group_on, change_prices_on,
-    export_menu_on, item_composition_on, list_combos_on, list_groups_on, menu_rows_on,
+    export_menu_to, item_composition_on, list_combos_on, list_groups_on, menu_rows_on,
     plan_import_on, run_import_on, save_combo_on, save_group_on, save_item_on, save_variant_on,
 };
-use crate::tax::{save_slab_on, slabs_on};
 use crate::signin_tests::Scratch;
 use crate::state::{App, OUTLET};
+use crate::tax::{save_slab_on, slabs_on};
 
 /// A shop with three items on two tax classes — enough that "every item on this class" is a
 /// claim with a counter-example in it.
@@ -283,25 +284,59 @@ fn a_bulk_price_change_rounds_once_and_stays_inside_its_category() {
     assert_eq!(price_of(&app, "itm_dosa"), "118.80");
 }
 
-/// Export, change one cell, import back.
+/// The menu, exported to a file in the scratch folder and read back as text.
+fn exported(app: &App, scratch: &Scratch, name: &str) -> String {
+    let path = scratch.dir().join(name);
+    let written = export_menu_to(app, &path).expect("exported");
+    assert_eq!(written, path.display().to_string());
+    std::fs::read_to_string(&path).expect("the file")
+}
+
+/// The file a restaurant already has: `category,name,price`, two hundred-odd rows, the same
+/// dish in two sections, a misspelt heading or two. It goes in as it is.
+const RESTAURANT_MENU: &str = include_str!("../fixtures/restaurant-menu.csv");
+
+/// Export, change one cell, import back — and the export reads the way a person would write it.
 #[test]
 fn the_menu_survives_a_trip_through_a_spreadsheet() {
     let scratch = Scratch::new("csv");
     let app = a_shop_with_a_menu(&scratch);
 
-    let csv = std::fs::read_to_string(export_menu_on(&app).expect("exported")).expect("the file");
-    assert!(csv.contains("Masala dosa"), "the menu is in it");
+    let csv = exported(&app, &scratch, "menu.csv");
+    assert!(
+        csv.starts_with("category,name,price,tax,"),
+        "the file leads with the three columns every restaurant has: {csv}"
+    );
+    assert!(
+        csv.contains(",Masala dosa,120.00,GST 5%,"),
+        "rupees and the slab's name: {csv}"
+    );
+    assert!(!csv.contains("12000"), "no paise anywhere: {csv}");
 
-    // The file carries paise, not rupees — a spreadsheet that rounds 120.00 to 120 is a
-    // spreadsheet, and this way there is nothing to round.
-    let edited = csv.replace(",12000,", ",13500,");
+    // Read straight back, nothing changes — and the plan says so rather than counting every
+    // row as a change.
+    let same = plan_import_on(&app, &csv, ImportMode::Update).expect("planned");
+    assert!(same.is_clean, "{same:?}");
+    assert!(same.is_empty, "{same:?}");
+    assert_eq!(same.unchanged, 3);
+    assert!(
+        same.summary.starts_with("Nothing would change"),
+        "{}",
+        same.summary
+    );
+
+    let edited = csv.replace(",120.00,", ",135.00,");
     assert_ne!(edited, csv, "the fixture actually changed a cell");
 
     // The dry run writes NOTHING and says what it would do.
-    let plan = plan_import_on(&app, edited.clone()).expect("planned");
+    let plan = plan_import_on(&app, &edited, ImportMode::Update).expect("planned");
     assert!(
         plan.is_clean,
         "a file we just exported has no bad rows: {plan:?}"
+    );
+    assert_eq!(
+        (plan.new_items, plan.updated_items, plan.unchanged),
+        (0, 1, 2)
     );
     assert_eq!(
         price_of(&app, "itm_dosa"),
@@ -309,10 +344,25 @@ fn the_menu_survives_a_trip_through_a_spreadsheet() {
         "the dry run changed nothing"
     );
 
-    let said = run_import_on(&app, edited).expect("imported");
+    let said = run_import_on(&app, &edited, ImportMode::Update).expect("imported");
     assert!(!said.is_empty());
     assert_eq!(price_of(&app, "itm_dosa"), "135.00");
     assert_eq!(rate_of(&app, "itm_water"), "18%", "and the rates came back");
+}
+
+/// A file exported before 1.6.17 — ids first, paise, slab ids — still imports.
+#[test]
+fn an_old_export_still_reads() {
+    let scratch = Scratch::new("csv_old");
+    let app = a_shop_with_a_menu(&scratch);
+
+    let old = "id,name,category,price_paise,tax_class,price_basis,hsn,short_code,cost_paise,available\r\n\
+               itm_dosa,Masala dosa,,13500,tax_food_5,shop,,,,yes\r\n";
+    let plan = plan_import_on(&app, old, ImportMode::Update).expect("planned");
+    assert!(plan.is_clean, "{plan:?}");
+    assert_eq!((plan.new_items, plan.updated_items), (0, 1));
+    run_import_on(&app, old, ImportMode::Update).expect("imported");
+    assert_eq!(price_of(&app, "itm_dosa"), "135.00");
 }
 
 /// A file with a bad cell is refused by line number, and the good lines do not sneak in — a
@@ -322,10 +372,11 @@ fn a_bad_row_names_its_line_and_nothing_is_written() {
     let scratch = Scratch::new("csv_bad");
     let app = a_shop_with_a_menu(&scratch);
 
-    let csv = export_menu_on(&app).expect("exported");
-    let broken = csv.replace(",12000,", ",one hundred and twenty,");
+    let csv = exported(&app, &scratch, "menu.csv");
+    let broken = csv.replace(",120.00,", ",one hundred and twenty,");
+    assert_ne!(broken, csv);
 
-    let plan = plan_import_on(&app, broken.clone()).expect("planned");
+    let plan = plan_import_on(&app, &broken, ImportMode::Update).expect("planned");
     assert!(!plan.is_clean, "a price in words is not a price");
     assert!(
         plan.refused
@@ -335,9 +386,273 @@ fn a_bad_row_names_its_line_and_nothing_is_written() {
         plan.refused
     );
 
-    let err = run_import_on(&app, broken).expect_err("refused");
+    let err = run_import_on(&app, &broken, ImportMode::Update).expect_err("refused");
     assert!(!err.message.is_empty());
     assert_eq!(price_of(&app, "itm_dosa"), "120.00", "nothing was written");
+}
+
+/// The file a restaurant already has goes in as it is: every category made, the same dish in
+/// two sections kept as two items, and a second import of the same file changing nothing.
+#[test]
+fn a_restaurants_own_file_imports_as_it_is() {
+    let scratch = Scratch::new("csv_restaurant");
+    let app = a_shop_with_a_menu(&scratch);
+
+    let plan = plan_import_on(&app, RESTAURANT_MENU, ImportMode::Update).expect("planned");
+    assert!(plan.is_clean, "{:?}", plan.refused);
+    assert_eq!(plan.new_categories.len(), 9, "{:?}", plan.new_categories);
+    // 241 rows, all new: the file puts "Tea" in TEA, and the shop's Tea has no category, so
+    // that is a second Tea — the owner finds and deletes duplicates, the import does not guess.
+    assert_eq!(
+        (plan.new_items, plan.updated_items, plan.unchanged),
+        (241, 0, 0)
+    );
+    assert!(plan.already.is_empty(), "{:?}", plan.already);
+
+    run_import_on(&app, RESTAURANT_MENU, ImportMode::Update).expect("imported");
+    let rows = menu_rows_on(&app).expect("the menu");
+    assert_eq!(rows.len(), 244);
+
+    // Boiled rice is Chinese at 40 and South Indian at 60. Two items.
+    let boiled: Vec<_> = rows
+        .iter()
+        .filter(|r| r.name.eq_ignore_ascii_case("boiled rice"))
+        .collect();
+    assert_eq!(boiled.len(), 2, "{boiled:?}");
+    assert_ne!(boiled[0].category_id, boiled[1].category_id);
+    assert!(boiled.iter().any(|r| r.price.text == "40.00"));
+    assert!(boiled.iter().any(|r| r.price.text == "60.00"));
+    assert_eq!(rows.iter().filter(|r| r.name == "Tea").count(), 2);
+    assert_eq!(
+        price_of(&app, "itm_tea"),
+        "20.00",
+        "the shop's own Tea was not touched"
+    );
+
+    // The same file again is a no-op, and says so — the second Boiled rice finds ITS item, and
+    // every row is named as already on the menu.
+    let again = plan_import_on(&app, RESTAURANT_MENU, ImportMode::Update).expect("planned again");
+    assert!(again.is_clean, "{:?}", again.refused);
+    assert!(again.is_empty, "{}", again.summary);
+    assert_eq!(again.unchanged, 241);
+    assert_eq!(again.already.len(), 241);
+    assert!(
+        again
+            .already
+            .contains(&"Boiled Rice (SOUTH INDIAN)".to_owned()),
+        "{:?}",
+        &again.already[..5]
+    );
+    assert!(again.new_categories.is_empty());
+
+    // And what went in comes out in the same shape, and goes back in unchanged.
+    let out = exported(&app, &scratch, "menu.csv");
+    let back = plan_import_on(&app, &out, ImportMode::Update).expect("planned the export");
+    assert!(back.is_clean && back.is_empty, "{back:?}");
+    assert_eq!(back.unchanged, 244);
+}
+
+/// REPLACE: the file becomes the menu. What it does not name is deleted — unless a size, a
+/// combo, a recipe or a bill still points at it, in which case it is taken off the menu and
+/// kept. A category left with nothing in it is removed.
+#[test]
+fn replacing_the_menu_keeps_only_what_the_file_names() {
+    let scratch = Scratch::new("csv_replace");
+    let app = a_shop_with_a_menu(&scratch);
+    // The dosa has a half size, so something points at it.
+    save_variant_on(
+        &app,
+        "itm_dosa".to_owned(),
+        "var_half".to_owned(),
+        "Half".to_owned(),
+        "70".to_owned(),
+        true,
+    )
+    .expect("a size");
+    // And the water sits in a category of its own that the file will not name.
+    run_import_on(
+        &app,
+        "category,name,price,id\nBottles,Water bottle,20,itm_water\n",
+        ImportMode::Update,
+    )
+    .expect("moved");
+
+    let file = "category,name,price\nTiffin,Idli,40\nTiffin,Tea,20\n";
+    let plan = plan_import_on(&app, file, ImportMode::Replace).expect("planned");
+    assert!(plan.is_clean, "{:?}", plan.refused);
+    assert_eq!(plan.mode, "replace");
+    // Idli is new; Tea has no category on the menu and the file gives one, so it is a second
+    // Tea; the old Tea, the dosa and the water are not in the file.
+    assert_eq!((plan.new_items, plan.updated_items), (2, 0));
+    assert_eq!(
+        plan.removed,
+        vec!["Tea".to_owned(), "Water bottle".to_owned()],
+        "{plan:?}"
+    );
+    assert_eq!(
+        plan.taken_off,
+        vec!["Masala dosa".to_owned()],
+        "the dosa has a size"
+    );
+    assert_eq!(plan.retired_categories, vec!["Bottles".to_owned()]);
+    assert!(
+        plan.summary.contains("3 item(s) not in the file would go"),
+        "{}",
+        plan.summary
+    );
+    assert!(!plan.is_empty);
+
+    // Nothing moved yet.
+    assert_eq!(menu_rows_on(&app).expect("rows").len(), 3);
+
+    let said = run_import_on(&app, file, ImportMode::Replace).expect("replaced");
+    assert_eq!(
+        said,
+        "2 items imported. One category was added. 2 not in the file removed and 1 taken off \
+         the menu."
+    );
+    let rows = menu_rows_on(&app).expect("rows");
+    let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+    assert!(
+        names.contains(&"Idli") && names.contains(&"Masala dosa"),
+        "{names:?}"
+    );
+    assert!(!names.contains(&"Water bottle"), "{names:?}");
+    assert_eq!(rows.iter().filter(|r| r.name == "Tea").count(), 1);
+    let dosa = rows
+        .iter()
+        .find(|r| r.id == "itm_dosa")
+        .expect("kept for its size");
+    assert!(!dosa.is_available, "taken off the menu, not deleted");
+    let categories = crate::menu::categories_on(&app).expect("categories");
+    let bottles = categories
+        .iter()
+        .find(|c| c.name == "Bottles")
+        .expect("still a row");
+    assert!(!bottles.is_active, "left empty, so retired");
+
+    // Replacing with the export of what is there now is a no-op.
+    let out = exported(&app, &scratch, "menu.csv");
+    let again = plan_import_on(&app, &out, ImportMode::Replace).expect("planned");
+    assert!(again.is_clean && again.is_empty, "{again:?}");
+}
+
+/// A plain list without categories updates by name; a name the shop has twice is asked about
+/// rather than guessed at; a category column settles it.
+#[test]
+fn a_name_finds_its_item_and_a_repeated_name_is_asked_about() {
+    let scratch = Scratch::new("csv_names");
+    let app = a_shop_with_a_menu(&scratch);
+
+    // Two items called Omlet, in two categories.
+    run_import_on(
+        &app,
+        "category,name,price\nChinese,Omlet,40\nNorth Indian,Omlet,50\n",
+        ImportMode::Update,
+    )
+    .expect("two omlets");
+    assert_eq!(
+        menu_rows_on(&app)
+            .expect("rows")
+            .iter()
+            .filter(|r| r.name == "Omlet")
+            .count(),
+        2
+    );
+
+    // No category: "Tea" is one item, so it updates; "Omlet" is two, so the row is refused
+    // with the reason.
+    let plain = plan_import_on(&app, "name,price\nTEA,22\nOmlet,45\n", ImportMode::Update)
+        .expect("planned");
+    assert_eq!(plain.updated_items, 1, "{plain:?}");
+    assert_eq!(plain.refused.len(), 1, "{plain:?}");
+    assert!(
+        plain.refused[0].contains("more than one item called Omlet"),
+        "{:?}",
+        plain.refused
+    );
+
+    // With the category, each row finds its own.
+    let placed = plan_import_on(
+        &app,
+        "category,name,price\nChinese,omlet,45\nNorth Indian,OMLET,55\n",
+        ImportMode::Update,
+    )
+    .expect("planned");
+    assert!(placed.is_clean, "{:?}", placed.refused);
+    assert_eq!((placed.new_items, placed.updated_items), (0, 2));
+
+    // The same item twice in one file is refused, naming the first line.
+    let twice =
+        plan_import_on(&app, "name,price\nTea,22\ntea,23\n", ImportMode::Update).expect("planned");
+    assert_eq!(twice.refused.len(), 1, "{twice:?}");
+    assert!(twice.refused[0].contains("line 2"), "{:?}", twice.refused);
+}
+
+/// Tabs from a paste out of Excel, a semicolon file, a rate for the tax, a rupee sign in the
+/// price: all of it reads.
+#[test]
+fn a_file_typed_by_hand_reads() {
+    let scratch = Scratch::new("csv_hand");
+    let app = a_shop_with_a_menu(&scratch);
+
+    let tabs = "Item\tRate\tGST\nPaneer Tikka\t₹ 240\t18%\nLassi\tRs. 60\t5\n";
+    let plan = plan_import_on(&app, tabs, ImportMode::Update).expect("planned");
+    assert!(plan.is_clean, "{:?}", plan.refused);
+    assert_eq!(plan.new_items, 2);
+    run_import_on(&app, tabs, ImportMode::Update).expect("imported");
+    let rows = menu_rows_on(&app).expect("rows");
+    let tikka = rows
+        .iter()
+        .find(|r| r.name == "Paneer Tikka")
+        .expect("tikka");
+    assert_eq!(tikka.price.text, "240.00");
+    assert_eq!(tikka.tax_class_id, "tax_packaged_18");
+    let lassi = rows.iter().find(|r| r.name == "Lassi").expect("lassi");
+    assert_eq!(lassi.tax_class_id, "tax_food_5");
+
+    // A price below zero is not a price, and a rate the shop does not have is named.
+    let bad = plan_import_on(
+        &app,
+        "name;price;tax\nGhost;-5;5%\nFree;10;12%\n",
+        ImportMode::Update,
+    )
+    .expect("planned");
+    assert_eq!(bad.refused.len(), 2, "{bad:?}");
+    assert!(bad.refused[0].contains("Line 2"), "{:?}", bad.refused);
+    assert!(bad.refused[1].contains("12%"), "{:?}", bad.refused);
+}
+
+/// The cost column travels with the owner, who may see margins — in rupees, like the price.
+#[test]
+fn the_cost_column_is_only_for_those_who_may_see_it() {
+    let scratch = Scratch::new("csv_cost");
+    let app = a_shop_with_a_menu(&scratch);
+    let mut dosa = menu_rows_on(&app)
+        .expect("rows")
+        .into_iter()
+        .find(|r| r.id == "itm_dosa")
+        .map(|r| crate::menu::MenuEdit {
+            id: r.id,
+            name: r.name,
+            category_id: r.category_id,
+            price: r.price.text,
+            tax_class_id: None,
+            price_basis: None,
+            hsn: None,
+            short_code: None,
+            cost: Some("45".to_owned()),
+            is_open_price: false,
+            is_available: true,
+            course: None,
+            prep_minutes: None,
+        })
+        .expect("dosa");
+    dosa.cost = Some("45".to_owned());
+    save_item_on(&app, dosa).expect("cost set");
+
+    let csv = exported(&app, &scratch, "owner.csv");
+    assert!(csv.contains(",45.00,"), "the owner sees the cost: {csv}");
 }
 
 /// A half plate is its own price, not a discount.
