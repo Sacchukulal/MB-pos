@@ -68,11 +68,11 @@ fn one_dosa() -> (mb_core::Bill, AnyOrder) {
             formatted: "3".to_owned(),
             business_day: day,
         },
-        bill_number: Claimed {
+        bill_number: Some(Claimed {
             value: 8,
             formatted: "0008".to_owned(),
             business_day: day,
-        },
+        }),
     };
     let mut settlement = Settlement::new();
     settlement

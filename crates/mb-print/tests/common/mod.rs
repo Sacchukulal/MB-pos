@@ -186,11 +186,11 @@ pub fn order(bill: Bill, settlement: Settlement) -> AnyOrder {
             formatted: "42".to_owned(),
             business_day: day,
         },
-        bill_number: Claimed {
+        bill_number: Some(Claimed {
             value: 1_207,
             formatted: "BIR/1207".to_owned(),
             business_day: day,
-        },
+        }),
     };
 
     AnyOrder::Settled(
