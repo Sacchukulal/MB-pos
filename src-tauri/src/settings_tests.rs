@@ -1209,6 +1209,72 @@ fn a_second_press_is_the_same_backup_and_copies_reach_every_folder() {
     assert!(view.copies.is_empty());
 }
 
+/// Every backup goes by the one name and takes the last one's place: the folder holds one
+/// backup however many are taken, and the pile an older build left is cleared by the first.
+#[test]
+fn a_later_backup_takes_the_last_ones_place() {
+    let scratch = Scratch::new("backup_one_name");
+    let app = a_shop(&scratch, "one_name");
+    let folder = crate::settings::backup::folder_for(&app);
+
+    // What an older build left behind: dated backups and a photograph folder with no backup.
+    let dated = folder.join("magicbill-1789024455216-dhlfvvyxwy.db");
+    app.with_shop(|shop| {
+        mb_db::backup::take(&shop.db, &dated, "1.6.17").expect("an old backup");
+        Ok(())
+    })
+    .expect("shop");
+    backdate(&dated, 1_000);
+    let orphan = folder.join("magicbill-1789046209284-4q7x4gfkkz.db.attachments");
+    std::fs::create_dir_all(&orphan).expect("orphan");
+
+    let view = crate::settings::backup::back_up_now_on(&app).expect("taken");
+    assert_eq!(view.backups.len(), 1, "the old pile was kept");
+    assert_eq!(view.backups[0].name, mb_db::backup::FILE_NAME);
+    assert!(view.backups[0].checked_ok);
+    assert!(!dated.exists(), "the dated backup survived");
+    assert!(!orphan.exists(), "the orphaned photograph folder survived");
+
+    // An hour later, the next one takes its place: still one file, still checked.
+    backdate(&folder.join(mb_db::backup::FILE_NAME), 2_000);
+    let view = crate::settings::backup::back_up_now_on(&app).expect("taken again");
+    assert_eq!(view.backups.len(), 1, "a second backup grew the list");
+    assert_eq!(view.backups[0].name, mb_db::backup::FILE_NAME);
+    assert!(view.backups[0].checked_ok, "the mark did not follow the file");
+    assert!(view.last.ends_with(", checked"), "{}", view.last);
+    assert!(
+        !folder.join("magicbill-backup.db.part").exists(),
+        "the part stayed behind"
+    );
+    assert_eq!(
+        std::fs::read_dir(&folder)
+            .expect("folder")
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "db"))
+            .count(),
+        1
+    );
+}
+
+/// Rewrite when a backup says it was taken, so the next press is not "the same backup".
+fn backdate(db: &std::path::Path, to_ms: i64) {
+    let mut manifest = db.as_os_str().to_os_string();
+    manifest.push(".manifest");
+    let manifest = std::path::PathBuf::from(manifest);
+    let text = std::fs::read_to_string(&manifest).expect("manifest");
+    let rebuilt: String = text
+        .lines()
+        .map(|line| {
+            if line.starts_with("taken_at_ms ") {
+                format!("taken_at_ms {to_ms}\n")
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect();
+    std::fs::write(manifest, rebuilt).expect("backdated");
+}
+
 /// Moving the backup folder carries the backups already taken with it.
 #[test]
 fn moving_the_backup_folder_carries_the_backups_over() {

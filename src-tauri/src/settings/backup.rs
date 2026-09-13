@@ -1,7 +1,9 @@
 //! Backup and restore. A backup is taken by the schedule the owner set, or on the button,
 //! checked the moment it is written, kept in the backup folder (the shop folder's `backups`
 //! unless the owner moved it) and copied to every folder on the copies list: a pen drive,
-//! Google Drive, OneDrive, a share. The newest `KEEP` are kept everywhere.
+//! Google Drive, OneDrive, a share. Only the newest `KEEP` are kept anywhere: a backup goes by
+//! one name, is written beside the last one, and takes its place once it has passed its check,
+//! so a folder never fills and a bad backup never replaces a good one.
 
 use std::path::{Path, PathBuf};
 
@@ -14,8 +16,9 @@ use crate::state::App;
 use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
 
-/// How many backups are kept, in the backup folder and in every copy folder.
-pub const KEEP: usize = 30;
+/// How many backups are kept, in the backup folder and in every copy folder: the newest one.
+/// A cloud folder keeps its own history of that file; the shop's disk does not.
+pub const KEEP: usize = 1;
 /// The folder inside the shop folder.
 const FOLDER: &str = "backups";
 /// The folder made inside a pen drive or a cloud folder.
@@ -441,9 +444,20 @@ fn verify_marks(app: &App) -> Vec<(String, String)> {
 
 fn remember_verify(app: &App, path: &str, mark: &str) {
     let mut marks = verify_marks(app);
-    marks.retain(|(p, _)| p != path);
+    // A mark for a file that is gone would only grow the list.
+    marks.retain(|(p, _)| p != path && Path::new(p).exists());
     marks.push((path.to_owned(), mark.to_owned()));
-    let Ok(text) = serde_json::to_string(&marks) else {
+    save_verify_marks(app, &marks);
+}
+
+fn forget_verify(app: &App, path: &str) {
+    let mut marks = verify_marks(app);
+    marks.retain(|(p, _)| p != path);
+    save_verify_marks(app, &marks);
+}
+
+fn save_verify_marks(app: &App, marks: &[(String, String)]) {
+    let Ok(text) = serde_json::to_string(marks) else {
         return;
     };
     write_raw_setting(app, VERIFIED_KEY, &text);
@@ -527,32 +541,31 @@ fn take_backup(
     who: &str,
 ) -> UiResult<(mb_db::backup::Backup, VerifyView)> {
     let folder = folder_for(app);
+    let target = folder.join(mb_db::backup::FILE_NAME);
 
-    let at = crate::flows::now();
-    // **id-lint-ok: this is a FILE NAME, and the time in it is the point.**
-    //
-    // A shop looking in the backup folder reads these; a name that was only a
-    // random tail would tell them nothing about which copy is which. The tail
-    // is on the end because two backups in the same millisecond would otherwise
-    // be one file name, and the second would land on top of the first.
-    let name = format!("magicbill-{}-{}.db", at.millis(), crate::newid::tail_only());
-    let target = folder.join(name);
-
-    let backup = app.with_shop(|shop| {
-        mb_db::backup::take(&shop.db, &target, env!("CARGO_PKG_VERSION"))
+    // Written beside the last backup, not over it.
+    let part = app.with_shop(|shop| {
+        mb_db::backup::take_beside(&shop.db, &target, env!("CARGO_PKG_VERSION"))
             .map_err(|e| words::from_db(&e))
     })?;
 
-    // Checked before anything is copied: a copy of a bad file is two bad files.
-    let report = check(app, &backup.path.display().to_string())?;
+    // Checked before it takes the last one's place, and before anything is copied: a bad
+    // backup must not replace a good one, and a copy of a bad file is two bad files.
+    let part_key = part.path.display().to_string();
+    let report = check(app, &part_key)?;
+    forget_verify(app, &part_key);
     if !report.ok {
         log_warn!(
-            "the backup {} failed its check: {}",
-            backup.path.display(),
+            "the new backup failed its check and was thrown away, the last one stays: {}",
             report.detail
         );
-        return Ok((backup, report));
+        if let Err(e) = mb_db::backup::discard(&part) {
+            log_warn!("the failed backup could not be removed: {e}");
+        }
+        return Ok((part, report));
     }
+    let backup = mb_db::backup::put_in_place(&part, &target).map_err(|e| words::from_db(&e))?;
+    remember_verify(app, &backup.path.display().to_string(), CHECKED);
 
     for copy in config.backup.copy_folders() {
         copy_backup_to(&backup, Path::new(&copy));

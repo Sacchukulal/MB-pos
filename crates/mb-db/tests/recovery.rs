@@ -408,6 +408,74 @@ fn t6_retention_keeps_the_newest_and_never_none() {
     assert_eq!(backup::list(&dir).expect("list").len(), 1);
 }
 
+/// A backup goes by one name: the next one is written beside it and takes its place only once
+/// it is in; a pruned backup takes its photographs with it, and a photograph folder left
+/// behind by an older build goes too.
+#[test]
+fn t19_one_name_and_the_photographs_go_with_their_backup() {
+    let scratch = Scratch::new("t7");
+    let dir = shop::backup_dir(&scratch);
+    let db = scratch.open();
+    shop::build(&db);
+
+    // A photograph beside the live database, so every backup carries a folder.
+    let photos = backup::attachments_dir(&scratch.db_path());
+    std::fs::create_dir_all(&photos).expect("photos");
+    std::fs::write(photos.join("abc123.jpg"), b"jpeg").expect("photo");
+
+    // Two dated backups from an older build, and an orphaned photograph folder.
+    let old = backup::take(&db, &dir.join("magicbill-1-old.db"), "test").expect("take");
+    backdate(&old, 1_000);
+    let older = backup::take(&db, &dir.join("magicbill-0-older.db"), "test").expect("take");
+    backdate(&older, 500);
+    let orphan = dir.join("magicbill-9-gone.db.attachments");
+    std::fs::create_dir_all(&orphan).expect("orphan");
+    std::fs::write(orphan.join("abc123.jpg"), b"jpeg").expect("orphan photo");
+
+    // The new way: beside, then in place.
+    let target = dir.join(backup::FILE_NAME);
+    let part = backup::take_beside(&db, &target, "test").expect("beside");
+    assert!(part.path.ends_with("magicbill-backup.db.part"));
+    assert_eq!(
+        backup::list(&dir).expect("list").len(),
+        2,
+        "a part counted as a backup"
+    );
+    let placed = backup::put_in_place(&part, &target).expect("in place");
+    assert_eq!(placed.path, target);
+    assert!(target.exists());
+    assert!(placed.manifest_path().exists());
+    assert!(placed.attachments_path().join("abc123.jpg").exists());
+    assert!(!part.path.exists(), "the part stayed behind");
+
+    // Newest one kept; the dated ones and every stray photograph folder gone.
+    let pruned = backup::prune(&dir, 1).expect("prune");
+    assert_eq!(pruned.len(), 2);
+    let left = backup::list(&dir).expect("list");
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].path, target);
+    assert!(!old.attachments_path().exists(), "photographs outlived their backup");
+    assert!(!older.path.exists());
+    assert!(!orphan.exists(), "the orphaned photograph folder survived");
+
+    // The next backup takes the same name, and a copy folder ends up with the same one file.
+    let again = backup::put_in_place(
+        &backup::take_beside(&db, &target, "test").expect("beside again"),
+        &target,
+    )
+    .expect("in place again");
+    assert_eq!(backup::list(&dir).expect("list").len(), 1);
+    let copies = dir.with_file_name("copies");
+    backup::copy_to_second_location(&again, &copies).expect("copy");
+    backup::copy_to_second_location(&again, &copies).expect("copy again");
+    let copied = backup::list(&copies).expect("list copies");
+    assert_eq!(copied.len(), 1);
+    assert!(copied[0].path.ends_with(backup::FILE_NAME));
+    assert!(copied[0].attachments_path().join("abc123.jpg").exists());
+    let report = backup::verify(&copied[0].path).expect("verify the copy");
+    assert!(report.is_ok(), "{}", report.summary());
+}
+
 fn backdate(taken: &backup::Backup, to_ms: i64) {
     let text = std::fs::read_to_string(taken.manifest_path()).expect("read");
     let rebuilt: String = text

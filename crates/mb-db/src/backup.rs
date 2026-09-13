@@ -236,6 +236,12 @@ fn copy_attachments(from: &Path, to: &Path) -> Result<Vec<(String, u64, String)>
     Ok(out)
 }
 
+/// The one name a backup goes by, in the backup folder and in every copy folder. A backup is
+/// written beside the last one and swapped in once it has passed its check, so a cloud folder
+/// sees the same file change and keeps its own history of it, and a shop is never left with
+/// none.
+pub const FILE_NAME: &str = "magicbill-backup.db";
+
 /// One backup on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Backup {
@@ -248,12 +254,88 @@ impl Backup {
     pub fn manifest_path(&self) -> PathBuf {
         manifest_path(&self.path)
     }
+
+    /// The photographs that belong to this backup.
+    #[must_use]
+    pub fn attachments_path(&self) -> PathBuf {
+        backup_attachments_dir(&self.path)
+    }
 }
 
 fn manifest_path(db: &Path) -> PathBuf {
     let mut p = db.as_os_str().to_os_string();
     p.push(".manifest");
     PathBuf::from(p)
+}
+
+/// Where a backup is written before it has earned its name: `<name>.part`, which `list` never
+/// counts as a backup.
+fn part_path(db: &Path) -> PathBuf {
+    let mut p = db.as_os_str().to_os_string();
+    p.push(".part");
+    PathBuf::from(p)
+}
+
+/// Remove a backup's three pieces: the file, its manifest, its photographs.
+fn remove_pieces(db: &Path) -> Result<(), DbError> {
+    let _ = std::fs::remove_file(manifest_path(db));
+    let photos = backup_attachments_dir(db);
+    if photos.is_dir() {
+        std::fs::remove_dir_all(&photos).map_err(|e| {
+            DbError::invariant(format!("could not remove {}: {e}", photos.display()))
+        })?;
+    }
+    match std::fs::remove_file(db) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(DbError::invariant(format!(
+            "could not remove {}: {e}",
+            db.display()
+        ))),
+    }
+}
+
+/// Move a backup's three pieces from `from` to `to`, taking the place of whatever was at `to`.
+fn move_pieces(from: &Path, to: &Path) -> Result<(), DbError> {
+    remove_pieces(to)?;
+    let rename = |a: &Path, b: &Path| {
+        std::fs::rename(a, b).map_err(|e| {
+            DbError::invariant(format!(
+                "could not move {} into place: {e}",
+                a.display()
+            ))
+        })
+    };
+    rename(from, to)?;
+    rename(&manifest_path(from), &manifest_path(to))?;
+    let photos = backup_attachments_dir(from);
+    if photos.is_dir() {
+        rename(&photos, &backup_attachments_dir(to))?;
+    }
+    Ok(())
+}
+
+/// Take a backup beside `to`, as `<to>.part`. It is not a backup until `put_in_place` says so,
+/// which is after it has been checked; a bad one is `discard`ed and the last good one stays.
+pub fn take_beside(db: &Db, to: &Path, app_version: &str) -> Result<Backup, DbError> {
+    let part = part_path(to);
+    // A part left by a run that died is not worth keeping.
+    remove_pieces(&part)?;
+    take(db, &part, app_version)
+}
+
+/// A checked part takes the name it was written beside.
+pub fn put_in_place(part: &Backup, to: &Path) -> Result<Backup, DbError> {
+    move_pieces(&part.path, to)?;
+    Ok(Backup {
+        path: to.to_path_buf(),
+        manifest: part.manifest.clone(),
+    })
+}
+
+/// Throw a backup away: the file, its manifest, its photographs.
+pub fn discard(backup: &Backup) -> Result<(), DbError> {
+    remove_pieces(&backup.path)
 }
 
 /// Take a backup of the live database while the shop keeps billing.
@@ -301,16 +383,18 @@ pub fn copy_to_second_location(backup: &Backup, dir: &Path) -> Result<PathBuf, D
         .file_name()
         .ok_or_else(|| DbError::invariant("the backup has no file name"))?;
     let target = dir.join(name);
-    std::fs::copy(&backup.path, &target)
+    // Written as a part and swapped in whole: a pen drive pulled halfway leaves the copy that
+    // was there, not half of a new one.
+    let part = part_path(&target);
+    remove_pieces(&part)?;
+    std::fs::copy(&backup.path, &part)
         .map_err(|e| DbError::invariant(format!("could not copy the backup: {e}")))?;
-    std::fs::copy(backup.manifest_path(), manifest_path(&target))
+    std::fs::copy(backup.manifest_path(), manifest_path(&part))
         .map_err(|e| DbError::invariant(format!("could not copy the manifest: {e}")))?;
     // The second copy carries the photographs too, or it is not a second copy of the same
     // thing.
-    copy_attachments(
-        &backup_attachments_dir(&backup.path),
-        &backup_attachments_dir(&target),
-    )?;
+    copy_attachments(&backup.attachments_path(), &backup_attachments_dir(&part))?;
+    move_pieces(&part, &target)?;
     Ok(target)
 }
 
@@ -616,20 +700,41 @@ fn verify_structure(path: &Path) -> Result<bool, DbError> {
     Ok(rows.next()?.is_none())
 }
 
-/// Keep the newest `keep` backups and remove the rest — and never the last one.
+/// Keep the newest `keep` backups and remove the rest — and never the last one. A backup goes
+/// with its photographs, and a photograph folder whose backup is already gone goes too.
 pub fn prune(dir: &Path, keep: usize) -> Result<Vec<PathBuf>, DbError> {
     let mut backups = list(dir)?;
     // Newest first.
     backups.sort_by_key(|b| std::cmp::Reverse(b.manifest.taken_at_ms));
     let mut pruned = Vec::new();
     for backup in backups.into_iter().skip(keep.max(1)) {
-        let _ = std::fs::remove_file(backup.manifest_path());
-        std::fs::remove_file(&backup.path).map_err(|e| {
-            DbError::invariant(format!("could not prune {}: {e}", backup.path.display()))
-        })?;
+        remove_pieces(&backup.path)?;
         pruned.push(backup.path);
     }
+    remove_orphan_attachments(dir)?;
     Ok(pruned)
+}
+
+/// A `<name>.db.attachments` folder with no `<name>.db` beside it belongs to nothing.
+fn remove_orphan_attachments(dir: &Path) -> Result<(), DbError> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(owner) = name.strip_suffix(".attachments") else {
+            continue;
+        };
+        if path.is_dir() && !dir.join(owner).exists() {
+            std::fs::remove_dir_all(&path).map_err(|e| {
+                DbError::invariant(format!("could not remove {}: {e}", path.display()))
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// Every backup in a folder, with its manifest.
