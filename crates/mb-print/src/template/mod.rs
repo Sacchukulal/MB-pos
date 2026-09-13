@@ -6,6 +6,8 @@ pub mod delivery;
 pub mod kitchen;
 /// The payslip.
 pub mod payslip;
+/// A report, on a roll or on a sheet.
+pub mod report;
 
 pub use bill::{BillContext, BillCustomer, Copy, EInvoice, Store, bill_document};
 pub use dayclose::{CountedNote, DayCloseContext, SlipLine, day_close_document};
@@ -14,6 +16,7 @@ pub use kitchen::{
     KitchenContext, LabelContext, TicketKind, TicketLine, kitchen_document, label_document,
 };
 pub use payslip::{PaySlipLine, PayslipContext, payslip_document};
+pub use report::{ReportColumn, ReportContext, report_document};
 
 /// What the paper calls an order type — the bill and the kitchen ticket say the same word.
 #[must_use]

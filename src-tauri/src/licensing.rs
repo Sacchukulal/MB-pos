@@ -103,6 +103,7 @@ pub const GATED: &[(&str, Feature)] = &[
     ("report", Feature::Reports),
     ("report_csv", Feature::Reports),
     ("report_pdf", Feature::Reports),
+    ("report_print", Feature::Reports),
     ("dashboard", Feature::Reports),
     // Phones: the switch, then `gate_phones` counts them.
     ("open_pairing", Feature::MobileOrdering),

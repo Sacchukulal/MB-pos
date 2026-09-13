@@ -14,12 +14,24 @@
   gap: var(--space-1);
 }
 
-.mb-reports__grouptitle {
+/* The group's name is the row that folds it: nine groups is a rail nobody reads. */
+.mb-reports__grouphead {
   margin: 0 0 var(--space-1);
+}
+
+.mb-reports__grouptitle {
+  min-height: var(--control-sm);
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   letter-spacing: var(--tracking-caps);
   color: var(--text-faint);
+}
+
+/* The reports inside a group, when it is open. */
+.mb-reports__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 /*

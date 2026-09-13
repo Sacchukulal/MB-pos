@@ -352,6 +352,7 @@ pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
             K::Drawer => "Cash drawer",
             K::DayClose => "Closing slip",
             K::Delivery => "Delivery slip",
+            K::Report => "Report",
         }
         .to_owned(),
         state: match status.state {
@@ -646,6 +647,7 @@ macro_rules! commands {
             $crate::reports::report,
             $crate::reports::report_csv,
             $crate::reports::report_pdf,
+            $crate::reports::report_print,
             $crate::reports::dashboard,
             // The business day: the gate, the Days screen, and the drawer count beside them.
             $crate::dayclose::day_state,

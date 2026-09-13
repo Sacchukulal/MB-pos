@@ -113,6 +113,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0015_bill_number_when_billed",
         sql: include_str!("migrations/0015_bill_number_when_billed.sql"),
     },
+    // A report is a thing the print queue can hold.
+    Migration {
+        version: 16,
+        name: "0016_report_on_paper",
+        sql: include_str!("migrations/0016_report_on_paper.sql"),
+    },
 ];
 
 /// The highest version this build understands.

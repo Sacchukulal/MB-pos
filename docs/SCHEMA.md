@@ -407,7 +407,7 @@ consulted, and §Indexes' rule is that one nobody named does not exist.
 | id | TEXT | no | |
 | outlet_id | TEXT | no | |
 | printer_id | TEXT | no | |
-| kind | TEXT | no | `bill` / `kitchen` / `label` / `test` / `drawer` / `day_close` / `delivery`. **P30 added the last two, and finding them missing is the point of the row:** `day_close` has existed since P18 and `delivery` since P29, so every Z-report and every rider slip was refused by this CHECK with the day still closing normally. `every_job_kind_the_queue_can_make_is_allowed_by_the_schema` walks the enum against this list so they cannot part company again. |
+| kind | TEXT | no | `bill` / `kitchen` / `label` / `test` / `drawer` / `day_close` / `delivery` / `recovery` (0002) / `report` (0016). **P30 added `day_close` and `delivery`, and finding them missing is the point of the row:** `day_close` has existed since P18 and `delivery` since P29, so every Z-report and every rider slip was refused by this CHECK with the day still closing normally. `every_job_kind_the_queue_can_make_is_allowed_by_the_schema` walks the enum against this list so they cannot part company again — and it is what caught `report` before a shop ever pressed Print on the reports screen. SQLite cannot alter a CHECK, so each of these rebuilt the table. |
 | state | TEXT | no | `pending` / `printing` / `failed` / `parked`. There is no `done`: a done job has no row. |
 | copies | INTEGER | no | |
 | priority | INTEGER | no | Lower is sooner. A bill queued behind forty kitchen tickets is a customer standing at the counter. |

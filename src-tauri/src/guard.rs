@@ -357,6 +357,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // reading it — `report_on` still checks the read.
     ("report_csv", Access::Needs(Permission::ReportsExport)),
     ("report_pdf", Access::Needs(Permission::ReportsExport)),
+    ("report_print", Access::Needs(Permission::ReportsExport)),
     // The dashboard is the day's takings on a screen, like every other report.
     ("dashboard", Access::Needs(Permission::ReportsView)),
     // Closing the day.

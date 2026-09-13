@@ -18,6 +18,7 @@ import {
   type Column,
 } from '../kit';
 import { call, isLicenceRefusal, isUiError } from '../ipc/call';
+import { keep, remember } from '../remember';
 import { useMay } from '../shell/permissions';
 import { Bills } from './Bills';
 import { Dashboard } from './Dashboard';
@@ -58,11 +59,22 @@ export function Reports({
   useEffect(() => {
     if (initial === DAYS) setChosen(DAYS);
   }, [initial]);
+  // Which groups are unfolded. The rail is nine groups long; folded is how a person finds
+  // anything in it, and which ones are open is a look preference, not a fact about the shop.
+  const [unfolded, setUnfolded] = useState<readonly string[]>(() => opened());
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [report, setReport] = useState<ReportView | null>(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+
+  const fold = (group: string) => {
+    const next = unfolded.includes(group)
+      ? unfolded.filter((name) => name !== group)
+      : [...unfolded, group];
+    setUnfolded(next);
+    keep(FOLDS, next.join('\n'));
+  };
 
   const complain = useCallback(
     (cause: unknown) => {
@@ -120,6 +132,13 @@ export function Reports({
       .catch(complain);
   };
 
+  /** The same figures, on the roll the bills come off. */
+  const print = () => {
+    call('report_print', { id: chosen, period: { from, to } })
+      .then((says) => toast.show('ok', says))
+      .catch(complain);
+  };
+
   /** Send the figures to somebody. */
   const share = (channel: 'copy' | 'whats_app' | 'email' | 'folder') => {
     call('share_report', { id: chosen, period: { from, to }, channel })
@@ -165,21 +184,38 @@ export function Reports({
               </Pick>
             ))}
         </div>
-        {groups(list?.reports ?? []).map(([group, entries]) => (
-          <div className="mb-reports__group" key={group}>
-            <h2 className="mb-reports__grouptitle">{group}</h2>
-            {entries.map((entry) => (
-              <Pick
-                key={entry.id}
-                className="mb-reports__pick"
-                current={entry.id === chosen}
-                onClick={() => setChosen(entry.id)}
-              >
-                {entry.title}
-              </Pick>
-            ))}
-          </div>
-        ))}
+        {groups(list?.reports ?? []).map(([group, entries]) => {
+          const open = unfolded.includes(group);
+          return (
+            <div className="mb-reports__group" key={group}>
+              {/* The heading IS the switch — a screen reader gets both the level and the state. */}
+              <h2 className="mb-reports__grouphead">
+                <Pick
+                  className="mb-reports__grouptitle"
+                  aria-expanded={open}
+                  aria-controls={`reports-${group}`}
+                  title={open ? `Fold ${group} away` : `Show ${group}`}
+                  onClick={() => fold(group)}
+                >
+                  <Icon name={open ? 'chevron-down' : 'chevron-right'} size="sm" />
+                  {group}
+                </Pick>
+              </h2>
+              <div className="mb-reports__list" id={`reports-${group}`} hidden={!open}>
+                {entries.map((entry) => (
+                  <Pick
+                    key={entry.id}
+                    className="mb-reports__pick"
+                    current={entry.id === chosen}
+                    onClick={() => setChosen(entry.id)}
+                  >
+                    {entry.title}
+                  </Pick>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </Scroller>
 
       <div className="mb-reports__body">
@@ -228,8 +264,13 @@ export function Reports({
                 mayExport ? (
                   <div className="mb-reports__exports">
                     {/*
-                      Sending it first, saving it second: an owner looking at this at 11 p.m.
+                      Paper first, because a shop with a printer on the counter asks for it
+                      before it asks for a file; then sending it, then saving it.
                     */}
+                    <Button size="sm" variant="quiet" onClick={print}>
+                      <Icon name="printer" size="sm" />
+                      Print
+                    </Button>
                     <Button size="sm" variant="quiet" onClick={() => share('copy')}>
                       Copy
                     </Button>
@@ -324,6 +365,16 @@ const BILLS = 'bills';
 
 /** Nor is the dashboard: it is the answer to a question, not a report. */
 const TODAY = 'today';
+
+/** Which report groups are open, on this computer. */
+const FOLDS = 'reports.unfolded';
+
+/** The groups this computer last had open — none, the first time, so the rail opens short. */
+function opened(): readonly string[] {
+  return remember(FOLDS, '')
+    .split('\n')
+    .filter((name) => name !== '');
+}
 
 /** The reports in their groups, in the order Rust listed them. */
 function groups(entries: readonly ReportEntryView[]): [string, ReportEntryView[]][] {

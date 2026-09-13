@@ -43,6 +43,8 @@ pub enum JobKind {
     Drawer,
     DayClose,
     Delivery,
+    /// A report on paper — the figures the owner was looking at.
+    Report,
 }
 
 impl JobKind {
@@ -55,6 +57,7 @@ impl JobKind {
         JobKind::Drawer,
         JobKind::DayClose,
         JobKind::Delivery,
+        JobKind::Report,
     ];
 
     #[must_use]
@@ -67,6 +70,7 @@ impl JobKind {
             JobKind::Drawer => "drawer",
             JobKind::DayClose => "day_close",
             JobKind::Delivery => "delivery",
+            JobKind::Report => "report",
         }
     }
 
@@ -80,6 +84,7 @@ impl JobKind {
             "drawer" => Some(JobKind::Drawer),
             "day_close" => Some(JobKind::DayClose),
             "delivery" => Some(JobKind::Delivery),
+            "report" => Some(JobKind::Report),
             _ => None,
         }
     }
@@ -97,7 +102,8 @@ impl JobKind {
             // With the food, so it goes at kitchen speed and not at label speed: the rider is
             // standing there.
             JobKind::Delivery => 25,
-            JobKind::Test | JobKind::Label => 50,
+            // Last of all: nobody is standing at the counter waiting for a report.
+            JobKind::Test | JobKind::Label | JobKind::Report => 50,
         }
     }
 }
@@ -408,7 +414,8 @@ impl Queue {
             | JobKind::Label
             | JobKind::Test
             | JobKind::Drawer
-            | JobKind::Delivery => true,
+            | JobKind::Delivery
+            | JobKind::Report => true,
         };
         if !allowed {
             return Err(PrintError::invalid(format!(

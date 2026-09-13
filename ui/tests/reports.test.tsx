@@ -91,6 +91,7 @@ function answer(command: string) {
       rules: null,
     });
   }
+  if (command === 'report_print') return Promise.resolve('Wastage by kitchen is printing.');
   if (command === 'report_csv' || command === 'report_pdf') {
     return Promise.resolve({
       path: 'C:/Users/x/Documents/Magic Bill reports/Wastage.csv',
@@ -101,6 +102,7 @@ function answer(command: string) {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   call.mockReset();
   call.mockImplementation((command: string) => answer(command));
 });
@@ -114,18 +116,24 @@ function open() {
   );
 }
 
-/** The screen opens on the dashboard. */
+/** Unfold one group of the rail, the way a person does. */
+async function unfold(group: string) {
+  await waitFor(() => expect(screen.getByRole('button', { name: group })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: group }));
+}
+
+/** The screen opens on the dashboard, with every group folded away. */
 async function openOnAReport() {
   open();
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Sales by day' })).toBeTruthy());
+  await unfold('Sales');
   fireEvent.click(screen.getByRole('button', { name: 'Sales by day' }));
 }
 
 it('renders a report it has never heard of, columns and all', async () => {
   open();
   // The list groups itself from what Rust sent, including a group this file invented.
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Wastage by kitchen' })).toBeTruthy());
-  // The group heading came from the data too.
+  await unfold('Kitchen');
+  // The group heading came from the data too, and it is the switch that opened it.
   expect(screen.getByRole('heading', { name: 'Kitchen' })).toBeTruthy();
 
   fireEvent.click(screen.getByRole('button', { name: 'Wastage by kitchen' }));
@@ -186,6 +194,46 @@ it('exports the report on screen, through Rust, and says where it went', async (
 
   fireEvent.click(screen.getByRole('button', { name: 'Save as PDF' }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('report_pdf', expect.anything()));
+});
+
+it('prints the report on screen, on the shop printer, for the period chosen', async () => {
+  await openOnAReport();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Print' })).toBeTruthy());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Print' }));
+  // The report that is on the screen, for the period that is on the screen.
+  await waitFor(() =>
+    expect(call).toHaveBeenCalledWith('report_print', {
+      id: 'sales_day',
+      period: { from: '2026-08-09', to: '2026-08-09' },
+    }),
+  );
+  // The whole sentence, written in Rust.
+  await waitFor(() =>
+    expect(screen.getByText('Wastage by kitchen is printing.')).toBeTruthy(),
+  );
+});
+
+/** Nine groups on the rail: folded is how a person finds anything in it. */
+it('opens with every group folded, and remembers the ones that were opened', async () => {
+  open();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Sales' })).toBeTruthy());
+  // Folded: the reports inside are not reachable.
+  expect(screen.queryByRole('button', { name: 'Sales by day' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Sales' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Sales by day' })).toBeTruthy());
+  // Only the one that was opened.
+  expect(screen.queryByRole('button', { name: 'Tax, rate-wise' })).toBeNull();
+
+  // Opened again tomorrow, the rail is how it was left.
+  cleanup();
+  open();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Sales by day' })).toBeTruthy());
+
+  // And folding it away puts it back.
+  fireEvent.click(screen.getByRole('button', { name: 'Sales' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Sales by day' })).toBeNull());
 });
 
 /** A licence refusal is an ANSWER, and it stays on the screen. */

@@ -2105,69 +2105,31 @@ pub fn dashboard(app: tauri::State<'_, App>, period: Option<PeriodArg>) -> UiRes
 /// to a PDF, a thermal printer or the on-screen preview without a second layout engine
 /// existing.
 #[must_use]
-pub fn to_document(report: &ReportView) -> mb_print::doc::Document {
-    use mb_print::doc::{Align, Block, Column, Document, Pattern, Style};
-    use mb_print::paper::{Paper, PaperKind};
-
-    let mut doc = Document::new(Paper::new(PaperKind::A4));
-    doc.text(report.title.clone(), Style::new(2, true), Align::Centre)
-        .text(report.subtitle.clone(), Style::NORMAL, Align::Centre)
-        .separator(Pattern::Double);
-
-    // Column widths from the widest cell, header included.
-    let widest = |index: usize| {
-        report
-            .rows
-            .iter()
-            .chain(report.totals.iter())
-            .filter_map(|row| row.get(index))
-            .map(|cell| cell.chars().count())
-            .chain(std::iter::once(
-                report.columns[index].header.chars().count(),
-            ))
-            .max()
-            .unwrap_or(1)
-    };
-    let mut filled = false;
-    let columns: Vec<Column> = report
+pub fn to_document(app: &App, report: &ReportView, paper: mb_print::paper::Paper) -> mb_print::doc::Document {
+    let store = app.shop_config().store.to_print_store();
+    let columns: Vec<mb_print::template::ReportColumn> = report
         .columns
         .iter()
-        .enumerate()
-        .map(|(index, spec)| {
-            if spec.numeric {
-                Column::fixed(widest(index) + 2, Align::Right)
-            } else if filled {
-                Column::fixed(widest(index) + 2, Align::Left)
-            } else {
-                filled = true;
-                Column::fill(Align::Left)
-            }
+        .map(|spec| mb_print::template::ReportColumn {
+            header: spec.header.clone(),
+            numeric: spec.numeric,
         })
         .collect();
-
-    doc.push(Block::Columns {
-        columns: columns.clone(),
-        rows: vec![report.columns.iter().map(|c| c.header.clone()).collect()],
-        style: Style::new(1, true),
-    })
-    .separator(Pattern::Solid)
-    .push(Block::Columns {
-        columns: columns.clone(),
-        rows: report.rows.clone(),
-        style: Style::NORMAL,
-    });
-
-    if let Some(totals) = &report.totals {
-        doc.separator(Pattern::Solid).push(Block::Columns {
-            columns,
-            rows: vec![totals.clone()],
-            style: Style::new(1, true),
-        });
-    }
-    for note in &report.notes {
-        doc.spacer(1).line(note.clone());
-    }
-    doc
+    // Whose figures, and as at when — a report on a desk with no date on it is worth nothing.
+    let printed = format!("Printed {}", words::when(crate::flows::now()));
+    mb_print::template::report_document(
+        paper,
+        &mb_print::template::ReportContext {
+            store: &store,
+            title: &report.title,
+            subtitle: &report.subtitle,
+            columns: &columns,
+            rows: &report.rows,
+            totals: report.totals.as_deref(),
+            notes: &report.notes,
+            printed: Some(&printed),
+        },
+    )
 }
 
 /// Where an export lands, and what to tell the person who asked for it.
@@ -2273,7 +2235,8 @@ pub fn report_pdf(
 ) -> UiResult<SavedFileView> {
     guard::require(&app, Permission::ReportsExport)?;
     let report = report_on(&app, id, period)?;
-    let laid = mb_print::layout::layout(&to_document(&report)).map_err(|e| {
+    let paper = mb_print::paper::Paper::new(mb_print::paper::PaperKind::A4);
+    let laid = mb_print::layout::layout(&to_document(&app, &report, paper)).map_err(|e| {
         UiError::new(
             "report.layout",
             "The report could not be laid out for printing.",
@@ -2282,6 +2245,31 @@ pub fn report_pdf(
     })?;
     let name = file_name(&report, "pdf");
     save(&name, &mb_print::pdf::to_pdf(&laid))
+}
+
+/// The report the owner is looking at, on the shop's own printer — the thermal roll a bill goes
+/// to, laid out for the paper that is in it.
+#[tauri::command]
+pub fn report_print(
+    app: tauri::State<'_, App>,
+    id: String,
+    period: PeriodArg,
+) -> UiResult<String> {
+    // Paper is paper: printing a report is taking it out of the building, like saving it.
+    guard::require(&app, Permission::ReportsExport)?;
+    let report = report_on(&app, id, period)?;
+    let printer = crate::flows::default_printer(&app)?;
+    let document = to_document(&app, &report, printer.paper);
+    app.print(
+        mb_print::queue::Job::new(
+            mb_print::queue::JobKind::Report,
+            &printer.id,
+            document,
+            crate::flows::today(crate::flows::now()),
+        )
+        .because(format!("report: {}", report.title)),
+    )?;
+    Ok(format!("{} is printing.", report.title))
 }
 
 #[cfg(test)]

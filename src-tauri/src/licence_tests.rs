@@ -304,6 +304,7 @@ fn every_gated_command_is_refused_when_the_shop_is_not_entitled() {
     // that one refusal rather than by their own.
     assert!(listed.contains(&"report_csv"));
     assert!(listed.contains(&"report_pdf"));
+    assert!(listed.contains(&"report_print"));
 }
 
 /// The day close is NOT gated, and this is the test that keeps it that way.

@@ -649,6 +649,8 @@ export interface Commands {
   report: { args: { id: string; period: PeriodArg }; returns: ReportView };
   report_csv: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
   report_pdf: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
+  /** On the shop's own printer, on the paper that is in it. */
+  report_print: { args: { id: string; period: PeriodArg }; returns: string };
 
   // The phones this counter serves.
   network: { args: void; returns: NetworkView };
