@@ -9,7 +9,7 @@ mod common;
 use common::Fixture;
 use mb_core::{ItemId, LineIdentity, Money, OrderType, Qty};
 use mb_print::doc::{Align, Block, Column, Document, Style};
-use mb_print::layout::{Note, layout};
+use mb_print::layout::{LaidContent, LaidLine, Note, layout};
 use mb_print::paper::{Offset, Paper, PaperKind};
 use mb_print::settings::KitchenSettings;
 use mb_print::template::{
@@ -464,4 +464,114 @@ fn a_cancellation_slip_says_cancel() {
     );
     assert!(rendered.contains("CANCEL"), "a cancellation must say so");
     assert!(rendered.contains("Masala Dosa"));
+}
+
+/// The line a laid-out page put this text on.
+fn line_with<'a>(laid: &'a mb_print::layout::Laid, wanted: &str) -> &'a LaidLine {
+    laid.lines
+        .iter()
+        .find(|line| match &line.content {
+            LaidContent::Text { text } => text.contains(wanted),
+            _ => false,
+        })
+        .unwrap_or_else(|| panic!("nothing on the paper says {wanted:?}"))
+}
+
+/// The column names sit OVER the columns they name.
+///
+/// A table's columns are measured in characters of its own size, and the kitchen sets its food
+/// far larger than its details — so a heading drawn at the details size had a four-character
+/// quantity column a third the width of the one below it, and "Qty" landed halfway across the
+/// paper with "Item" after it. Found on a real ticket.
+#[test]
+fn the_kitchen_column_names_line_up_with_the_food() {
+    let lines = vec![
+        TicketLine {
+            name: "Masala Dosa".to_owned(),
+            qty: Qty::from_whole(12).expect("qty"),
+            note: None,
+            modifiers: vec![],
+        },
+        TicketLine {
+            name: "Kushka Rice".to_owned(),
+            qty: Qty::from_whole(6).expect("qty"),
+            note: None,
+            modifiers: vec![],
+        },
+    ];
+    let settings = KitchenSettings {
+        show_column_names: true,
+        ..KitchenSettings::default()
+    };
+    let ctx = KitchenContext {
+        kind: TicketKind::New,
+        token: Some("7"),
+        bill_number: Some("0023"),
+        kot_number: Some("11"),
+        order_type: OrderType::DineIn,
+        table: Some("18"),
+        time: Some("12:39"),
+        waiter: Some("sachin"),
+        station: None,
+        reprint: false,
+        note: None,
+        lines: &lines,
+        settings: &settings,
+    };
+    let laid = layout(&kitchen_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds"))
+        .expect("lays out");
+
+    let heading = line_with(&laid, "Qty");
+    let dish = line_with(&laid, "Masala Dosa");
+    // Same size, therefore the same character cell, therefore the same column boundaries.
+    assert_eq!(
+        heading.style.size, dish.style.size,
+        "the heading is set at a different size from the food, so it cannot line up"
+    );
+    assert_eq!(
+        heading.segments, dish.segments,
+        "the heading's boxes are not the food's boxes"
+    );
+    assert_eq!(heading.indent_dots, dish.indent_dots);
+    // And it is the quieter of the two: a caption, not a dish.
+    assert!(!heading.style.bold);
+}
+
+/// The two-dish-per-line ticket has the same rule.
+#[test]
+fn the_two_column_ticket_names_its_columns_at_the_food_size() {
+    // Short names: two dishes to a line in the kitchen size is already a wrap waiting to
+    // happen, and a wrapped cell is a different claim from the one this test makes.
+    let lines = vec![TicketLine {
+        name: "Tea".to_owned(),
+        qty: Qty::from_whole(2).expect("qty"),
+        note: None,
+        modifiers: vec![],
+    }];
+    let settings = KitchenSettings {
+        show_column_names: true,
+        two_column: true,
+        ..KitchenSettings::default()
+    };
+    let ctx = KitchenContext {
+        kind: TicketKind::New,
+        token: Some("7"),
+        bill_number: None,
+        kot_number: Some("11"),
+        order_type: OrderType::DineIn,
+        table: Some("18"),
+        time: None,
+        waiter: None,
+        station: None,
+        reprint: false,
+        note: None,
+        lines: &lines,
+        settings: &settings,
+    };
+    let laid = layout(&kitchen_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds"))
+        .expect("lays out");
+    let heading = line_with(&laid, "Item");
+    let dish = line_with(&laid, "Tea");
+    assert_eq!(heading.style.size, dish.style.size);
+    assert_eq!(heading.segments, dish.segments);
 }

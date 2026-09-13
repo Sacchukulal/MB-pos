@@ -375,6 +375,19 @@ fn slip_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
     }
 }
 
+/// The column names, set over the dishes.
+///
+/// A table's columns are measured in characters of its own size, so a heading printed smaller
+/// than the food lands between the columns instead of over them — which is what a ticket with
+/// a quantity heading sitting halfway across the paper was. Same size as the dishes, lighter
+/// weight, so it reads as a caption and not as a dish.
+const fn heading_over(items: Style) -> Style {
+    Style {
+        size: items.size,
+        bold: false,
+    }
+}
+
 /// The normal ticket: quantity first, because the kitchen reads the number, not the name.
 fn one_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
     let s = ctx.settings;
@@ -389,7 +402,7 @@ fn one_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
         doc.push(Block::Columns {
             columns: columns.clone(),
             rows: vec![vec!["Qty".to_owned(), String::new(), "Item".to_owned()]],
-            style: s.details,
+            style: heading_over(s.items),
         });
         if s.separators.below_column_names {
             doc.separator(s.pattern);
@@ -424,7 +437,7 @@ fn two_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
         doc.push(Block::Columns {
             columns: columns.clone(),
             rows: vec![vec!["Item".to_owned(), "Item".to_owned()]],
-            style: s.details,
+            style: heading_over(s.items),
         });
         if s.separators.below_column_names {
             doc.separator(s.pattern);
