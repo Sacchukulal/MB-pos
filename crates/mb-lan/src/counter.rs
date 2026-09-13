@@ -125,8 +125,11 @@ pub trait Counter: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Find a live device and check its credential.
-    fn authenticate(&self, device_id: &str, secret: &str) -> Option<Device>;
+    /// Find a live device and check its credential. `Ok(None)` is "no such phone, or the
+    /// wrong secret": the phone is refused. `Err` is "the register cannot be read right now"
+    /// (the shop is not open yet, the database is busy) and carries the sentence: the phone is
+    /// told to try again, never that it was removed.
+    fn authenticate(&self, device_id: &str, secret: &str) -> Result<Option<Device>, String>;
 
     /// Record that a device was heard from, for the panel's "last seen".
     fn seen(&self, device_id: &str, ip: &str);

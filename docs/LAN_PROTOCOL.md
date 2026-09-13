@@ -268,7 +268,7 @@ taken as sending now.
 | `open_order` | `order_type`, `table_id?`, `covers?` | `bill.create` |
 | `add_item` | `item_id`, `qty` (decimal string), `note?`, `modifiers[]` | `bill.create` |
 | `set_qty` | `line`, `qty` | `bill.create` |
-| `void_item` | `line`, `reason` (**compulsory**) | `order.item.void` |
+| `void_item` | `line`, `reason` (**compulsory**) | `order.item.void` — a line the kitchen already has comes off too: the ledger forgets it and a stop slip prints, as the counter's own void does |
 | `set_order_note` | `note?` | `bill.create` |
 | `set_covers` | `covers?` | `bill.create` |
 | `set_customer` | `customer_id?` | `customers.manage` |
@@ -304,14 +304,19 @@ print queue — an order from a phone prints exactly like one typed at the count
 ```json
 { "outcome": "ok", "order_id": "…", "total": "240.00",
   "lines": [ { "line": 0, "name": "Masala Dosa", "qty": "2",
-               "amount": "240.00", "note": null, "sent_to_kitchen": true } ],
+               "amount": "240.00", "note": null, "in_kitchen": "2", "sent_to_kitchen": true } ],
   "token": "7", "note": null }
 
-{ "outcome": "refused", "message": "The kitchen has already made this. Ask …" }
+{ "outcome": "refused", "message": "The kitchen has already been told about 2 of these. Take it off …" }
 
 { "outcome": "held",    "message": "This was typed more than 12 hours ago …",
   "batch_id": "…" }
 ```
+
+`in_kitchen` is how much of the line the kitchen has been told about, written like
+`qty` and never more than it; `sent_to_kitchen` is true when that is all of it. A line
+raised from 2 to 3 after it went out reads `"in_kitchen": "2", "sent_to_kitchen": false`,
+so the phone offers Send to kitchen again and only the extra one goes.
 
 **Every outcome carries a sentence a waiter can read.** Show it. Do not
 translate a code into your own wording — the counter's vocabulary is the

@@ -63,6 +63,9 @@ pub struct KitchenContext<'a> {
     pub station: Option<&'a str>,
     /// A ticket printed again, marked so the kitchen does not cook it twice.
     pub reprint: bool,
+    /// What the waiter said about the whole order. Under the head on every ticket for it: a
+    /// cook reads the paper, not the counter.
+    pub note: Option<&'a str>,
     pub lines: &'a [TicketLine],
     pub settings: &'a KitchenSettings,
 }
@@ -84,6 +87,7 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
         TicketFormat::TableCard => table_card_head(&mut doc, ctx),
         TicketFormat::Slip => slip_head(&mut doc, ctx),
     }
+    order_note(&mut doc, ctx);
     // Air before the food, so the cook's eye lands on the first line and not on the header.
     doc.air(s.row_height.section_air());
 
@@ -100,6 +104,20 @@ pub fn kitchen_document(paper: Paper, ctx: &KitchenContext<'_>) -> Result<Docume
     doc.spacer(1);
 
     Ok(doc)
+}
+
+/// The order's note, bold under the head, the same on every format.
+fn order_note(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    if let Some(note) = ctx.note.map(str::trim).filter(|n| !n.is_empty()) {
+        doc.text(
+            format!("* {note}"),
+            Style {
+                bold: true,
+                ..ctx.settings.details
+            },
+            Align::Left,
+        );
+    }
 }
 
 /// The word at the top of the ticket.

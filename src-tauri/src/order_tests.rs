@@ -274,6 +274,61 @@ fn the_counter_decides_the_kitchen_delta_and_a_retry_sends_nothing() {
     );
 }
 
+/// A line raised after it went out tells the phone how much the kitchen has.
+#[test]
+fn a_raised_line_says_how_much_the_kitchen_has() {
+    let scratch = Scratch::new("p20_raised");
+    let app = a_shop(&scratch, "raised");
+    let order = open_one(&app, None);
+    go(
+        &app,
+        &intent(
+            "add",
+            Some(&order),
+            What::AddItem {
+                item_id: "itm_dosa".to_owned(),
+                qty: "2".to_owned(),
+                note: None,
+                modifiers: vec![],
+            },
+        ),
+    );
+    go(&app, &intent("fire1", Some(&order), What::SendToKitchen));
+
+    let raised = go(
+        &app,
+        &intent(
+            "raise",
+            Some(&order),
+            What::SetQty {
+                line: 0,
+                qty: "3".to_owned(),
+            },
+        ),
+    );
+    let Outcome::Ok { lines, .. } = &raised else {
+        panic!("{raised:?}");
+    };
+    assert_eq!(lines[0].qty, "3");
+    assert_eq!(lines[0].in_kitchen, "2", "the kitchen was told about two");
+    assert!(
+        !lines[0].sent_to_kitchen,
+        "the phone would hide Send to kitchen with one still to go"
+    );
+
+    let fired = go(&app, &intent("fire2", Some(&order), What::SendToKitchen));
+    assert!(
+        fired.message().contains("1 item"),
+        "only the extra one goes: {}",
+        fired.message()
+    );
+    let Outcome::Ok { lines, .. } = &fired else {
+        panic!("{fired:?}");
+    };
+    assert_eq!(lines[0].in_kitchen, "3");
+    assert!(lines[0].sent_to_kitchen, "the kitchen has all of it now");
+}
+
 /// The conflicts, each as documented.
 #[test]
 fn every_conflict_resolves_the_way_the_protocol_says() {
@@ -306,7 +361,9 @@ fn every_conflict_resolves_the_way_the_protocol_says() {
         other => panic!("{other:?}"),
     }
 
-    // (c) voiding a line the kitchen has already made goes to the counter.
+    // (c) voiding a line the kitchen has already made: the waiter holds the permission the
+    // counter's own screen asks for, so it goes through, the kitchen is told to stop, and the
+    // audit trail says who.
     go(
         &app,
         &intent(
@@ -334,16 +391,60 @@ fn every_conflict_resolves_the_way_the_protocol_says() {
     );
     let said = voided.message();
     assert!(
-        said.contains("kitchen has already made this"),
-        "a cooked dish was thrown away from the floor: {said}"
+        said.contains("off the order"),
+        "a cooked dish could not be taken off from the floor: {said}"
     );
     assert!(
-        said.contains("counter"),
-        "it did not say what to do: {said}"
+        said.contains("stop"),
+        "it did not say the kitchen is being told: {said}"
     );
+    let Outcome::Ok { lines, .. } = &voided else {
+        panic!("{voided:?}");
+    };
+    assert!(lines.is_empty(), "the line is still on the order");
+    let Some(mb_core::AnyOrder::Open(open)) =
+        crate::flows::find_order(&app, &mb_core::OrderId::new(first.clone())).expect("read")
+    else {
+        panic!("the order is not open any more");
+    };
+    assert!(
+        open.core.kitchen.is_empty(),
+        "the ledger still says the kitchen is cooking it"
+    );
+    let voids = app
+        .with_shop(|shop| {
+            shop.db
+                .read_transaction(|tx| {
+                    Repos::new(tx).audit().list(
+                        OUTLET,
+                        &mb_db::repo::AuditFilter {
+                            action: Some(mb_auth::audit::action::ITEM_VOIDED.to_owned()),
+                            limit: 10,
+                            ..Default::default()
+                        },
+                    )
+                })
+                .map_err(|e| crate::words::from_db(&e))
+        })
+        .expect("the audit trail");
+    assert_eq!(voids.len(), 1, "the void was not written down: {voids:?}");
 
-    // And reducing the quantity below what was cooked is refused for the same reason, in words
-    // with the number in them.
+    // And reducing the quantity below what was cooked is refused, in words with the number in
+    // them: it is a void, and a void wants a reason.
+    go(
+        &app,
+        &intent(
+            "c-add2",
+            Some(&first),
+            What::AddItem {
+                item_id: "itm_dosa".to_owned(),
+                qty: "1".to_owned(),
+                note: None,
+                modifiers: vec![],
+            },
+        ),
+    );
+    go(&app, &intent("c-fire2", Some(&first), What::SendToKitchen));
     let shrunk = go(
         &app,
         &intent(

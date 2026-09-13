@@ -1275,7 +1275,7 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
         && let Err(e) = print_cancellation(
             app,
             &open.core,
-            &told,
+            crate::flows::ticket_lines(&open.core.cart, &told),
             table.as_ref(),
             Some(&mb_core::AnyOrder::Open(open.clone())),
         )
@@ -1300,7 +1300,8 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
 fn print_cancellation(
     app: &App,
     core: &mb_core::OrderCore,
-    lines: &[(mb_core::LineIdentity, mb_core::Qty)],
+    // Already in a cook's words, named from the cart that still had them.
+    lines: Vec<(mb_core::ItemId, mb_print::template::TicketLine)>,
     table: Option<&mb_core::TableId>,
     // The order, when the caller has one — so the slip carries the same token and bill number
     // the ticket that started the cooking did.
@@ -1313,7 +1314,7 @@ fn print_cancellation(
         core.order_type(),
         table,
         order,
-        crate::flows::ticket_lines(&core.cart, lines),
+        lines,
         false,
         "cancellation".to_owned(),
     )?;
@@ -1341,8 +1342,10 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
         ))
     })?;
 
-    // Off the order.
-    let (cancel, core) = app.with_cart_mut(|state| {
+    // Off the order. The cook's words come from the cart as it was, since the line is
+    // leaving it.
+    let (cancel, slip, core) = app.with_cart_mut(|state| {
+        let before = state.cart.clone();
         state.cart.remove(index).map_err(|e| {
             UiError::new("void_line.refused", "That line could not be removed.")
                 .with_detail(e.to_string())
@@ -1354,7 +1357,12 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
             )
             .with_detail(e.to_string())
         })?;
-        Ok((cancel, state.to_core(at, &who.staff_id, app.terminal_id())))
+        let slip = crate::flows::ticket_lines(&before, &cancel);
+        Ok((
+            cancel,
+            slip,
+            state.to_core(at, &who.staff_id, app.terminal_id()),
+        ))
     })?;
     // The kitchen's slip does not need a table to exist yet, so a dine-in cart with no table is
     // not refused here — there is no paper without a ledger, and no ledger without a park.
@@ -1368,7 +1376,7 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
                 "This is a dine-in order with no table, so no kitchen slip can be printed.",
             ));
         };
-        if let Err(e) = print_cancellation(app, core, &cancel, core.table(), None) {
+        if let Err(e) = print_cancellation(app, core, slip, core.table(), None) {
             // Deliberately not fatal, and deliberately loud: the line IS off the bill, so the
             // customer is not charged.
             log_warn!("a line was voided but the kitchen slip failed: {e}");

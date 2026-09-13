@@ -46,6 +46,8 @@ pub struct KitchenTicket {
     pub place: String,
     pub token: String,
     pub waiter: Option<String>,
+    /// What the waiter said about the whole order — the same words the ticket prints.
+    pub note: Option<String>,
     /// Minutes since the counter told the kitchen.
     pub waiting_minutes: u32,
     /// Already a sentence: "4 min", "11 min".
@@ -373,6 +375,7 @@ fn card(
         place,
         token,
         waiter,
+        note: order.and_then(|o| o.core().note.clone()),
         waiting_minutes: minutes,
         waiting: format!("{minutes} min"),
         expected: ticket

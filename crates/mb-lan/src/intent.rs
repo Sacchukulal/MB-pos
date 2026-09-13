@@ -158,7 +158,11 @@ pub struct LineView {
     pub qty: String,
     pub amount: String,
     pub note: Option<String>,
-    /// True once the kitchen has been told about this much of it.
+    /// How much of it the kitchen has been told about, written like `qty`: "2" against a
+    /// `qty` of "3" once a line was raised after it went. Never more than `qty`.
+    pub in_kitchen: String,
+    /// True once the kitchen has been told about all of it. Phones before 2.5.8 read only
+    /// this.
     pub sent_to_kitchen: bool,
 }
 

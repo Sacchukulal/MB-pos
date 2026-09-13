@@ -144,17 +144,27 @@ impl mb_lan::Counter for Bridge {
         ))
     }
 
-    fn authenticate(&self, device_id: &str, secret: &str) -> Option<mb_lan::Device> {
-        let handle = self.app()?;
+    fn authenticate(
+        &self,
+        device_id: &str,
+        secret: &str,
+    ) -> Result<Option<mb_lan::Device>, String> {
+        // No shop open yet, or a register that cannot be read: "not now", never "not yours".
+        // A phone told 401 here would show its waiter as removed for a hiccup on the counter.
+        let Some(handle) = self.app() else {
+            return Err("The counter is still starting. Try again in a moment.".to_owned());
+        };
         // A READER, on every request.
-        let device = handle
+        let Some(device) = handle
             .with_shop(|shop| {
                 shop.db
                     .read_transaction(|tx| mb_db::Repos::new(tx).devices().live(OUTLET, device_id))
                     .map_err(|e| words::from_db(&e))
             })
-            .ok()
-            .flatten()?;
+            .map_err(|e| e.message)?
+        else {
+            return Ok(None);
+        };
 
         // Argon2 once per phone; a cheap, constant-time compare from then on.
         let digest = mb_auth::sha256(secret.as_bytes());
@@ -162,9 +172,11 @@ impl mb_lan::Counter for Bridge {
             .get(&device.id)
             .is_some_and(|known| constant_time_eq(known, &digest));
         if !already {
-            let hash = mb_auth::PinHash::from_stored(&device.secret_hash).ok()?;
+            let Ok(hash) = mb_auth::PinHash::from_stored(&device.secret_hash) else {
+                return Ok(None);
+            };
             if !mb_auth::verify_device_secret(secret, &hash) {
-                return None;
+                return Ok(None);
             }
             lock(&self.verified).insert(device.id.clone(), digest);
         }
@@ -180,13 +192,13 @@ impl mb_lan::Counter for Bridge {
             .staff_id
             .as_ref()
             .and_then(|id| staff_name(&handle, id.as_str()));
-        Some(mb_lan::Device {
+        Ok(Some(mb_lan::Device {
             id: device.id,
             name: device.name,
             staff_id: device.staff_id.map(|s| s.as_str().to_owned()),
             staff_name,
             permissions,
-        })
+        }))
     }
 
     fn seen(&self, device_id: &str, ip: &str) {

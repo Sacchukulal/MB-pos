@@ -38,6 +38,7 @@ function ticket(over: Partial<KitchenTicket> = {}): KitchenTicket {
     station: 'Tandoor',
     place: 'Table 5',
     token: '12',
+    note: null,
     waiter: 'Ravi',
     course: '',
     lines: [line()],

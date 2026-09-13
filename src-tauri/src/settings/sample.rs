@@ -287,6 +287,7 @@ pub fn kitchen_preview(config: &ShopConfig, around: &Around) -> Result<PreviewDo
             waiter: around.waiter.as_deref(),
             station: None,
             reprint: false,
+            note: None,
             lines: &lines,
             settings: &config.kitchen,
         },

@@ -10,6 +10,10 @@ export type KitchenTicket = { id: string, orderId: string, station: string,
  */
 place: string, token: string, waiter: string | null, 
 /**
+ * What the waiter said about the whole order — the same words the ticket prints.
+ */
+note: string | null, 
+/**
  * Minutes since the counter told the kitchen.
  */
 waitingMinutes: number, 

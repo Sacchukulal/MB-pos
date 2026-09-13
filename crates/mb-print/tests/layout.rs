@@ -346,6 +346,7 @@ fn t13_the_kitchen_ticket_is_a_delta_in_cart_order() {
         waiter: Some("Suresh"),
         station: None,
         reprint: false,
+        note: None,
         lines: &lines,
         settings: &settings,
     };
@@ -379,6 +380,55 @@ fn t13_the_kitchen_ticket_is_a_delta_in_cart_order() {
     assert!(kitchen_document(Paper::new(PaperKind::Mm80), &empty).is_err());
 }
 
+/// The order's note goes on every ticket for it, whatever the format.
+#[test]
+fn the_order_note_is_on_the_ticket_in_every_format() {
+    let lines = vec![TicketLine {
+        name: "Idli".to_owned(),
+        qty: Qty::from_whole(2).expect("qty"),
+        note: None,
+        modifiers: vec![],
+    }];
+    for format in [
+        mb_print::settings::TicketFormat::Classic,
+        mb_print::settings::TicketFormat::BigToken,
+        mb_print::settings::TicketFormat::TableCard,
+        mb_print::settings::TicketFormat::Slip,
+    ] {
+        let settings = KitchenSettings {
+            format,
+            ..KitchenSettings::default()
+        };
+        let ctx = KitchenContext {
+            kind: TicketKind::New,
+            token: Some("42"),
+            bill_number: None,
+            kot_number: Some("14"),
+            order_type: OrderType::DineIn,
+            table: Some("6"),
+            time: None,
+            waiter: None,
+            station: None,
+            reprint: false,
+            note: Some("less spicy, serve together"),
+            lines: &lines,
+            settings: &settings,
+        };
+        let rendered = text::to_text(
+            &layout(&kitchen_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds"))
+                .expect("lays out"),
+        );
+        let flat = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.contains("* less spicy, serve together"),
+            "{format:?}: the order note is missing: {rendered}"
+        );
+        let note = flat.find("less spicy").expect("note");
+        let idli = flat.find("Idli").expect("idli");
+        assert!(note < idli, "{format:?}: the note came after the food");
+    }
+}
+
 /// A cancellation slip is the same ticket wearing a different word.
 #[test]
 fn a_cancellation_slip_says_cancel() {
@@ -404,6 +454,7 @@ fn a_cancellation_slip_says_cancel() {
         waiter: Some("Suresh"),
         station: None,
         reprint: false,
+        note: None,
         lines: &lines,
         settings: &settings,
     };

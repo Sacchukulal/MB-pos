@@ -235,6 +235,8 @@ function Card({
         </div>
       )}
 
+      {ticket.note && <p className="mb-kds__note mb-kds__note--order">{ticket.note}</p>}
+
       <ul className="mb-kds__lines">
         {ticket.lines.map((line) => (
           <li

@@ -259,6 +259,12 @@
   color: var(--warn);
 }
 
+/* The whole order's note, above the dishes; the same voice as a line's. */
+.mb-kds__note--order {
+  margin: 0;
+  padding-left: 0;
+}
+
 /* What a cook presses. */
 
 .mb-kds__actions {

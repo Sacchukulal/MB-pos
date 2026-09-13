@@ -75,6 +75,7 @@ pub(crate) fn queue_kitchen_lines(
     let token = order.and_then(|o| o.token().map(|t| t.formatted.clone()));
     let bill_number = order.and_then(|o| o.bill_number().map(|b| b.formatted.clone()));
     let waiter = order.and_then(|o| staff_name(app, &o.core().created_by));
+    let note = order.and_then(|o| o.core().note.clone());
     let time = clock_time(at);
 
     // One ticket per printer, or one per category on it: the shop's two choices under
@@ -141,6 +142,7 @@ pub(crate) fn queue_kitchen_lines(
             time: Some(time.as_str()),
             waiter: waiter.as_deref(),
             reprint,
+            note: note.as_deref(),
             station: heading,
             lines: &station.lines,
             settings: &settings,

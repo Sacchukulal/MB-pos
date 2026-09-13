@@ -36,6 +36,8 @@ struct FakeCounter {
     /// near the applier.
     applied: Mutex<Vec<String>>,
     till_full: Mutex<Option<String>>,
+    /// The register cannot be read right now, and why.
+    register_down: Mutex<Option<String>>,
 }
 
 impl FakeCounter {
@@ -47,6 +49,7 @@ impl FakeCounter {
             seen: Mutex::new(Vec::new()),
             applied: Mutex::new(Vec::new()),
             till_full: Mutex::new(None),
+            register_down: Mutex::new(None),
         })
     }
 
@@ -98,19 +101,25 @@ impl Counter for FakeCounter {
             .collect()
     }
 
-    fn authenticate(&self, device_id: &str, secret: &str) -> Option<Device> {
+    fn authenticate(&self, device_id: &str, secret: &str) -> Result<Option<Device>, String> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        if let Some(why) = self.register_down.lock().unwrap().clone() {
+            return Err(why);
+        }
         let rows = self.rows.lock().unwrap();
-        let row = rows
+        let Some(row) = rows
             .iter()
-            .find(|r| r.id == device_id && r.secret == secret && !r.revoked)?;
-        Some(Device {
+            .find(|r| r.id == device_id && r.secret == secret && !r.revoked)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(Device {
             id: row.id.clone(),
             name: row.name.clone(),
             staff_id: row.staff_id.clone(),
             staff_name: row.staff_id.as_ref().map(|_| "Ravi".to_owned()),
             permissions: row.permissions.clone(),
-        })
+        }))
     }
 
     fn seen(&self, device_id: &str, ip: &str) {
@@ -445,6 +454,40 @@ async fn an_unpaired_phone_gets_nothing_but_hello() {
     }
 }
 
+/// A register the counter cannot read is "not now", never "not yours": the phone keeps its
+/// seat and is told to try again.
+#[tokio::test]
+async fn a_register_that_cannot_be_read_is_not_a_refusal() {
+    let h = Harness::start();
+    let device = pair_a_phone(&h, "Patient phone").await;
+    *h.counter.register_down.lock().unwrap() = Some("The counter is still starting.".to_owned());
+
+    let later = h
+        .client
+        .get(h.url("/v1/me"))
+        .header("authorization", bearer(&device))
+        .send()
+        .await
+        .expect("answered");
+    assert_eq!(
+        later.status(),
+        503,
+        "a hiccup on the counter read as a revoke"
+    );
+    let body: serde_json::Value = later.json().await.expect("json");
+    assert_eq!(body["message"], "The counter is still starting.");
+
+    *h.counter.register_down.lock().unwrap() = None;
+    let ok = h
+        .client
+        .get(h.url("/v1/me"))
+        .header("authorization", bearer(&device))
+        .send()
+        .await
+        .expect("again");
+    assert_eq!(ok.status(), 200);
+}
+
 /// A revoked device is refused on its VERY NEXT request.
 #[tokio::test]
 async fn a_revoked_phone_is_refused_on_the_next_request() {
@@ -489,6 +532,7 @@ async fn a_permission_is_enforced_on_the_server_not_on_the_phone() {
     let device = h
         .counter
         .authenticate(&paired.device_id, &paired.secret)
+        .expect("readable")
         .expect("live");
     // It may take an order.
     assert!(mb_lan::require(&device, Permission::BillCreate).is_ok());
@@ -504,6 +548,7 @@ async fn a_permission_is_enforced_on_the_server_not_on_the_phone() {
     let device = h
         .counter
         .authenticate(&paired.device_id, &paired.secret)
+        .expect("readable")
         .expect("live");
     assert!(mb_lan::require(&device, Permission::BillVoid).is_ok());
 }

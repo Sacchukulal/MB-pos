@@ -593,9 +593,12 @@ fn authenticate(shared: &Shared, headers: &HeaderMap, from: Peer) -> Result<Devi
         return Err(too_many(wait));
     }
 
-    // One refusal for "no such device" and "wrong secret".
-    let Some(device) = shared.counter.authenticate(device_id, secret) else {
-        return Err(refused(&Refusal::NotPaired));
+    // One refusal for "no such device" and "wrong secret". A register that cannot be read is
+    // not a refusal: 503, so the phone keeps its seat and tries again.
+    let device = match shared.counter.authenticate(device_id, secret) {
+        Ok(Some(device)) => device,
+        Ok(None) => return Err(refused(&Refusal::NotPaired)),
+        Err(why) => return Err(trouble(StatusCode::SERVICE_UNAVAILABLE, why)),
     };
     shared.counter.seen(&device.id, &from.ip());
     // A known phone, and a shop whose plan is not running: the sentence, not the data.

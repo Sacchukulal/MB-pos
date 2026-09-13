@@ -154,6 +154,7 @@ fn p3_a_kitchen_ticket_renders_in_almost_no_time() {
         waiter: Some("Suresh"),
         station: Some("TANDOOR"),
         reprint: false,
+        note: None,
         lines: &lines,
         settings: &settings,
     };
@@ -273,6 +274,7 @@ fn b6_a_kitchen_ticket_reaches_the_queue_inside_its_budget() {
         waiter: Some("Suresh"),
         station: None,
         reprint: false,
+        note: None,
         lines: &lines,
         settings: &settings,
     };

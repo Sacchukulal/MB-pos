@@ -245,6 +245,7 @@ fn render_ticket(config: &ShopConfig) -> String {
             waiter: Some("Suresh"),
             station: Some("TANDOOR"),
             reprint: false,
+            note: None,
             lines: &lines,
             settings: &config.kitchen,
         },

@@ -4,6 +4,7 @@ use mb_auth::Permission;
 use mb_auth::audit::{AuditEntry, action};
 use mb_core::{AnyOrder, Money, OrderId, Qty, StaffId, Timestamp};
 use mb_lan::intent::{Intent, LineView, Outcome, What};
+use mb_print::template::TicketKind;
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -34,9 +35,18 @@ pub struct Applied {
     pub outcome: Outcome,
     /// Set when the cashier has this order open and must be told rather than overwritten.
     pub tell_the_cashier: Option<FloorChange>,
-    /// The kitchen ticket the caller queues once the outcome is on disk: the order as
-    /// sent, and the delta the kitchen had not seen.
-    pub kitchen_paper: Option<(AnyOrder, Vec<(mb_core::LineIdentity, Qty)>)>,
+    /// The kitchen paper the caller queues once the outcome is on disk.
+    pub kitchen_paper: Option<KitchenPaper>,
+}
+
+/// A slip owed to the kitchen after a commit: new food, or food to stop.
+#[derive(Debug)]
+pub struct KitchenPaper {
+    pub kind: TicketKind,
+    /// The order as saved.
+    pub order: AnyOrder,
+    /// The lines the slip is about, already in a cook's words.
+    pub lines: Vec<(mb_core::ItemId, mb_print::template::TicketLine)>,
 }
 
 /// Apply one intent.
@@ -146,19 +156,23 @@ pub fn apply(
     // ticket (`flows::queue_kitchen_lines`): grouped by station, one KOT number per roll.
     // A shop that switched the kitchen ticket off still gets the event and the kitchen
     // screen; it just prints nothing.
-    if let Some((order, delta)) = &applied.kitchen_paper
+    if let Some(paper) = &applied.kitchen_paper
         && !config.billing.kitchen_ticket_off
     {
-        let core = order.core();
+        let core = paper.order.core();
+        let reason = match paper.kind {
+            TicketKind::New => "an order from a phone",
+            TicketKind::Cancellation => "a void from a phone",
+        };
         if let Err(e) = crate::flows::queue_kitchen_lines(
             app,
-            mb_print::template::TicketKind::New,
+            paper.kind,
             core.order_type(),
             core.table(),
-            Some(order),
-            crate::flows::ticket_lines(&core.cart, delta),
+            Some(&paper.order),
+            paper.lines.clone(),
             false,
-            "an order from a phone".to_owned(),
+            reason.to_owned(),
         ) {
             crate::log_warn!(
                 "order={} the kitchen was told but the ticket did not queue: {e}",
@@ -386,7 +400,7 @@ fn do_it(
                 if qty < told {
                     return Ok(refused(format!(
                         "The kitchen has already been told about {told} of these. \
-                         Ask the counter to void it instead."
+                         Take it off the order instead, or ask somebody at the counter."
                     )));
                 }
             }
@@ -402,23 +416,43 @@ fn do_it(
             let Some(cart_line) = open.core.cart.lines().get(*line).cloned() else {
                 return Ok(refused("That line is not on the order any more."));
             };
-            // Conflict (c) again, and this is the important half: voiding something the kitchen
-            // COOKED is a decision with a cost, so it goes to the counter rather than being
-            // done from the floor.
-            if !open
-                .core
-                .kitchen
-                .quantity_told(&cart_line.identity())
-                .is_zero()
-            {
-                return Ok(refused(
-                    "The kitchen has already made this. Ask somebody at the \
-                     counter to take it off.",
-                ));
-            }
+            // The cook's words come from the cart as it was, since the line is leaving it.
+            let before = open.core.cart.clone();
             if open.core.cart.remove(*line).is_err() {
                 return Ok(refused("That line could not be removed."));
             }
+            // Food the kitchen was told about that is no longer ordered: the ledger forgets
+            // it and a slip tells the cook to stop, exactly as the counter's own void does.
+            let stop = open
+                .core
+                .kitchen
+                .over_told(&open.core.cart)
+                .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
+            let name = cart_line.snapshot.name.clone();
+            if stop.is_empty() {
+                note = Some(format!("{name} is off the order."));
+            } else {
+                open.core
+                    .kitchen
+                    .mark_cancelled(&stop)
+                    .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
+                note = Some(format!(
+                    "{name} is off the order. The kitchen is being told to stop it."
+                ));
+                kitchen_delta = Some((
+                    TicketKind::Cancellation,
+                    crate::flows::ticket_lines(&before, &stop),
+                ));
+            }
+            repos.audit().append(
+                OUTLET,
+                &AuditEntry::new(at, day, Some(staff.clone()), action::ITEM_VOIDED, "order")
+                    .about(order_id.to_owned())
+                    .changed(
+                        serde_json::json!({ "item": name, "qty": cart_line.qty.to_string() }),
+                        serde_json::json!({ "removed": true, "reason": reason }),
+                    ),
+            )?;
         }
 
         What::SetOrderNote { note: order_note } => {
@@ -456,7 +490,10 @@ fn do_it(
                     "{} sent to the kitchen.",
                     words::count(i64::try_from(how_many).unwrap_or(0), "item", "items")
                 ));
-                kitchen_delta = Some(pending);
+                kitchen_delta = Some((
+                    TicketKind::New,
+                    crate::flows::ticket_lines(&open.core.cart, &pending),
+                ));
             }
         }
 
@@ -565,17 +602,24 @@ fn do_it(
     // screen, exactly as the counter's own ticket records them. The paper itself needs
     // `&App`, so `apply` queues it once this transaction is on disk.
     let kitchen_paper = match kitchen_delta {
-        Some(delta) => {
-            repos.events().record(
-                order_id,
-                at,
-                day,
-                mb_db::repo::events::KITCHEN_TICKET,
-                None,
-                None,
-            )?;
-            crate::kitchen::send_in(repos, config, order_id, None, at)?;
-            Some((AnyOrder::Open(open.clone()), delta))
+        Some((kind, lines)) => {
+            // New food reaches the kitchen screen too; a stop is paper only, as at the counter.
+            if kind == TicketKind::New {
+                repos.events().record(
+                    order_id,
+                    at,
+                    day,
+                    mb_db::repo::events::KITCHEN_TICKET,
+                    None,
+                    None,
+                )?;
+                crate::kitchen::send_in(repos, config, order_id, None, at)?;
+            }
+            Some(KitchenPaper {
+                kind,
+                order: AnyOrder::Open(open.clone()),
+                lines,
+            })
         }
         None => None,
     };
@@ -722,17 +766,27 @@ fn view_of(
             .lines()
             .iter()
             .enumerate()
-            .map(|(index, line)| LineView {
-                line: index,
-                name: line.snapshot.name.clone(),
-                qty: line.qty.to_string(),
-                amount: line
-                    .qty
-                    .extend(line.snapshot.unit_price)
-                    .unwrap_or(Money::ZERO)
-                    .to_plain_string(),
-                note: line.note.clone(),
-                sent_to_kitchen: !open.core.kitchen.quantity_told(&line.identity()).is_zero(),
+            .map(|(index, line)| {
+                // Capped at what is ordered: a line lowered at the counter after it went
+                // out is still "all in the kitchen" to the phone.
+                let told = open
+                    .core
+                    .kitchen
+                    .quantity_told(&line.identity())
+                    .min(line.qty);
+                LineView {
+                    line: index,
+                    name: line.snapshot.name.clone(),
+                    qty: line.qty.to_string(),
+                    amount: line
+                        .qty
+                        .extend(line.snapshot.unit_price)
+                        .unwrap_or(Money::ZERO)
+                        .to_plain_string(),
+                    note: line.note.clone(),
+                    in_kitchen: told.to_string(),
+                    sent_to_kitchen: told == line.qty,
+                }
             })
             .collect(),
         token: Some(open.token.formatted.clone()),
