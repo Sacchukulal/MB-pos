@@ -116,6 +116,8 @@ mod redact;
 /// One shape for every report, so one screen renders all of them and adding a report never
 /// touches a `.tsx` file.
 mod reports;
+#[cfg(test)]
+mod reports_tests;
 mod search;
 mod session;
 /// The one table that knows what a setting is, and the load / save / reset / export / import

@@ -2255,11 +2255,15 @@ pub fn report_print(
     id: String,
     period: PeriodArg,
 ) -> UiResult<String> {
+    report_print_on(&app, id, period)
+}
+
+pub fn report_print_on(app: &App, id: String, period: PeriodArg) -> UiResult<String> {
     // Paper is paper: printing a report is taking it out of the building, like saving it.
-    guard::require(&app, Permission::ReportsExport)?;
-    let report = report_on(&app, id, period)?;
-    let printer = crate::flows::default_printer(&app)?;
-    let document = to_document(&app, &report, printer.paper);
+    guard::require(app, Permission::ReportsExport)?;
+    let report = report_on(app, id, period)?;
+    let printer = crate::flows::default_printer(app)?;
+    let document = to_document(app, &report, printer.paper);
     app.print(
         mb_print::queue::Job::new(
             mb_print::queue::JobKind::Report,
