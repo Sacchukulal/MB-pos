@@ -400,14 +400,14 @@ impl PeriodArg {
 
 // Building one.
 
-fn column(header: &str, numeric: bool) -> ReportColumn {
+pub(crate) fn column(header: &str, numeric: bool) -> ReportColumn {
     ReportColumn {
         header: header.to_owned(),
         numeric,
     }
 }
 
-fn period_words(period: Period) -> String {
+pub(crate) fn period_words(period: Period) -> String {
     let days = period.days();
     if days == 1 {
         return period.from.to_string();
@@ -2132,6 +2132,20 @@ pub fn to_document(app: &App, report: &ReportView, paper: mb_print::paper::Paper
     )
 }
 
+/// Any report as a PDF on A4 — the one place a report becomes a file to look at, so the
+/// reports screen and the bills list produce the same sheet.
+pub(crate) fn pdf_of(app: &App, report: &ReportView) -> UiResult<Vec<u8>> {
+    let paper = mb_print::paper::Paper::new(mb_print::paper::PaperKind::A4);
+    let laid = mb_print::layout::layout(&to_document(app, report, paper)).map_err(|e| {
+        UiError::new(
+            "report.layout",
+            "The report could not be laid out for printing.",
+        )
+        .with_detail(e.to_string())
+    })?;
+    Ok(mb_print::pdf::to_pdf(&laid))
+}
+
 /// Where an export lands, and what to tell the person who asked for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -2155,13 +2169,27 @@ pub(crate) fn documents_folder(under: &str) -> std::path::PathBuf {
     crate::config::AppConfig::directory().join("exports")
 }
 
-pub(crate) fn export_folder() -> std::path::PathBuf {
+/// Where a saved file lands, and where the file dialogs open: the Downloads folder. It is
+/// where a spreadsheet somebody sent on WhatsApp arrives, and the first place anybody looks
+/// for a file they have just made.
+pub(crate) fn export_folder(app: &App) -> std::path::PathBuf {
+    if let Some(folder) = app.download_dir().filter(|folder| folder.is_dir()) {
+        return folder;
+    }
+    if let Some(profile) = std::env::var_os("USERPROFILE") {
+        let downloads = std::path::PathBuf::from(profile).join("Downloads");
+        if downloads.is_dir() {
+            return downloads;
+        }
+    }
+    // A machine with no Downloads folder still gets its file, in the place the reports used
+    // to live.
     documents_folder("Magic Bill reports")
 }
 
-/// Write a file into the shop's exports folder and say where it went.
-pub(crate) fn save(name: &str, bytes: &[u8]) -> UiResult<SavedFileView> {
-    let folder = export_folder();
+/// Write a file into the Downloads folder and say where it went.
+pub(crate) fn save(app: &App, name: &str, bytes: &[u8]) -> UiResult<SavedFileView> {
+    let folder = export_folder(app);
     std::fs::create_dir_all(&folder).map_err(|e| {
         UiError::new(
             "report.save",
@@ -2178,28 +2206,43 @@ pub(crate) fn save(name: &str, bytes: &[u8]) -> UiResult<SavedFileView> {
         .with_detail(e.to_string())
     })?;
     Ok(SavedFileView {
-        message: format!("Saved as {name}, in your Documents folder under \"Magic Bill reports\"."),
+        message: format!("Saved as {name}, in your Downloads folder."),
         path: path.display().to_string(),
     })
 }
 
+/// Write the file, then hand it to Windows so it opens in whatever the owner uses. A file
+/// that could not be opened is still a file that was saved, so a refusal here is logged and
+/// the save stands.
+pub(crate) fn save_and_show(app: &App, name: &str, bytes: &[u8]) -> UiResult<SavedFileView> {
+    let saved = save(app, name, bytes)?;
+    if let Err(e) = crate::share::launch(&saved.path) {
+        crate::log_warn!("{} was saved but could not be opened: {e}", saved.path);
+    }
+    Ok(saved)
+}
+
+/// Words a file name can hold: everything else becomes one dash, never a run of them.
+fn as_file_words(text: &str, keep: impl Fn(char) -> bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if keep(c) {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_owned()
+}
+
 /// A file name a person can find again: what it is, and what it covers.
-fn file_name(report: &ReportView, extension: &str) -> String {
-    let clean: String = report
-        .title
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect();
-    let period: String = report
-        .subtitle
-        .chars()
-        .filter(|c| c.is_ascii_digit() || *c == '-')
-        .collect();
-    format!(
-        "{}-{}.{extension}",
-        clean.trim_matches('-'),
-        period.trim_matches('-')
-    )
+pub(crate) fn file_name(report: &ReportView, extension: &str) -> String {
+    let what = as_file_words(&report.title, char::is_alphanumeric);
+    // Only the dates out of "2026-09-01 to 2026-09-13 · 13 days" — the count of days is not
+    // part of which file this is.
+    let dates = report.subtitle.split('·').next().unwrap_or_default();
+    let when = as_file_words(dates, |c| c.is_ascii_digit() || c == '-');
+    format!("{what}-{when}.{extension}")
 }
 
 // The seats.
@@ -2224,7 +2267,7 @@ pub fn report_csv(
     guard::require(&app, Permission::ReportsExport)?;
     let report = report_on(&app, id, period)?;
     let name = file_name(&report, "csv");
-    save(&name, csv_of(&report).as_bytes())
+    save_and_show(&app, &name, csv_of(&report).as_bytes())
 }
 
 #[tauri::command]
@@ -2235,16 +2278,9 @@ pub fn report_pdf(
 ) -> UiResult<SavedFileView> {
     guard::require(&app, Permission::ReportsExport)?;
     let report = report_on(&app, id, period)?;
-    let paper = mb_print::paper::Paper::new(mb_print::paper::PaperKind::A4);
-    let laid = mb_print::layout::layout(&to_document(&app, &report, paper)).map_err(|e| {
-        UiError::new(
-            "report.layout",
-            "The report could not be laid out for printing.",
-        )
-        .with_detail(e.to_string())
-    })?;
+    let bytes = pdf_of(&app, &report)?;
     let name = file_name(&report, "pdf");
-    save(&name, &mb_print::pdf::to_pdf(&laid))
+    save_and_show(&app, &name, &bytes)
 }
 
 /// The report the owner is looking at, on the shop's own printer — the thermal roll a bill goes

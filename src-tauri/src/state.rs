@@ -206,6 +206,16 @@ impl App {
         }
     }
 
+    /// Where Windows says this person's downloads go. `None` before the window is up, and on
+    /// a machine that has no such folder — every caller has somewhere else to put the file.
+    #[must_use]
+    pub fn download_dir(&self) -> Option<std::path::PathBuf> {
+        use tauri::Manager as _;
+        lock(&self.window)
+            .as_ref()
+            .and_then(|handle| handle.path().download_dir().ok())
+    }
+
     /// The window is up: from now on the shop's data tells it what changed.
     pub fn attach_window(&self, handle: tauri::AppHandle) {
         *lock(&self.window) = Some(handle.clone());

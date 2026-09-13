@@ -1,6 +1,6 @@
 /** Every bill, one at a time — and the ways one is taken back. */
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import {
   Badge,
@@ -35,6 +35,7 @@ import type { BillsView } from '../ipc/generated/BillsView';
 import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { HistoryView } from '../ipc/generated/HistoryView';
 import { ReasonDialog, type ReasonKind } from '../corrections/Reason';
+import { useMay } from '../shell/permissions';
 
 type Pending =
   | { kind: 'revert'; bill: BillRowView }
@@ -47,11 +48,6 @@ const TONES: Record<string, BadgeTone> = {
   settled: 'ok',
   voided: 'danger',
   cancelled: 'neutral',
-};
-const STATE_WORDS: Record<string, string> = {
-  settled: 'Paid',
-  voided: 'Voided',
-  cancelled: 'Cancelled',
 };
 
 const STATES = [
@@ -86,6 +82,7 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   const [detail, setDetail] = useState<BillDetailView | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const toast = useToast();
+  const mayExport = useMay()('reports.export');
 
   const complain = useCallback(
     (cause: unknown) => {
@@ -94,17 +91,22 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     [toast],
   );
 
+  // One filter, asked for and saved: a file that does not match the list on screen is worse
+  // than no file.
+  const filter = useMemo(
+    () => ({
+      period: from && to ? { from, to } : null,
+      query: query || null,
+      cashier: cashier || null,
+      state: state || null,
+      mode: mode || null,
+    }),
+    [from, to, query, cashier, state, mode],
+  );
+
   const load = useCallback(async () => {
     try {
-      const fresh = await call('bills', {
-        filter: {
-          period: from && to ? { from, to } : null,
-          query: query || null,
-          cashier: cashier || null,
-          state: state || null,
-          mode: mode || null,
-        },
-      });
+      const fresh = await call('bills', { filter });
       setView(fresh);
       // The first answer carries the presets; the screen opens on today.
       const today = fresh.periods[0];
@@ -115,7 +117,14 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     } catch (cause) {
       complain(cause);
     }
-  }, [from, to, query, cashier, state, mode, complain]);
+  }, [filter, from, complain]);
+
+  /** The list on screen, as a file in the Downloads folder that opens itself. */
+  const save = (command: 'bills_csv' | 'bills_pdf') => {
+    call(command, { filter })
+      .then((saved) => toast.show('ok', saved.message, saved.path))
+      .catch(complain);
+  };
 
   useEffect(() => {
     const timer = setTimeout(() => void load(), SEARCH_SETTLE_MS);
@@ -225,7 +234,7 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       render: (b) => (
         <span className="mb-stack mb-stack--gap-inline">
           <span className="mb-row mb-row--gap-inline">
-            <Badge tone={TONES[b.state] ?? 'neutral'}>{STATE_WORDS[b.state] ?? b.state}</Badge>
+            <Badge tone={TONES[b.state] ?? 'neutral'}>{b.stateWord}</Badge>
             {b.edited ? <Badge tone="accent">Edited</Badge> : null}
             {b.approval === 'waiting' ? <Badge tone="warn">Needs approval</Badge> : null}
             {b.approval === 'approved' ? <Badge tone="ok">Approved</Badge> : null}
@@ -276,7 +285,23 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
   return (
     <div className="mb-bills">
-      <PageHeader title="Bills" count={view.rows.length} subtitle={subtitle} />
+      <PageHeader
+        title="Bills"
+        count={view.rows.length}
+        subtitle={subtitle}
+        actions={
+          mayExport ? (
+            <>
+              <Button size="sm" variant="quiet" onClick={() => save('bills_csv')}>
+                Save as CSV
+              </Button>
+              <Button size="sm" variant="quiet" onClick={() => save('bills_pdf')}>
+                Save as PDF
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
       <Toolbar
         end={
@@ -478,9 +503,7 @@ function BillDialog({
             {row.paidBy ? <Fact label="Paid by">{row.paidBy}</Fact> : null}
             <Fact label="State">
               <span className="mb-row mb-row--gap-inline">
-                <Badge tone={TONES[row.state] ?? 'neutral'}>
-                  {STATE_WORDS[row.state] ?? row.state}
-                </Badge>
+                <Badge tone={TONES[row.state] ?? 'neutral'}>{row.stateWord}</Badge>
                 {row.edited ? <Badge tone="accent">Edited</Badge> : null}
                 {row.reprints > 0 ? <Badge tone="neutral">{row.reprints + 1} copies</Badge> : null}
               </span>

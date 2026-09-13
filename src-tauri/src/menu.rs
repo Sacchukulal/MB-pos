@@ -876,13 +876,6 @@ pub fn export_menu_to(app: &App, path: &std::path::Path) -> UiResult<String> {
     Ok(path.display().to_string())
 }
 
-/// Where a file dialog opens: the Downloads folder, which is where a spreadsheet somebody
-/// sent on WhatsApp or mail lands, and where a saved one is easy to find again.
-fn downloads(window: &tauri::Window) -> Option<std::path::PathBuf> {
-    use tauri::Manager;
-    window.path().download_dir().ok().filter(|d| d.is_dir())
-}
-
 /// Ask for a spreadsheet. `None` when the dialog was cancelled. The dialog is the counter's
 /// own, not the page's: a file input in a menu sheet is unmounted the moment the sheet closes,
 /// and a file chosen for an input that is no longer on the page goes nowhere.
@@ -899,9 +892,7 @@ pub fn pick_menu_file(
         .file()
         .add_filter("Spreadsheets", &["csv", "txt", "tsv"])
         .set_title("Choose the menu file");
-    if let Some(at) = downloads(&window) {
-        dialog = dialog.set_directory(at);
-    }
+    dialog = dialog.set_directory(crate::reports::export_folder(&app));
     let Some(picked) = dialog.blocking_pick_file() else {
         return Ok(None);
     };
@@ -947,9 +938,7 @@ pub fn export_menu(app: tauri::State<'_, App>, window: tauri::Window) -> UiResul
         .add_filter("Spreadsheet", &["csv"])
         .set_file_name(MENU_FILE)
         .set_title("Save the menu as a file");
-    if let Some(at) = downloads(&window) {
-        dialog = dialog.set_directory(at);
-    }
+    dialog = dialog.set_directory(crate::reports::export_folder(&app));
     let Some(picked) = dialog.blocking_save_file() else {
         return Ok(None);
     };

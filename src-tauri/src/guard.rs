@@ -106,6 +106,9 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("audit_trail", Access::Needs(Permission::AuditView)),
     // Taking something back.
     ("bills", Access::Needs(Permission::ReportsView)),
+    // Saving the list is taking it out of the building, the same as saving a report.
+    ("bills_csv", Access::Needs(Permission::ReportsExport)),
+    ("bills_pdf", Access::Needs(Permission::ReportsExport)),
     ("bill_detail", Access::Needs(Permission::ReportsView)),
     // Taking a paid bill back to the counter; a manager signs it off afterwards.
     ("revert_bill", Access::Needs(Permission::BillRevert)),

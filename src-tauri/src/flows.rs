@@ -841,7 +841,8 @@ pub fn bill_pdf_on(app: &App, order_id: String) -> UiResult<crate::reports::Save
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect();
-    crate::reports::save(
+    crate::reports::save_and_show(
+        app,
         &format!("Invoice-{clean}.pdf"),
         &mb_print::pdf::to_pdf(&laid),
     )

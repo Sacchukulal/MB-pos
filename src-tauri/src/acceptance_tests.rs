@@ -959,3 +959,86 @@ fn two_settles_at_the_same_instant_make_one_bill() {
     );
     assert_eq!(totals(&app).bills, 1, "one sale became two bills");
 }
+
+/// The file an owner saves off the Bills screen is the list they were looking at — the same
+/// filter, the same rows, and a total that ties to them.
+#[test]
+fn a_saved_bills_list_is_the_filtered_list_and_its_figures_tie() {
+    let scratch = Scratch::new("acceptance_bills_file");
+    let app = a_shop(&scratch, "bills_file");
+
+    let (cash_number, cash_total) = bill(&app, &[("itm_dosa", "1")], "Cash");
+    let (card_number, _card_total) = bill(&app, &[("itm_biryani", "2")], "Card");
+
+    // Everything, first: both bills are on the sheet and the total is what was taken.
+    let all = crate::corrections::bills_report(&app, crate::corrections::BillFilter::default())
+        .expect("the whole day");
+    assert_eq!(
+        all.rows.len(),
+        2,
+        "a bill went missing on the way to a file"
+    );
+    let taken = crate::corrections::list_bills_on(&app)
+        .expect("the bills")
+        .iter()
+        .fold(Money::ZERO, |sum, row| {
+            sum.add(Money::from_paise(row.total.paise))
+                .expect("a day's takings")
+        });
+    let totals_row = all.totals.clone().expect("a saved list carries its total");
+    assert_eq!(
+        totals_row.last().map(String::as_str),
+        Some(taken.to_plain_string().as_str()),
+        "the Total column and the total line disagree"
+    );
+
+    // Then the filter the person actually set. It reaches the rows AND the file name, so two
+    // exports of one day are two files.
+    let cash_only = crate::corrections::bills_report(
+        &app,
+        crate::corrections::BillFilter {
+            mode: Some("Cash".to_owned()),
+            ..crate::corrections::BillFilter::default()
+        },
+    )
+    .expect("the cash bills");
+    let numbers: Vec<&str> = cash_only
+        .rows
+        .iter()
+        .filter_map(|row| row.first().map(String::as_str))
+        .collect();
+    assert_eq!(numbers, vec![cash_number.as_str()]);
+    assert!(
+        !numbers.contains(&card_number.as_str()),
+        "a card bill is in a file the owner asked to be cash only"
+    );
+    assert_eq!(
+        cash_only
+            .totals
+            .as_ref()
+            .and_then(|row| row.last().cloned()),
+        Some(cash_total.to_plain_string())
+    );
+
+    // The CSV is the header, the rows, and the total — nothing else, because the offline tools
+    // read it as a table.
+    let csv = crate::reports::csv_of(&cash_only);
+    assert_eq!(
+        csv.lines().count(),
+        3,
+        "the CSV is not a plain table: {csv}"
+    );
+    assert!(
+        csv.starts_with("Bill,When"),
+        "the CSV lost its header: {csv}"
+    );
+
+    // A name a person can find again, and never a run of dashes.
+    let name = crate::reports::file_name(&cash_only, "csv");
+    assert!(
+        name.starts_with("Bills-Cash-"),
+        "{name} does not say what it is"
+    );
+    assert!(!name.contains("--"), "{name} is not a name anybody types");
+    assert!(name.ends_with(".csv"));
+}

@@ -37,6 +37,9 @@ pub struct BillRowView {
     pub cashier: Option<String>,
     /// "settled", "voided", "cancelled".
     pub state: String,
+    /// The same state in the word a person reads: "Paid", "Voided", "Cancelled". Rust owns
+    /// the word, so the badge on the screen and the cell in a saved file never disagree.
+    pub state_word: String,
     /// Present on a voided bill, and shown.
     pub void_reason: Option<String>,
     pub refunded: Option<MoneyView>,
@@ -370,6 +373,7 @@ fn bill_row(
         total: MoneyView::from(total),
         paid_by: paid,
         cashier,
+        state_word: state_word(state).to_owned(),
         state: state.to_owned(),
         void_reason,
         refunded: None,
@@ -377,6 +381,19 @@ fn bill_row(
         edited: false,
         approval: None,
     })
+}
+
+/// The word for a state. One list, because a badge and a saved file that disagree about what
+/// happened to a bill are worse than either on its own.
+fn state_word(state: &str) -> &str {
+    match state {
+        "settled" => "Paid",
+        "voided" => "Voided",
+        "cancelled" => "Cancelled",
+        // No bill is in this state; it is one of the things the toolbar can ask for.
+        "edited" => "Edited",
+        other => other,
+    }
 }
 
 /// What the register says about this bill: taken back, and whether that was signed off.
@@ -1557,11 +1574,159 @@ pub fn refund_on(
     list_bills_on(app)
 }
 
+// The list, as a file.
+
+/// The State column of a saved list: the word for the state, and anything else that happened
+/// to the bill. The badges on the screen say the same things.
+fn state_cell(row: &BillRowView) -> String {
+    let mut out = row.state_word.clone();
+    if row.edited {
+        out.push_str(", edited");
+    }
+    if row.approval.as_deref() == Some("waiting") {
+        out.push_str(", to approve");
+    }
+    out
+}
+
+/// What the file is of: the list, and the filters the person set — so two exports of the same
+/// day under different filters are two files rather than one overwriting the other.
+fn bills_title(view: &BillsView, filter: &BillFilter) -> String {
+    let mut out = String::from("Bills");
+    let mut add = |word: &str| {
+        out.push(' ');
+        out.push_str(word);
+    };
+    if let Some(id) = filter.cashier.as_deref().filter(|id| !id.is_empty()) {
+        let name = view
+            .cashiers
+            .iter()
+            .find(|c| c.id == id)
+            .map_or(id, |c| c.name.as_str());
+        add(name);
+    }
+    if let Some(state) = filter.state.as_deref().filter(|s| !s.is_empty()) {
+        add(state_word(state));
+    }
+    if let Some(mode) = filter.mode.as_deref().filter(|m| !m.is_empty()) {
+        add(mode);
+    }
+    if let Some(query) = filter
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+    {
+        add(query);
+    }
+    out
+}
+
+/// The Bills screen as a report — the same shape every other report has, so the one CSV
+/// writer and the one page layout serve this list too, filters and all.
+pub(crate) fn bills_report(app: &App, filter: BillFilter) -> UiResult<crate::reports::ReportView> {
+    let period = match &filter.period {
+        Some(arg) => arg.parse()?,
+        None => mb_db::repo::reports::Period::one_day(today(now())),
+    };
+    let view = bills_on(app, filter.clone())?;
+    let totals = &view.totals;
+
+    // The money last, because that is where a report keeps its figure — on a narrow roll it
+    // is the one that stands beside the bill number.
+    let columns = vec![
+        crate::reports::column("Bill", false),
+        crate::reports::column("When", false),
+        crate::reports::column("Table", false),
+        crate::reports::column("Items", true),
+        crate::reports::column("Paid by", false),
+        crate::reports::column("Taken by", false),
+        crate::reports::column("State", false),
+        crate::reports::column("Total", true),
+    ];
+    let rows: Vec<Vec<String>> = view
+        .rows
+        .iter()
+        .map(|row| {
+            vec![
+                row.number.clone(),
+                row.at.clone(),
+                row.table.clone().unwrap_or_else(|| row.order_type.clone()),
+                row.items.to_string(),
+                row.paid_by.clone(),
+                row.cashier.clone().unwrap_or_default(),
+                state_cell(row),
+                row.total.text.clone(),
+            ]
+        })
+        .collect();
+    // The Total column adds up to what was taken, voided bills included — the same figure the
+    // screen's header calls "Taken".
+    let mut total_row = vec![String::new(); columns.len()];
+    total_row[0] = "Total".to_owned();
+    total_row[columns.len() - 1] = totals.gross.text.clone();
+
+    // What the column cannot say on its own.
+    let mut notes = vec![format!("Net {}", totals.net.text)];
+    if totals.voids.paise > 0 {
+        notes.push(format!(
+            "Voided {} on {} bills",
+            totals.voids.text, totals.voided_bills
+        ));
+    }
+    if totals.refunded.paise > 0 {
+        notes.push(format!("Given back {}", totals.refunded.text));
+    }
+    if totals.cancelled_orders > 0 {
+        notes.push(format!(
+            "{} cancelled before they were billed",
+            totals.cancelled_orders
+        ));
+    }
+
+    Ok(crate::reports::ReportView {
+        id: "bills".to_owned(),
+        title: bills_title(&view, &filter),
+        subtitle: crate::reports::period_words(period),
+        columns,
+        rows,
+        totals: Some(total_row),
+        compare: None,
+        notes,
+    })
+}
+
 // The command seats.
 
 #[tauri::command]
 pub fn bills(app: tauri::State<'_, App>, filter: BillFilter) -> UiResult<BillsView> {
     bills_on(&app, filter)
+}
+
+/// The list on screen, as a spreadsheet in the Downloads folder.
+#[tauri::command]
+pub fn bills_csv(
+    app: tauri::State<'_, App>,
+    filter: BillFilter,
+) -> UiResult<crate::reports::SavedFileView> {
+    // Taking the list out of the building is its own permission, on top of reading it.
+    guard::require(&app, Permission::ReportsExport)?;
+    let report = bills_report(&app, filter)?;
+    let name = crate::reports::file_name(&report, "csv");
+    crate::reports::save_and_show(&app, &name, crate::reports::csv_of(&report).as_bytes())
+}
+
+/// The same list, as a sheet of A4.
+#[tauri::command]
+pub fn bills_pdf(
+    app: tauri::State<'_, App>,
+    filter: BillFilter,
+) -> UiResult<crate::reports::SavedFileView> {
+    guard::require(&app, Permission::ReportsExport)?;
+    let report = bills_report(&app, filter)?;
+    let bytes = crate::reports::pdf_of(&app, &report)?;
+    let name = crate::reports::file_name(&report, "pdf");
+    crate::reports::save_and_show(&app, &name, &bytes)
 }
 
 #[tauri::command]

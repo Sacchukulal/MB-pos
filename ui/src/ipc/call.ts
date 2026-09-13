@@ -231,6 +231,8 @@ export interface Commands {
 
   // The four ways a shop takes something back.
   bills: { args: { filter: BillFilter }; returns: BillsView };
+  bills_csv: { args: { filter: BillFilter }; returns: SavedFileView };
+  bills_pdf: { args: { filter: BillFilter }; returns: SavedFileView };
   bill_detail: { args: { orderId: string }; returns: BillDetailView };
   revert_bill: {
     args: {

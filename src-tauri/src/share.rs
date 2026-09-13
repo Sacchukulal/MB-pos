@@ -27,7 +27,7 @@ pub enum Channel {
     Copy,
     WhatsApp,
     Email,
-    /// Open `Documents\Magic Bill reports\`, where the PDF already is.
+    /// Open the Downloads folder, where the saved PDF already is.
     Folder,
 }
 
@@ -42,7 +42,7 @@ pub fn share_report_on(
     crate::guard::require(app, mb_auth::Permission::ReportsExport)?;
     let report = crate::reports::report_on(app, id, period)?;
     let text = summarise(&report);
-    hand_over(&text, &report.title, channel)
+    hand_over(app, &text, &report.title, channel)
 }
 
 /// The report as a message somebody would actually send.
@@ -76,7 +76,7 @@ fn summarise(report: &crate::reports::ReportView) -> String {
     out
 }
 
-fn hand_over(text: &str, title: &str, channel: Channel) -> UiResult<ShareView> {
+fn hand_over(app: &App, text: &str, title: &str, channel: Channel) -> UiResult<ShareView> {
     match channel {
         // Nothing to launch: the screen puts it on the clipboard.
         Channel::Copy => Ok(ShareView {
@@ -109,7 +109,7 @@ fn hand_over(text: &str, title: &str, channel: Channel) -> UiResult<ShareView> {
             })
         }
         Channel::Folder => {
-            let folder = crate::reports::export_folder();
+            let folder = crate::reports::export_folder(app);
             std::fs::create_dir_all(&folder).map_err(|e| {
                 UiError::new("share.folder", "That folder could not be opened.")
                     .with_detail(e.to_string())

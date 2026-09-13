@@ -14,6 +14,11 @@ paidBy: string, cashier: string | null,
  */
 state: string, 
 /**
+ * The same state in the word a person reads: "Paid", "Voided", "Cancelled". Rust owns
+ * the word, so the badge on the screen and the cell in a saved file never disagree.
+ */
+stateWord: string, 
+/**
  * Present on a voided bill, and shown.
  */
 voidReason: string | null, refunded: MoneyView | null, 

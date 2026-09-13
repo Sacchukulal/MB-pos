@@ -463,6 +463,8 @@ macro_rules! commands {
             $crate::ipc::audit_trail,
             // The four ways a shop takes something back.
             $crate::corrections::bills,
+            $crate::corrections::bills_csv,
+            $crate::corrections::bills_pdf,
             $crate::corrections::bill_detail,
             $crate::corrections::revert_bill,
             $crate::corrections::approve_revert,
