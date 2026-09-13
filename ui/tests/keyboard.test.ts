@@ -355,6 +355,24 @@ describe('the processing orders by keyboard (step 4)', () => {
     expect(state.mode).toEqual({ kind: 'processing', index: 1 });
   });
 
+  it('the arrows choose as they move — the row they land on goes into the cart', () => {
+    // Down from the box opens the top order; the next Down opens the one below it. No Enter.
+    let [state, commands] = run(initial(), cooking(...two), press('ArrowDown'));
+    expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_3' }]);
+    [state, commands] = run(state, press('ArrowDown'));
+    expect(commands).toEqual([{ do: 'open-order', orderId: 'ord_Parcel' }]);
+    [, commands] = run(state, press('ArrowUp'));
+    expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_3' }]);
+  });
+
+  it('but never re-opens the order the cart already has', () => {
+    const inCart = [two[0], { ...two[1], selected: true }] as TableView[];
+    // Down lands on it because it is the one in the cart: nothing to ask Rust for.
+    const [state, commands] = run(initial(), cooking(...inCart), press('ArrowDown'));
+    expect(state.mode).toEqual({ kind: 'processing', index: 1 });
+    expect(commands).toEqual([]);
+  });
+
   it('does not move when there is nothing cooking', () => {
     const [state] = run(initial(), floor(table('1')), press('ArrowDown'));
     expect(state.mode.kind).toBe('searching');

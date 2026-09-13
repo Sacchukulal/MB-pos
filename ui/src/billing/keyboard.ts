@@ -275,16 +275,16 @@ function key(state: State, pressed: string): [State, Command[]] {
       return [cleared(state), [{ do: 'new-order' }, { do: 'focus-search' }]];
     }
     if (pressed === 'ArrowDown' && count > 0) {
-      return [{ ...state, mode: { kind: 'processing', index: (at + 1) % count } }, []];
+      return moveTo(state, (at + 1) % count);
     }
     if (pressed === 'ArrowUp' && count > 0) {
-      return [{ ...state, mode: { kind: 'processing', index: (at - 1 + count) % count } }, []];
+      return moveTo(state, (at - 1 + count) % count);
     }
     if (pressed === 'Enter') {
       const order = state.processing[at];
       if (!order) return [cleared(state), [{ do: 'focus-search' }]];
-      // Already in the cart: this Enter completes it. Otherwise into the cart — and the
-      // highlight stays on the row, so the arrows carry on from here.
+      // The arrows already put it in the cart, so this Enter completes it. The other branch is
+      // only for an open that has not come back yet.
       if (order.selected && state.cartHasItems) {
         return [state, [{ do: 'complete-bill' }]];
       }
@@ -322,7 +322,7 @@ function key(state: State, pressed: string): [State, Command[]] {
     // is in the cart, when one is, so a tap on a row is where the arrows carry on from.
     if (state.text === '' && state.processing.length > 0) {
       const on = state.processing.findIndex((order) => order.selected);
-      return [{ ...state, mode: { kind: 'processing', index: on >= 0 ? on : 0 } }, []];
+      return moveTo(state, on >= 0 ? on : 0);
     }
     return [state, []];
   }
@@ -381,6 +381,18 @@ function key(state: State, pressed: string): [State, Command[]] {
   return [state, []];
 }
 
+/**
+ * The arrows choose as they move: the processing row they land on IS the order in the cart, so
+ * nothing has to be pressed after them. The row already in the cart is left alone — moving onto
+ * it again would ask Rust for an order it has.
+ */
+function moveTo(state: State, index: number): [State, Command[]] {
+  const next: State = { ...state, mode: { kind: 'processing', index } };
+  const order = state.processing[index];
+  if (!order || order.selected) return [next, []];
+  return [next, [openCommand(order)]];
+}
+
 /** A tile was chosen, by key or by tap. Typed items go with the cashier — Rust sees to that. */
 function openTile(state: State, table: TableView): [State, Command[]] {
   return [cleared(state), [openCommand(table)]];
@@ -418,12 +430,12 @@ export const SHORTCUTS: readonly {
   { group: 'The order', keys: 'Enter', what: 'On an empty box: print the kitchen ticket — the order waits under Processing orders' },
   { group: 'The order', keys: 'Enter', what: 'On an order from Processing orders: complete the bill' },
   { group: 'The order', keys: 'table number, Enter', what: "Open that table's order — typed items go with you" },
-  { group: 'The order', keys: 'Enter, with no table', what: 'A dine-in order asks for its table number in a box; type it and press Enter' },
+  { group: 'The order', keys: 'Enter, with no table', what: 'A dine-in order asks for its table number in a box; type it and the kitchen ticket goes' },
   { group: 'The order', keys: '← →', what: 'Change the order type (unless the shop locks it)' },
   { group: 'The order', keys: 'Esc', what: 'New order, from anywhere' },
   { group: 'Processing orders', keys: '↓', what: 'From an empty box, into the processing orders' },
-  { group: 'Processing orders', keys: '↑ ↓', what: 'Move through them' },
-  { group: 'Processing orders', keys: 'Enter', what: 'Open it in the cart; Enter again completes the bill' },
+  { group: 'Processing orders', keys: '↑ ↓', what: 'Move through them — the row you land on opens in the cart' },
+  { group: 'Processing orders', keys: 'Enter', what: 'Complete the bill for the order the arrows are on' },
   { group: 'Help', keys: '?', what: 'Show this sheet' },
   // The key is handled by the shell rather than by this reducer — it must work on every screen,
   // not only on this one — but it is documented HERE, because the help sheet is generated from

@@ -428,6 +428,11 @@ describe('the cart controls', () => {
     expect(row).toContain('grid-template-columns 0s linear var(--motion-normal)');
     expect(row).not.toContain('grid-template-columns var(--motion');
     expect(block(billing, '.mb-billing__floorrow--open {')).toContain('transition: none');
+    // Tables off the billing screen: the list keeps its head's width, in its own column, and
+    // does not spread across the room the tiles left.
+    const only = block(billing, '.mb-billing__floorrow--orders-only {');
+    expect(only).toContain('minmax(0, 1fr) var(--queue-width)');
+    expect(block(billing, '.mb-processing__fold {')).toContain('grid-column: 2');
     // Never a number of milliseconds here.
     for (const rule of ['.mb-billing__floorrow {', '.mb-billing__floorrow--open {', '.mb-processing__fold {']) {
       expect(block(billing, rule), rule).not.toMatch(/\d+ms/);

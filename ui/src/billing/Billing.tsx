@@ -151,8 +151,11 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const report = useReport();
   // One action at a time on this screen, matching the counter in Rust.
   const [act, acting] = useAction();
-  /** The table-number box is open: Enter was pressed on a dine-in cart with no table. */
-  const [pickingTable, setPickingTable] = useState(false);
+  /**
+   * The table-number box is open, and what it is holding up: Enter on a dine-in cart with no
+   * table asks for the number, and the answer FINISHES that press — the ticket, or the bill.
+   */
+  const [pickingTable, setPickingTable] = useState<'kitchen' | 'bill' | null>(null);
 
   // Silent on failure, and deliberately.
   const refreshFloor = useCallback(async () => {
@@ -408,7 +411,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       toast.show('ok', 'Kitchen ticket sent.');
     } catch (cause) {
       // A dine-in cart with no table: ask for the number, in its own box.
-      if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable(true);
+      if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable('kitchen');
       else report(cause);
     }
   }, [refreshFloor, report, toast]);
@@ -451,7 +454,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       await refreshFloor();
       toast.show('ok', `Bill ${number} settled.`);
     } catch (cause) {
-      if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable(true);
+      if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable('bill');
       else report(cause);
     }
   }, [freshMoney, payMode, refreshFloor, report, toast]);
@@ -515,6 +518,24 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       if (index >= 0) dispatch({ kind: 'tap-tile', index });
     },
     [tables],
+  );
+
+  /**
+   * The table box was answered. Opening the table is only half of it: the press that asked for
+   * the number is still waiting, so the ticket goes to the kitchen — or the bill is settled —
+   * without a second Enter.
+   */
+  const tableChosen = useCallback(
+    (table: TableView) => {
+      const waiting = pickingTable;
+      setPickingTable(null);
+      act(async () => {
+        await openTableById(table.id);
+        if (waiting === 'bill') await completeBill();
+        else await printKitchen();
+      });
+    },
+    [act, completeBill, openTableById, pickingTable, printKitchen],
   );
 
   /** Carry the bill to the table. */
@@ -772,11 +793,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           {pickingTable ? (
             <TableBox
               tables={tables}
-              onClose={() => setPickingTable(false)}
-              onOpen={(table) => {
-                setPickingTable(false);
-                dispatch({ kind: 'tap-tile', index: tables.indexOf(table) });
-              }}
+              onClose={() => setPickingTable(null)}
+              onOpen={tableChosen}
             />
           ) : null}
 

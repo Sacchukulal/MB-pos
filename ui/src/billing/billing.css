@@ -67,10 +67,14 @@
   transition: none;
 }
 
-/* The tables are off this screen: the orders being cooked take the whole column. */
+/*
+ * The tables are off this screen (Floor's switch). The list keeps the width it always has —
+ * its head's width — and stays under the head. It does not spread into the room the tiles
+ * left: a list of four orders as wide as a floor reads as a mistake.
+ */
 .mb-billing__floorrow--orders-only {
-  grid-template-columns: minmax(0, 1fr);
-  column-gap: 0;
+  grid-template-columns: minmax(0, 1fr) var(--queue-width);
+  column-gap: var(--queue-gap);
 }
 
 /* The order type takes the cart's column, and exactly the cart's width. */
@@ -641,8 +645,12 @@
   text-overflow: ellipsis;
 }
 
-/* The list folds UP into its head: no rows when folded. It drops only once its column is open. */
+/*
+ * The list folds UP into its head: no rows when folded. It drops only once its column is open.
+ * Always the SECOND column, so a floor that is switched off cannot let it slide into the first.
+ */
 .mb-processing__fold {
+  grid-column: 2;
   display: grid;
   grid-template-rows: 0fr;
   min-width: 0;
