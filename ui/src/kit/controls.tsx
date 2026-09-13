@@ -19,7 +19,7 @@ import { cx } from './cx';
 import { Icon } from './Icon';
 import { InfoTip } from './InfoTip';
 
-type Variant = 'primary' | 'secondary' | 'quiet' | 'danger';
+type Variant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'link';
 
 /** lg — a hand on a touch screen; md — a page's own buttons; sm — inside a row. */
 type Size = 'sm' | 'md' | 'lg';
@@ -96,8 +96,11 @@ function FieldShell({ label, hint, error, children }: FieldShellProps) {
   );
 }
 
+/** How wide a box is, from the field-size scale in tokens.css. */
+export type FieldSize = 'xs' | 'sm' | 'md' | 'lg';
+
 export interface InputProps
-  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'id'> {
+  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'id' | 'size'> {
   /** The box itself, for a caller that has to focus it — the Cash button on the till. */
   ref?: Ref<HTMLInputElement>;
   label?: string;
@@ -105,9 +108,11 @@ export interface InputProps
   error?: string;
   /** A mark drawn inside the box and outside the value — `₹`, `+91`. */
   prefix?: string;
+  /** One of the four widths, so four boxes in a row never show four unrelated widths. */
+  size?: FieldSize;
 }
 
-export function Input({ label, hint, error, className, prefix, ...rest }: InputProps) {
+export function Input({ label, hint, error, className, prefix, size, ...rest }: InputProps) {
   const field = (id: string, invalid: boolean) => (
     <input
           id={id}
@@ -116,7 +121,7 @@ export function Input({ label, hint, error, className, prefix, ...rest }: InputP
            * because this sits before the spread.
            */
           autoComplete="off"
-          className={cx('mb-input', invalid && 'mb-input--invalid', className)}
+          className={cx('mb-input', invalid && 'mb-input--invalid', size && `mb-input--${size}`, className)}
       aria-invalid={invalid || undefined}
       {...rest}
     />
@@ -241,11 +246,13 @@ export function PhoneInput({
 }
 
 export interface SelectProps
-  extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'id'> {
+  extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'id' | 'size'> {
   label?: string;
   hint?: string;
   error?: string;
   options: readonly { value: string; label: string }[];
+  /** One of the four widths — the same scale as `Input`. */
+  size?: FieldSize;
 }
 
 /** Where the sheet lies: fixed to the window, under the box or above it. */
@@ -271,6 +278,7 @@ export function Select({
   error,
   options,
   className,
+  size,
   onKeyDown,
   ...rest
 }: SelectProps) {
@@ -415,7 +423,7 @@ export function Select({
           <select
             id={id}
             ref={box}
-            className={cx('mb-input', 'mb-select', className)}
+            className={cx('mb-input', 'mb-select', size && `mb-input--${size}`, className)}
             aria-invalid={invalid || undefined}
             aria-expanded={open}
             data-open={open || undefined}
@@ -561,16 +569,16 @@ export interface SearchFieldProps extends InputProps {
  * somebody styles again.
  */
 export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(
-  function SearchField({ what = 'Search', ...rest }, ref) {
+  function SearchField({ what = 'Search', size, className, ...rest }, ref) {
     return (
-      <div className="mb-search">
+      <div className={cx('mb-search', className)}>
         <span className="mb-search__icon" aria-hidden="true">
           ⌕
         </span>
         <input
           ref={ref}
           type="search"
-          className="mb-input"
+          className={cx('mb-input', size && `mb-input--${size}`)}
           placeholder={what}
           aria-label={what}
           autoComplete="off"
@@ -706,3 +714,74 @@ export function Choice({
     </div>
   );
 }
+
+/**
+ * A segment: two to four words side by side, the chosen one filled. One control, one width,
+ * so a screen never draws its own row of buttons for a choice.
+ */
+export function Segment<Value extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  fill = false,
+  size = 'md',
+  className,
+}: {
+  /** What the choice is, for the screen reader. */
+  label: string;
+  options: readonly { value: Value; label: ReactNode; disabled?: boolean }[];
+  value: Value | null;
+  onChange: (value: Value) => void;
+  /** Take the whole width, every option the same share. */
+  fill?: boolean;
+  size?: 'md' | 'lg';
+  className?: string;
+}) {
+  return (
+    <div
+      className={cx('mb-segment', fill && 'mb-segment--fill', size === 'lg' && 'mb-segment--lg', className)}
+      role="group"
+      aria-label={label}
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className="mb-segment__option"
+          aria-pressed={option.value === value}
+          disabled={option.disabled}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export interface PickProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  /** This is the one: the dark fill, the marker down its left edge. */
+  current?: boolean;
+}
+
+/**
+ * A row of a list somebody chooses from — a category, a report, an item under the search
+ * box. The look is THE PICK CONTRACT in tokens.css; nothing else may wear it.
+ */
+export const Pick = forwardRef<HTMLButtonElement, PickProps>(function Pick(
+  { current = false, className, children, ...rest },
+  ref,
+) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      className={cx('mb-pick', className)}
+      aria-current={current ? 'true' : undefined}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+});

@@ -87,7 +87,7 @@ export function Gallery() {
             ))}
             <Select
               aria-label="Text size"
-              className="mb-input--sm"
+              size="sm"
               value={textSize}
               onChange={(event) => setTextSize(event.target.value)}
               options={TEXT_SIZES.map((s) => ({ value: s.id, label: s.name }))}

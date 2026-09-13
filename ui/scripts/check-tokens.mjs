@@ -35,6 +35,16 @@ const CHECKS = [
     re: /style=\{\{/g,
   },
   {
+    // 0.5, 0.7 — "half there" is a --dim-* token so it means the same thing on every screen.
+    what: 'a raw opacity',
+    re: /opacity\s*:\s*0?\.\d/g,
+  },
+  {
+    // 200ms — every duration is a --motion-* token. Zero is "none", not a value.
+    what: 'a raw duration',
+    re: /\b(?!0m?s\b)\d+m?s\b/g,
+  },
+  {
     // 600, 700 — a weight is a token so the whole product changes together.
     what: 'a raw font weight',
     re: /font-weight\s*:\s*\d/g,

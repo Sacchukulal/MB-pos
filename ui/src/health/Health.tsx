@@ -66,13 +66,9 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         <div className="mb-health__says">
           <span>{row.says}</span>
           {row.goTo && onGoTo ? (
-            <button
-              type="button"
-              className="mb-health__go"
-              onClick={() => onGoTo(row.goTo as string)}
-            >
+            <Button variant="link" onClick={() => onGoTo(row.goTo as string)}>
               Open {row.goTo}
-            </button>
+            </Button>
           ) : null}
         </div>
       ),

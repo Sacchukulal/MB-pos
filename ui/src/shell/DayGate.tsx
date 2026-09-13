@@ -5,7 +5,7 @@
 
 import { useState } from 'react';
 
-import { Button, Modal, Money, Numeric, Table, useToast, type Column } from '../kit';
+import { Button, Modal, Money, Numeric, Segment, Table, useToast, type Column } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { DayStateView } from '../ipc/generated/DayStateView';
 import type { PendingDayView } from '../ipc/generated/PendingDayView';
@@ -75,21 +75,20 @@ export function DayGate({ state, onChange, onEscape, onSignOut }: DayGateProps) 
           // A day with an open order is not a choice; it is a sentence.
           <span className="mb-muted mb-daygate__says">{row.openSays}</span>
         ) : (
-          <div className="mb-segment" role="group" aria-label={`What to do with ${row.daySays}`}>
-            {(['close', 'holiday'] as const).map((choice) => (
-              <button
-                key={choice}
-                type="button"
-                className="mb-segment__option"
-                aria-pressed={row.suggested === choice}
-                // Only a day with nothing on it can be a holiday; Rust decided that.
-                disabled={!state.mayAct || (choice === 'holiday' && !row.looksLikeHoliday)}
-                onClick={() => choose(row.day, choice)}
-              >
-                {choice === 'close' ? 'Close' : 'Holiday'}
-              </button>
-            ))}
-          </div>
+          <Segment
+            label={`What to do with ${row.daySays}`}
+            options={[
+              { value: 'close' as const, label: 'Close', disabled: !state.mayAct },
+              // Only a day with nothing on it can be a holiday; Rust decided that.
+              {
+                value: 'holiday' as const,
+                label: 'Holiday',
+                disabled: !state.mayAct || !row.looksLikeHoliday,
+              },
+            ]}
+            value={row.suggested === 'close' || row.suggested === 'holiday' ? row.suggested : null}
+            onChange={(choice) => choose(row.day, choice)}
+          />
         ),
     },
   ];

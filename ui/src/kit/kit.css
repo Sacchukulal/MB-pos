@@ -20,20 +20,37 @@
   transition:
     background-color var(--motion-fast) var(--ease),
     border-color var(--motion-fast) var(--ease),
-    color var(--motion-fast) var(--ease);
+    color var(--motion-fast) var(--ease),
+    box-shadow var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
 }
 
 .mb-button:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: var(--dim-disabled);
+}
+
+/*
+ * THE PRESS. Every control in the product gives the same small amount under the finger, so
+ * a touch screen answers the hand the way a key does. One rule, every control.
+ */
+.mb-button:active:not(:disabled),
+.mb-pick:active,
+.mb-segment__option:active,
+.mb-tab:active,
+.mb-sheet__item:active,
+.mb-stepper__step:active:not(:disabled) {
+  transform: scale(var(--press));
 }
 
 .mb-button--primary {
   background: var(--accent);
   color: var(--accent-ink);
+  box-shadow: var(--level-raised);
 }
 .mb-button--primary:hover:not(:disabled) {
   background: var(--accent-hover);
+  box-shadow: var(--level-lifted);
 }
 
 .mb-button--secondary {
@@ -44,6 +61,7 @@
 .mb-button--secondary:hover:not(:disabled) {
   background: var(--surface-2);
   border-color: var(--text-faint);
+  box-shadow: var(--level-raised);
 }
 
 /*
@@ -89,6 +107,22 @@
 }
 .mb-modal__actions .mb-button--danger:hover:not(:disabled) {
   filter: brightness(1.08);
+}
+
+/* A link: a word that goes somewhere, inside a sentence or a cell. No box. */
+.mb-button--link {
+  height: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  border: none;
+  font-weight: var(--weight-medium);
+  text-decoration: underline;
+  text-underline-offset: var(--space-1);
+}
+
+.mb-button--link:hover:not(:disabled) {
+  color: var(--accent-hover);
 }
 
 /* Inside a row. */
@@ -166,6 +200,10 @@
   font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
 }
 
 /* Under the hand, or under the arrow keys — the two are one state, on the way to a choice. */
@@ -214,7 +252,7 @@
   bottom: var(--pick-mark-short);
   width: var(--pick-mark);
   border-radius: var(--radius-pill);
-  background: var(--pick-line);
+  background: var(--pick-mark-ink);
 }
 
 /*
@@ -231,6 +269,7 @@
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--level-pop);
+  animation: mb-drop var(--motion-enter) var(--ease-out);
 }
 
 /* One row of a sheet: a pick that stands to one line, at the sheet's own corner. */
@@ -291,6 +330,7 @@
 .mb-rowmenu__sheet--up {
   top: auto;
   bottom: calc(100% + var(--space-1));
+  animation-name: mb-rise;
 }
 
 /* A menu whose button carries a word ("Card") as well as the arrow. */
@@ -324,7 +364,8 @@
   white-space: nowrap;
   transition:
     background-color var(--motion-fast) var(--ease),
-    color var(--motion-fast) var(--ease);
+    color var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
 }
 
 .mb-segment__option:hover {
@@ -365,7 +406,7 @@
   font: inherit;
   font-size: var(--text-xs);
   line-height: var(--line-normal);
-  opacity: 0.7;
+  opacity: var(--dim-quiet);
 }
 
 /* Stepper: − n +, one shape. */
@@ -392,7 +433,8 @@
   cursor: pointer;
   transition:
     background-color var(--motion-fast) var(--ease),
-    color var(--motion-fast) var(--ease);
+    color var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
 }
 
 .mb-stepper__step:hover:not(:disabled) {
@@ -488,6 +530,12 @@ input.mb-stepper__value {
 textarea.mb-input {
   height: auto;
   padding: var(--space-2) var(--space-3);
+}
+
+.mb-input {
+  transition:
+    border-color var(--motion-fast) var(--ease),
+    background-color var(--motion-fast) var(--ease);
 }
 
 .mb-input:hover:not(:disabled) {
@@ -617,7 +665,7 @@ textarea.mb-input {
 
 .mb-switch input:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: var(--dim-disabled);
 }
 
 /* Which way it is, in a word — colour is never the only signal. */
@@ -707,7 +755,20 @@ textarea.mb-input {
   justify-content: center;
   padding: var(--space-5);
   background: var(--overlay);
+  -webkit-backdrop-filter: blur(var(--scrim-blur));
+  backdrop-filter: blur(var(--scrim-blur));
   z-index: var(--layer-modal);
+  animation: mb-fade-in var(--motion-enter) var(--ease-out);
+}
+
+/* On its way out. The scrim fades and the dialog sinks; a press in the meantime lands nowhere. */
+.mb-overlay--closing {
+  pointer-events: none;
+  animation: mb-fade-out var(--motion-exit) var(--ease-in) forwards;
+}
+
+.mb-overlay--closing .mb-modal {
+  animation: mb-sink var(--motion-exit) var(--ease-in) forwards;
 }
 
 .mb-modal {
@@ -723,6 +784,7 @@ textarea.mb-input {
   box-shadow: var(--shadow-pop);
   /* The PANEL does not scroll — the body does. */
   overflow: hidden;
+  animation: mb-rise var(--motion-enter) var(--ease-out);
 }
 
 .mb-modal--wide {
@@ -793,6 +855,7 @@ textarea.mb-input {
   border-left: var(--tile-stripe) solid var(--border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
+  animation: mb-slide-in var(--motion-enter) var(--ease-out);
 }
 
 .mb-toast--ok {
@@ -842,6 +905,8 @@ textarea.mb-input {
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
+  /* The figure is sized against THIS box, so it never runs out of it. */
+  container-type: inline-size;
 }
 
 .mb-stat__label {
@@ -853,7 +918,7 @@ textarea.mb-input {
 .mb-stat__value {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
-  font-size: var(--text-2xl);
+  font-size: min(var(--text-stat), var(--text-stat-fit));
   font-weight: var(--weight-bold);
   line-height: var(--line-tight);
   letter-spacing: var(--tracking-title);
@@ -938,7 +1003,7 @@ textarea.mb-input {
   background: none;
   border: none;
   color: var(--text-faint);
-  opacity: 0.7;
+  opacity: var(--dim-quiet);
   cursor: help;
 }
 
@@ -1129,6 +1194,10 @@ textarea.mb-input {
   font-size: var(--text-md);
   font-weight: var(--weight-medium);
   cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
 }
 
 .mb-tab:hover {
@@ -1180,7 +1249,7 @@ textarea.mb-input {
   border: var(--border-width-thick) solid var(--border);
   border-top-color: var(--accent);
   border-radius: var(--radius-pill);
-  animation: mb-spin 900ms linear infinite;
+  animation: mb-spin var(--motion-spin) linear infinite;
 }
 
 @keyframes mb-spin {
@@ -1208,7 +1277,7 @@ textarea.mb-input {
 .mb-progress__bar--busy {
   position: absolute;
   width: 30%;
-  animation: mb-sweep 1200ms ease-in-out infinite alternate;
+  animation: mb-sweep var(--motion-sweep) ease-in-out infinite alternate;
 }
 
 @keyframes mb-sweep {
@@ -1558,4 +1627,53 @@ textarea.mb-input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * THE MOTION. Six ways a thing arrives or leaves, and no seventh. A screen never writes a
+ * keyframe of its own; it names one of these. Every one of them is an opacity and a small
+ * travel — never a size, never a colour — so nothing on the page reflows while it runs.
+ */
+@keyframes mb-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes mb-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Up onto the page: a dialog, a sheet that opens upward. */
+@keyframes mb-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise));
+  }
+}
+
+/* Back down off it. */
+@keyframes mb-sink {
+  to {
+    opacity: 0;
+    transform: translateY(var(--rise));
+  }
+}
+
+/* Down from the thing that opened it: a menu, a dropdown, the alerts. */
+@keyframes mb-drop {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--rise) * -1));
+  }
+}
+
+/* In from the left edge: a toast. */
+@keyframes mb-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--rise) * -1));
+  }
 }

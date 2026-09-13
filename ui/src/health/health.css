@@ -1,14 +1,5 @@
 /* "Is this counter healthy?". */
 
-.mb-health {
-  /* The page margin is the SHELL's. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
-  height: 100%;
-}
-
 /* `.mb-card` is a COLUMN, so a row inside one says so. */
 .mb-health__top {
   flex-direction: row;
@@ -42,21 +33,6 @@
   align-items: flex-start;
   gap: var(--space-1);
   max-width: 70ch;
-}
-
-.mb-health__go,
-.mb-health__file {
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-}
-
-.mb-health__go {
-  color: var(--accent);
-  text-decoration: underline;
-  cursor: pointer;
-  text-transform: capitalize;
 }
 
 /* The bundle's manifest. */

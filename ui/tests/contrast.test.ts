@@ -90,7 +90,7 @@ const PAIRS: readonly { ink: string; ground: string; least: number }[] = [
   { ink: '--pick-ink', ground: '--pick-bg-hover', least: 4.5 },
   { ink: '--text', ground: '--pick-hover', least: 4.5 },
   // The marker down its left edge, on the fill it is drawn over.
-  { ink: '--pick-line', ground: '--pick-bg', least: 3 },
+  { ink: '--pick-mark-ink', ground: '--pick-bg', least: 3 },
 
   { ink: '--border-strong', ground: '--surface', least: 3 },
   { ink: '--border-strong', ground: '--bg', least: 3 },

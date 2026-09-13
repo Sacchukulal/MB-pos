@@ -1,14 +1,5 @@
 /* The delivery board. */
 
-.mb-delivery {
-  /* The page margin is the SHELL's. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-group);
-  min-height: 0;
-  height: 100%;
-}
-
 .mb-delivery__day {
   font-size: var(--text-sm);
   color: var(--text-muted);

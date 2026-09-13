@@ -133,6 +133,16 @@ const CHECKS = [
     fix: 'Sentence case. The one caption that may be capitals is the kit Caption (mb-layout-allow: if it IS a form caption).',
   },
   {
+    /**
+     * A button, a row you press, a box you type in: the kit draws them. A screen that writes
+     * `cursor: pointer` is drawing a control of its own, and that is the second way.
+     */
+    what: 'a control drawn by a screen',
+    re: /^\s*(cursor\s*:\s*pointer|font\s*:\s*inherit)\s*;/,
+    only: 'css',
+    fix: 'Use <Button>, <Pick>, <Segment> or <Input> from the kit; a class on top may place it.',
+  },
+  {
     what: 'a scrollbar gutter reserved outside the kit',
     re: /scrollbar-gutter\s*:/,
     only: 'css',

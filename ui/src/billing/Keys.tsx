@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { Button, Input, Modal, cx, onlyAmount } from '../kit';
+import { Button, Input, Modal, NumberInput, Pick, cx, onlyAmount } from '../kit';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
 import { SHORTCUTS, type Mode } from './keyboard';
@@ -22,18 +22,17 @@ export function Suggestions({
     <ul className="mb-suggestions mb-sheet" role="listbox" aria-label="Menu suggestions">
       {items.map((item, index) => (
         <li key={item.id}>
-          <button
-            type="button"
+          <Pick
             role="option"
             aria-selected={index === highlighted}
-            className={cx('mb-pick', 'mb-sheet__item', 'mb-suggestion')}
+            className={cx('mb-sheet__item', 'mb-suggestion')}
             // Touch reaches the same place Enter does.
             onClick={() => onPick(index)}
           >
             <span className="mb-suggestion__name">{item.name}</span>
             <span className="mb-suggestion__rate">{item.rateLabel}</span>
             <span className="mb-suggestion__price">{item.price.text}</span>
-          </button>
+          </Pick>
         </li>
       ))}
     </ul>
@@ -80,12 +79,10 @@ export function HowMany({
       }
     >
       <div className="mb-ask">
-        <input
+        <NumberInput
           ref={box}
-          className="mb-input mb-input--number mb-ask__box"
+          className="mb-ask__box"
           data-keys="engine"
-          inputMode="decimal"
-          autoComplete="off"
           aria-label="How many"
           value={mode.text}
           onChange={(event) => onChange(onlyAmount(event.target.value))}

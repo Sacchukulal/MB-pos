@@ -1,14 +1,5 @@
 /* The reports screen. */
 
-.mb-reports {
-  /* The page margin is the SHELL's. */
-  display: grid;
-  grid-template-columns: var(--settings-rail) minmax(0, 1fr);
-  gap: var(--space-4);
-  height: 100%;
-  min-height: 0;
-}
-
 .mb-reports__rail {
   display: flex;
   flex-direction: column;

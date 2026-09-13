@@ -19,7 +19,7 @@ export function More({
   children: ReactNode;
 }) {
   return (
-    <div className="mb-more">
+    <div className="mb-railpage">
       <Rail label="More screens" className="mb-more__rail">
         {screens.map((item) => (
           <RailItem

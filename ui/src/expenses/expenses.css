@@ -1,14 +1,5 @@
 /* Money going out — scope 10.6. Every value is a token. */
 
-.mb-expenses {
-  /* The page margin is the SHELL's. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
-  height: 100%;
-}
-
 /*
  * Quick add. The whole point of the screen: two fields and Enter, because a cashier records a
  * 40-rupee milk purchase mid-service or does not record it at all.

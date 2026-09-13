@@ -81,10 +81,15 @@
   /* How far short of the row's ends it stops, so it reads as a mark and not as an edge. */
   --pick-mark-short: var(--space-2);
 
-  /* THE ELEVATION CONTRACT — three levels, and no fourth. */
-
+  /*
+   * THE ELEVATION CONTRACT — four levels, and no fifth.
+   * flat   — a line and nothing else: a row, a chip, a panel inside a panel.
+   * raised — a thing standing on the page: a panel, a tile, a card, the filled button.
+   * lifted — the same thing under the hand, on its way to being pressed.
+   * pop    — a thing lying OVER the page: a dialog, a sheet, a toast.
+   * The three shadows are per-theme, because a shadow is a colour.
+   */
   --level-flat: none;
-  /* Level-raised and --level-pop are per-theme: a shadow is a colour. */
 
   /*
    * Icons. Sized off the type scale rather than in pixels, so the text-size setting moves an
@@ -144,6 +149,12 @@
   --text-lg: calc(1.0625rem * var(--type-scale));
   --text-xl: calc(1.375rem * var(--type-scale));
   --text-2xl: calc(1.875rem * var(--type-scale));
+  /*
+   * A figure on a stat card: big, but eight digits and a sign still fit the card at every
+   * text size — the second value is the most of the card's own width one character may take.
+   */
+  --text-stat: calc(1.625rem * var(--type-scale));
+  --text-stat-fit: 18cqw;
 
   --weight-normal: 400;
   --weight-medium: 500;
@@ -169,10 +180,38 @@
   --line-tight: 1.25;
   --line-normal: 1.5;
 
-  /* Motion: 120–200 ms, CSS only, and NOTHING on the billing path animates. */
+  /*
+   * Motion: 120–200 ms, CSS only, and nothing on the billing path ever MOVES A LINE — a
+   * cart line, a total or a tile never shifts under the hand. What it may do is answer:
+   * a button darkens and gives under the finger, a dialog rises, a sheet drops, a toast
+   * slides in. Enter is a touch longer than exit: a thing arriving is looked at, a thing
+   * leaving is already forgotten.
+   */
   --motion-fast: 120ms;
   --motion-normal: 200ms;
+  --motion-enter: 180ms;
+  --motion-exit: 120ms;
   --ease: cubic-bezier(0.2, 0, 0.2, 1);
+  /* Arriving: quick off the mark, settles gently. */
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  /* Leaving: the other way round. */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  /* How far a thing travels while it fades in or out. */
+  --rise: 0.5rem;
+  /* How much a control gives under the finger. */
+  --press: 0.97;
+  /* The one busy spinner, and the sweep of a bar that has no end yet. */
+  --motion-spin: 900ms;
+  --motion-sweep: 1200ms;
+  /* How much the page behind a dialog blurs. */
+  --scrim-blur: 2px;
+  /*
+   * How faint a thing is drawn: a disabled control, a quiet second line, a lock that is off.
+   * Three steps, so "half there" means the same thing on every screen.
+   */
+  --dim-disabled: 0.5;
+  --dim-quiet: 0.7;
+  --dim-faint: 0.45;
   /*
    * The one exception to the 120–200 ms rule, and it is deliberate: the bell has to be
    * noticed from across the counter by somebody who is looking at a table, not at the
@@ -200,10 +239,10 @@
    * THE FIELD-SIZE SCALE. A form row picks from these, so four fields never show four
    * unrelated widths.
    */
-  --field-xs: 6rem;
-  --field-sm: 10rem;
-  --field-md: 16rem;
-  --field-lg: 24rem;
+  --field-xs: calc(6rem * var(--type-scale));
+  --field-sm: calc(10rem * var(--type-scale));
+  --field-md: calc(16rem * var(--type-scale));
+  --field-lg: calc(24rem * var(--type-scale));
 
   /*
    * Component widths. Here rather than in a component, because "the rail is too narrow" and
@@ -268,8 +307,10 @@
   /* How little of the cart may ever be on screen. */
   --cart-lines-min: 6rem;
   /* The cash box on the money row: one width, with room beside it for the answer. */
-  --cash-box-width: 8rem;
+  --cash-box-width: calc(7.5rem * var(--type-scale));
 
+  /* Whose till it is, in the top bar: the name never squeezes the screens beside it. */
+  --who-width: 10rem;
   /* The alerts panel. */
   --alerts-width: 24rem;
   /* The Floor screen's arranging panel, and every side panel. */
@@ -307,7 +348,7 @@
   --bill-totals: 20rem;
 
   /* A fact's column on a page of facts, and the label column of a folder row. */
-  --fact-column: 12rem;
+  --fact-column: calc(14rem * var(--type-scale));
   --account-label: 8rem;
   --account-side: 22rem;
 
@@ -385,21 +426,21 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg: #eef2f7;
+  --bg: #e8edf4;
   --surface: #ffffff;
-  --surface-2: #f3f6fa;
-  --surface-sunk: #e4e9f1;
+  --surface-2: #f2f5f9;
+  --surface-sunk: #e1e7ef;
 
   /* Line — two weights and they do different jobs. */
-  --border: #b9c3d2;
-  --border-strong: #75839a;
+  --border: #a8b3c5;
+  --border-strong: #5b6b85;
   /* A panel's edge. */
-  --panel-border: #b9c3d2;
+  --panel-border: #aab5c7;
 
   /* Text — three steps, all of them dark enough to read from a step back. */
   --text: #0f172a;
-  --text-muted: #475569;
-  --text-faint: #6b7a90;
+  --text-muted: #3d4a60;
+  --text-faint: #5c6b83;
 
   /* Accent — navy. A chosen segment, the primary button, a pressed toggle. */
   --accent: #111c33;
@@ -413,17 +454,18 @@
   --brand-soft: #dbe7fd;
 
   /*
-   * The pick — the chosen row of a list, and the row under the hand on the way to it. The
-   * chosen row used to be the panel's own grey and could not be told from the panel it sat in;
-   * this is a blue tint, deep enough to see from a step back and light enough to read dark ink
-   * on. It is the SAME blue in both themes — nobody should have to learn selection twice on
-   * the way from day to night — and the marker is the brand blue itself, the one colour in
-   * this product whose whole job is to point.
+   * The pick — the chosen row of a list, the chosen tile, the chosen report. DARK, in both
+   * themes (owner, 2026-09-13: the pale tint "could not be understood"): the same navy as the
+   * primary button, white ink on it, and a light-blue marker down its left edge that can be
+   * seen on that navy. The row under the hand on the way to it is a tint, so the two are never
+   * confused.
    */
   --pick-hover: #e6edf8;
-  --pick-bg: #cfe0fb;
-  --pick-bg-hover: #bcd4f8;
-  --pick-ink: var(--text);
+  --pick-bg: #111c33;
+  --pick-bg-hover: #1e2b47;
+  --pick-ink: #ffffff;
+  /* The marker on the fill, and the ring round a chosen tile on the page. */
+  --pick-mark-ink: #60a5fa;
   --pick-line: var(--brand);
 
   /*
@@ -463,8 +505,13 @@
   --person-7: #65a30d;
   --person-8: #0284c7;
 
-  /* Elevation — a panel is a line on a cool ground; only something lying OVER the page casts a shadow. */
-  --level-raised: none;
+  /*
+   * Elevation. A panel is a line on a cool ground with the faintest shadow under it, so it
+   * stands ON the page rather than being drawn on it; under the hand it lifts a little more;
+   * only something lying OVER the page casts a real one.
+   */
+  --level-raised: 0 1px 2px rgb(15 23 42 / 8%), 0 1px 4px rgb(15 23 42 / 10%);
+  --level-lifted: 0 2px 6px rgb(15 23 42 / 12%), 0 6px 16px rgb(15 23 42 / 12%);
   --level-pop: 0 4px 14px rgb(15 23 42 / 14%), 0 12px 32px rgb(15 23 42 / 12%);
   --shadow: var(--level-raised);
   --shadow-pop: var(--level-pop);
@@ -475,14 +522,15 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #060a14;
-  --surface: #111a2e;
-  --surface-2: #182338;
-  --surface-sunk: #1f2c45;
+  /* The ground is the darkest thing on screen; every surface stands clearly off it. */
+  --bg: #070b17;
+  --surface: #131e36;
+  --surface-2: #1b2842;
+  --surface-sunk: #233350;
 
-  --border: #2b3a55;
-  --border-strong: #56698a;
-  --panel-border: #2b3a55;
+  --border: #31435f;
+  --border-strong: #5d7191;
+  --panel-border: #31435f;
 
   --text: #f1f5f9;
   --text-muted: #b7c3d6;
@@ -500,9 +548,10 @@
 
   /* The pick — the same argument, and the same blue, chosen again for navy paper. */
   --pick-hover: #202e4a;
-  --pick-bg: #1e3a63;
-  --pick-bg-hover: #27497b;
-  --pick-ink: var(--text);
+  --pick-bg: #1d4ed8;
+  --pick-bg-hover: #2563eb;
+  --pick-ink: #ffffff;
+  --pick-mark-ink: #bfdbfe;
   --pick-line: var(--brand);
 
   --chart-mono: var(--brand);
@@ -530,7 +579,8 @@
   --person-7: #a3e635;
   --person-8: #38bdf8;
 
-  --level-raised: none;
+  --level-raised: 0 1px 2px rgb(0 0 0 / 35%), 0 1px 4px rgb(0 0 0 / 30%);
+  --level-lifted: 0 2px 6px rgb(0 0 0 / 45%), 0 6px 16px rgb(0 0 0 / 40%);
   --level-pop: 0 4px 14px rgb(0 0 0 / 55%), 0 12px 32px rgb(0 0 0 / 60%);
   --shadow: var(--level-raised);
   --shadow-pop: var(--level-pop);
@@ -612,8 +662,12 @@ textarea {
   :root {
     --motion-fast: 0ms;
     --motion-normal: 0ms;
+    --motion-enter: 0ms;
+    --motion-exit: 0ms;
     --motion-beat: 0ms;
     --beats: 0;
+    --rise: 0;
+    --press: 1;
   }
 }
 

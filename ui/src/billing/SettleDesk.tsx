@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Button, Modal, cx, useReport, useToast } from '../kit';
+import { Button, Modal, Segment, cx, useReport, useToast } from '../kit';
 import { call, inApp, subscribe } from '../ipc/call';
 import type { SettleRequestView } from '../ipc/generated/SettleRequestView';
 import { formatMinutes } from './TableGrid';
@@ -165,23 +165,16 @@ export function SettleDesk() {
               <span className="mb-settle__ago"> · {r.minutes === 0 ? 'just now' : `${formatMinutes(r.minutes)} ago`}</span>
             </div>
             <div className="mb-settle__row-actions">
-              <div className="mb-settle__modes" role="radiogroup" aria-label="Paid by">
-                {MODES.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    role="radio"
-                    aria-checked={modeOf(r) === m}
-                    className={cx('mb-settle__mode', modeOf(r) === m && 'mb-settle__mode--on')}
-                    onClick={() => {
-                      setIndex(i);
-                      setModes((was) => ({ ...was, [r.orderId]: m }));
-                    }}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
+              <Segment
+                label="Paid by"
+                className="mb-settle__modes"
+                options={MODES.map((m) => ({ value: m, label: m }))}
+                value={modeOf(r)}
+                onChange={(m) => {
+                  setIndex(i);
+                  setModes((was) => ({ ...was, [r.orderId]: m }));
+                }}
+              />
               <Button size="sm" variant="quiet" disabled={acting} onClick={() => void decline(r)}>
                 Decline
               </Button>

@@ -1,14 +1,5 @@
 /* Buying and the stock count. */
 
-.mb-buying {
-  /* The page margin is the SHELL's. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
-  height: 100%;
-}
-
 /* The count does NOT scroll itself. */
 .mb-count {
   display: flex;

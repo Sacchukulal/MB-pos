@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactNode } from 'react';
 
-import { cx, EmptyState, Icon, Scroller } from '../kit';
+import { Button, cx, EmptyState, Icon, Scroller } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 
 /* The tile brings its own styling. */
@@ -250,15 +250,16 @@ export function Tile({
 
       {/* The corner, and only what this caller actually offers. */}
       {table.orderId && onPrintBill ? (
-        <button
-          type="button"
+        <Button
+          variant="quiet"
+          size="sm"
+          iconOnly
           className="mb-tile__print"
           onClick={onPrintBill}
           title={`Print the bill for table ${table.label}`}
           aria-label={`Print the bill for table ${table.label}`}
-        >
-          <Icon name="printer" size="sm" />
-        </button>
+          icon={<Icon name="printer" size="sm" />}
+        />
       ) : null}
 
       {/*
@@ -266,41 +267,44 @@ export function Tile({
         party's tile is its order, not the table — and only once the table is busy.
       */}
       {onSplit && table.orderId && table.id !== table.orderId ? (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
+          iconOnly
           className="mb-tile__split"
           onClick={onSplit}
           title={`Another party on table ${table.label}`}
           aria-label={`Another party on table ${table.label}`}
-        >
-          <Icon name="plus" size="sm" />
-        </button>
+          icon={<Icon name="plus" size="sm" />}
+        />
       ) : null}
 
       {/* On hover, and on keyboard focus. */}
       {onEdit || onDelete ? (
         <div className="mb-tile__tools">
           {onEdit ? (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
+              iconOnly
               className="mb-tile__tool"
               onClick={onEdit}
               title={`Edit table ${table.label}`}
               aria-label={`Edit table ${table.label}`}
-            >
-              <Icon name="pencil" size="sm" />
-            </button>
+              icon={<Icon name="pencil" size="sm" />}
+            />
           ) : null}
           {onDelete ? (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
+              iconOnly
               className="mb-tile__tool mb-tile__tool--danger"
               onClick={onDelete}
               title={`Delete table ${table.label}`}
               aria-label={`Delete table ${table.label}`}
-            >
-              <Icon name="trash" size="sm" />
-            </button>
+              icon={<Icon name="trash" size="sm" />}
+            />
           ) : null}
         </div>
       ) : null}

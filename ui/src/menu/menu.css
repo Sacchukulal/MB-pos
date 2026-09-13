@@ -108,10 +108,10 @@
   border-radius: var(--radius-md);
   background: transparent;
   color: inherit;
-  font: inherit;
+  font: inherit; /* mb-layout-allow: the category row is a Pick holding its own buttons */
   font-size: var(--text-md);
   text-align: left;
-  cursor: pointer;
+  cursor: pointer; /* mb-layout-allow: the category row is a Pick holding its own buttons */
 }
 
 .mb-menu__catname {

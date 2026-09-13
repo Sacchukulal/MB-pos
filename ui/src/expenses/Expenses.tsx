@@ -143,7 +143,7 @@ export function Expenses() {
       <div className="mb-row mb-expenses__quick">
         <Input
           label="What"
-          className="mb-input--lg"
+          size="lg"
           value={what}
           autoFocus
           onChange={(e) => setWhat(e.target.value)}
@@ -153,7 +153,7 @@ export function Expenses() {
         />
         <MoneyInput
           label="Amount"
-          className="mb-input--sm"
+          size="sm"
           value={amount}
           onChange={setAmount}
           onKeyDown={(e) => {
@@ -162,7 +162,7 @@ export function Expenses() {
         />
         <Select
           label="Category"
-          className="mb-input--md"
+          size="md"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           options={[
@@ -172,7 +172,7 @@ export function Expenses() {
         />
         <Select
           label="How"
-          className="mb-input--sm"
+          size="sm"
           value={mode}
           onChange={(e) => setMode(e.target.value)}
           options={MODES}

@@ -38,6 +38,8 @@ export function Modal({
   wide,
 }: ModalProps) {
   const panel = useRef<HTMLDivElement>(null);
+  const scrim = useRef<HTMLDivElement>(null);
+  const shown = useLeaving(open, scrim);
 
   // Escape closes — the keyboard-first rule (§1) does not stop at the edge of a modal.
   useEffect(() => {
@@ -65,11 +67,12 @@ export function Modal({
     (first ?? panel.current)?.focus();
   }, [open]);
 
-  if (!open) return null;
+  if (shown === 'gone') return null;
 
   return (
     <div
-      className="mb-overlay"
+      ref={scrim}
+      className={cx('mb-overlay', shown === 'leaving' && 'mb-overlay--closing')}
       // Touch closes it too: "every popup closes by touch" (§1).
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -92,6 +95,48 @@ export function Modal({
       </div>
     </div>
   );
+}
+
+/**
+ * Whether a thing that can leave is still on the page.
+ *
+ * A dialog told to close stays mounted for as long as its exit motion runs, so the leaving can
+ * be seen; the motion is the kit's, so this asks the element what is running rather than
+ * knowing a duration. Where nothing runs — a test, reduced motion — it is gone at once.
+ */
+function useLeaving(
+  open: boolean,
+  element: React.RefObject<HTMLElement | null>,
+): 'here' | 'leaving' | 'gone' {
+  const [state, setState] = useState<'here' | 'leaving' | 'gone'>(open ? 'here' : 'gone');
+
+  useEffect(() => {
+    if (open) {
+      setState('here');
+      return undefined;
+    }
+    setState((was) => (was === 'here' ? 'leaving' : was));
+    return undefined;
+  }, [open]);
+
+  useEffect(() => {
+    if (state !== 'leaving') return undefined;
+    const running = element.current?.getAnimations?.({ subtree: true }) ?? [];
+    let cancelled = false;
+    const gone = () => {
+      if (!cancelled) setState('gone');
+    };
+    if (running.length === 0) {
+      gone();
+      return undefined;
+    }
+    void Promise.allSettled(running.map((a) => a.finished)).then(gone);
+    return () => {
+      cancelled = true;
+    };
+  }, [state, element]);
+
+  return state;
 }
 
 export interface ConfirmDialogProps {

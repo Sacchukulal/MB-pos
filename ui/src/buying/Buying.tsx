@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Badge, Button, Card, EmptyState, freshId, Input, Modal, MoneyInput, onlyAmount, PhoneInput, Select, Table, Tabs, useToast, type Column, InfoTip } from '../kit';
+import { Badge, Button, Card, EmptyState, freshId, Input, Modal, MoneyInput, NumberInput, onlyAmount, PhoneInput, Select, Table, Tabs, useToast, type Column, InfoTip } from '../kit';
 import { call, isLicenceRefusal, isUiError } from '../ipc/call';
 import type { BuyingView } from '../ipc/generated/BuyingView';
 import type { BuyMaterialView } from '../ipc/generated/BuyMaterialView';
@@ -738,11 +738,9 @@ function SupplierAccount({
       {/* A correction is a LINE, not an edit. */}
       {fixing ? (
         <div className="mb-row">
-          <Input
+          <NumberInput
             label="By how much"
             value={adjust}
-            inputMode="decimal"
-            className="mb-input--number"
             onChange={(e) => setAdjust(onlyAmount(e.target.value))}
           />
           <Select

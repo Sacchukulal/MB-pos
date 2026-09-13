@@ -856,7 +856,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
       <div className="mb-billbar__type">
         {cart?.orderTypeLocked ? null : (
-          /* Four buttons, the lit one filled — and the small lock for the ← → keys. */
+          /* Four buttons sharing the column, the lit one filled. */
           <div className="mb-ordertype" role="group" aria-label="Order type">
             {ORDER_TYPES.map((kind) => (
               <Button
@@ -867,21 +867,6 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                 {kind}
               </Button>
             ))}
-            <Button
-              variant="quiet"
-              size="sm"
-              iconOnly
-              className="mb-ordertype__lock"
-              aria-pressed={arrowsLocked}
-              title={
-                arrowsLocked
-                  ? 'The ← → keys are locked. Press to let them change the order type again.'
-                  : 'Lock the ← → keys so they cannot change the order type.'
-              }
-              aria-label={arrowsLocked ? 'Unlock the arrow keys' : 'Lock the arrow keys'}
-              onClick={() => setArrowsLocked((was) => !was)}
-              icon={<Icon name="lock" size="sm" />}
-            />
           </div>
         )}
       </div>
@@ -929,12 +914,30 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
         {/* Where this bill is, and its number once it has one. */}
         {/* The bill itself: where it is, and its lines, on one bordered sheet. */}
         <Panel flush className="mb-cart__bill">
-        {cart && (cart.table || cart.billNumber) ? (
+        {cart ? (
           <div className="mb-cart__head">
             <span className="mb-cart__where">
               {cart.table ? `Table ${cart.table}` : cart.orderType}
             </span>
             {cart.billNumber ? <span className="mb-cart__no">{cart.billNumber}</span> : null}
+            {/* The small lock for the ← → keys, beside the bill they would change. */}
+            {cart.orderTypeLocked ? null : (
+              <Button
+                variant="quiet"
+                size="sm"
+                iconOnly
+                className="mb-ordertype__lock"
+                aria-pressed={arrowsLocked}
+                title={
+                  arrowsLocked
+                    ? 'The ← → keys are locked. Press to let them change the order type again.'
+                    : 'Lock the ← → keys so they cannot change the order type.'
+                }
+                aria-label={arrowsLocked ? 'Unlock the arrow keys' : 'Lock the arrow keys'}
+                onClick={() => setArrowsLocked((was) => !was)}
+                icon={<Icon name="lock" size="sm" />}
+              />
+            )}
           </div>
         ) : null}
 
@@ -942,8 +945,9 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           {cart && cart.lines.length > 0 ? (
             cart.lines.map((line) => (
               <div className="mb-cartline" key={line.index}>
-                <div className="mb-cartline__what">
-                  <span className="mb-cartline__name">{line.name}</span>
+                <span className="mb-cartline__name">{line.name}</span>
+                <span className="mb-cartline__amount">{line.amount.text}</span>
+                <div className="mb-cartline__about">
                   {/* The price of one, its tax rate, the extras on it, and any money off. */}
                   <span className="mb-cartline__detail">
                     <span className="mb-cartline__price">{line.unitPrice.text}</span>
@@ -961,6 +965,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                   − qty + and then ✕, in that order, because the quantity is what a cashier
                   changes forty times a shift and the removal is what they do once.
                 */}
+                <div className="mb-cartline__controls">
                 <Stepper
                   label={`Quantity of ${line.name}`}
                   what={line.name}
@@ -999,8 +1004,10 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                   )}
                 </Stepper>
                 {typingQty?.index === line.index && hasScale ? (
-                  <button
-                    type="button"
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    iconOnly
                     className="mb-cartline__tool"
                     title="Take the weight from the scale"
                     aria-label="Take the weight from the scale"
@@ -1018,35 +1025,36 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                         })
                         .catch(report);
                     }}
-                  >
-                    <Icon name="scale" size="sm" />
-                  </button>
+                    icon={<Icon name="scale" size="sm" />}
+                  />
                 ) : null}
-                <span className="mb-cartline__amount">{line.amount.text}</span>
                 {/* Money off this one line — only for whoever may give it. */}
                 {may('bill.discount.line') ? (
-                  <button
-                    type="button"
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    iconOnly
                     className="mb-cartline__tool"
                     title={`Money off ${line.name}`}
                     aria-label={`Money off ${line.name}`}
                     onClick={() => setDiscounting({ line })}
-                  >
-                    <Icon name="tag" size="sm" />
-                  </button>
+                    icon={<Icon name="tag" size="sm" />}
+                  />
                 ) : null}
                 {/* ✕ is a void once the kitchen has been told, and a void is a permission. */}
                 {!cart.kitchenTold || mayVoidLine ? (
-                  <button
-                    type="button"
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    iconOnly
                     className="mb-cartline__tool mb-cartline__tool--remove"
                     title={`Remove ${line.name}`}
                     aria-label={`Remove ${line.name}`}
                     onClick={() => void takeOffTheBill(line)}
-                  >
-                    <Icon name="x" size="sm" />
-                  </button>
+                    icon={<Icon name="x" size="sm" />}
+                  />
                 ) : null}
+                </div>
               </div>
             ))
           ) : (
@@ -1095,20 +1103,22 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             Complete bill
           </Button>
 
-          <button
-            type="button"
+          <Button
+            variant="quiet"
+            size="sm"
             className="mb-actions__toggle"
             aria-expanded={moreActions}
             aria-controls={moreActionsId}
             title={moreActions ? 'Hide the rest' : 'The rest of the actions'}
             onClick={() => setMoreActions((was) => !was)}
-          >
-            <Icon
-              name={moreActions ? 'chevron-up' : 'chevron-down'}
-              size="sm"
-              label={moreActions ? 'Hide the rest' : 'The rest of the actions'}
-            />
-          </button>
+            icon={
+              <Icon
+                name={moreActions ? 'chevron-up' : 'chevron-down'}
+                size="sm"
+                label={moreActions ? 'Hide the rest' : 'The rest of the actions'}
+              />
+            }
+          />
         </div>
 
         {/* The rest, in two lines: the paper first, then what changes the bill. */}

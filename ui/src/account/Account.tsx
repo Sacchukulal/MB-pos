@@ -5,8 +5,10 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Badge,
   Button,
+  Caption,
   ConfirmDialog,
   Fact,
+  Facts,
   Icon,
   Input,
   Modal,
@@ -23,7 +25,6 @@ import { call, isUiError } from '../ipc/call';
 import type { LicenceView } from '../ipc/generated/LicenceView';
 import { Backup } from './Backup';
 import { ChangeLicence } from './ChangeLicence';
-import { Line, Lines } from './Lines';
 import { Version } from './Version';
 
 import './account.css';
@@ -145,7 +146,15 @@ export function Account() {
         }
       />
 
-      <Panel title="Licence" actions={<Badge tone={tone}>{view.chip}</Badge>}>
+      <Panel
+        title="Licence"
+        actions={
+          <>
+            {view.hasLicence ? <Caption>Checked {view.checked}</Caption> : null}
+            <Badge tone={tone}>{view.chip}</Badge>
+          </>
+        }
+      >
         {view.headline !== '' && (
           <Notice
             tone={tone === 'neutral' ? 'info' : tone}
@@ -179,7 +188,7 @@ export function Account() {
 
         {view.hasLicence && (
           <>
-            <dl className="mb-account__grid">
+            <Facts>
               <Fact label="Owner">{view.ownerName || '—'}</Fact>
               <Fact label="Mobile">{view.ownerPhone || '—'}</Fact>
               <Fact label="Plan">{view.planName}</Fact>
@@ -206,22 +215,19 @@ export function Account() {
               </Fact>
               <Fact label="Phones">{view.phonesAllowed}</Fact>
               <Fact label="Tills">{view.tillsAllowed}</Fact>
-            </dl>
-
-            <Lines>
+              {/* The two facts that are a row of words rather than one value. */}
               {view.included.length > 0 ? (
-                <Line label="Includes">
+                <Fact label="Includes" className="mb-account__wide">
                   {view.included.map((feature) => (
                     <Badge key={feature}>{feature}</Badge>
                   ))}
-                </Line>
+                </Fact>
               ) : null}
-              <Line label="Cloud copy">
+              <Fact label="Cloud copy" className="mb-account__wide">
                 <Badge tone={cloudTone}>{CLOUD_WORDS[view.cloudTone] ?? 'Cloud copy'}</Badge>
                 <span>{view.cloudCopy}</span>
-              </Line>
-              <Line label="Last checked">{view.checked}</Line>
-            </Lines>
+              </Fact>
+            </Facts>
 
             <Row end>
               <Button variant="quiet" disabled={busy} onClick={() => setDialog('sign-out')}>

@@ -18,6 +18,7 @@ import {
   Page,
   PageHeader,
   Panel,
+  Pick,
   plural,
   RowMenu,
   Scroller,
@@ -389,15 +390,10 @@ function Categories({
 
       <Scroller inset className="mb-menu__list">
         <div className="mb-menu__categories">
-          <button
-            type="button"
-            className="mb-pick mb-menu__category"
-            aria-current={chosen === null ? 'page' : undefined}
-            onClick={() => onChoose(null)}
-          >
+          <Pick className="mb-menu__category" current={chosen === null} onClick={() => onChoose(null)}>
             <span className="mb-menu__catname">Everything</span>
             <span className="mb-menu__catcount">{total}</span>
-          </button>
+          </Pick>
           {categories.map((category) =>
             renaming?.id === category.id ? (
               <form

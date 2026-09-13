@@ -9,6 +9,7 @@ import {
   EmptyState,
   Icon,
   Locked,
+  Pick,
   Scroller,
   SectionHeader,
   Spinner,
@@ -143,7 +144,7 @@ export function Reports({
   const lines: readonly Line[] = report?.rows.map((cells, at) => ({ at, cells })) ?? [];
 
   return (
-    <div className="mb-reports">
+    <div className="mb-railpage">
       <Scroller inset className="mb-reports__rail">
         {/* At the top and on their own: the dashboard, the bills, and the day itself. */}
         <div className="mb-reports__group">
@@ -154,30 +155,28 @@ export function Reports({
           ]
             .filter((entry) => entry.shown)
             .map((entry) => (
-              <button
-                type="button"
+              <Pick
                 key={entry.id}
-                className="mb-pick mb-reports__pick"
-                aria-current={chosen === entry.id ? 'true' : undefined}
+                className="mb-reports__pick"
+                current={chosen === entry.id}
                 onClick={() => setChosen(entry.id)}
               >
                 {entry.label}
-              </button>
+              </Pick>
             ))}
         </div>
         {groups(list?.reports ?? []).map(([group, entries]) => (
           <div className="mb-reports__group" key={group}>
             <h2 className="mb-reports__grouptitle">{group}</h2>
             {entries.map((entry) => (
-              <button
-                type="button"
+              <Pick
                 key={entry.id}
-                className="mb-pick mb-reports__pick"
-                aria-current={entry.id === chosen ? 'true' : undefined}
+                className="mb-reports__pick"
+                current={entry.id === chosen}
                 onClick={() => setChosen(entry.id)}
               >
                 {entry.title}
-              </button>
+              </Pick>
             ))}
           </div>
         ))}

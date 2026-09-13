@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { Button, EmptyState, Icon, Logo, Modal, plural, useToast, type IconName } from '../kit';
+import { Button, EmptyState, Hint, Icon, Logo, Modal, plural, useToast, type IconName } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
@@ -900,6 +900,7 @@ function TopBar({
         </span>
         <span className="mb-topbar__name">Magic Bill</span>
       </div>
+      <span className="mb-topbar__divider" aria-hidden="true" />
 
       <nav className="mb-nav" aria-label="Screens">
         {inBar.map((item) => (
@@ -931,22 +932,6 @@ function TopBar({
       </nav>
 
       <div className="mb-topbar__tools">
-        {/* Whose till this is, right now. */}
-        {who ? (
-          <button
-            type="button"
-            className="mb-who"
-            onClick={onLock}
-            aria-label={`Signed in as ${who}. Lock the counter (Ctrl+L)`}
-            title="Lock the counter — Ctrl+L"
-          >
-            <Icon name="user" size="sm" />
-            <span className="mb-who__name">{who}</span>
-            {role ? <span className="mb-who__role">{role}</span> : null}
-            <Icon name="lock" size="sm" className="mb-who__lock" />
-          </button>
-        ) : null}
-
         {/* The print queue: only while something is printing, or did not print. */}
         {jobs.length === 0 ? null : (
         <button
@@ -1038,6 +1023,25 @@ function TopBar({
           <Icon name={face} size="lg" />
         </button>
 
+        {/* Whose till this is, right now: the face, the name, the role. */}
+        {who ? (
+          <>
+            <span className="mb-topbar__divider" aria-hidden="true" />
+            <button
+              type="button"
+              className="mb-who"
+              onClick={onLock}
+              aria-label={`Signed in as ${who}${role ? `, ${role}` : ''}. Lock the counter (Ctrl+L)`}
+              title={`${role ? `${role} — ` : ''}Lock the counter — Ctrl+L`}
+            >
+              <span className="mb-who__face" aria-hidden="true">
+                {who.trim().charAt(0).toUpperCase()}
+              </span>
+              <span className="mb-who__name">{who}</span>
+              <Icon name="lock" size="sm" className="mb-who__lock" />
+            </button>
+          </>
+        ) : null}
         <span className="mb-topbar__windows">
           <button
             type="button"
@@ -1128,7 +1132,7 @@ export function PrintQueuePanel({
                   {job.printer} · {job.state}
                 </span>
                 {job.lastError ? (
-                  <span className="mb-field__hint">{job.lastError}</span>
+                  <Hint>{job.lastError}</Hint>
                 ) : null}
               </div>
               {/* Any job can be given up on; only a parked one can be tried again. */}

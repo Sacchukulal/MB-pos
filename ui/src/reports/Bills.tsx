@@ -313,7 +313,7 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           onChange={(event) => setQuery(event.target.value)}
         />
         <Select
-          className="mb-input--sm"
+          size="sm"
           aria-label="Taken by"
           value={cashier}
           onChange={(event) => setCashier(event.target.value)}
@@ -323,14 +323,14 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           ]}
         />
         <Select
-          className="mb-input--sm"
+          size="sm"
           aria-label="State"
           value={state}
           onChange={(event) => setState(event.target.value)}
           options={STATES}
         />
         <Select
-          className="mb-input--sm"
+          size="sm"
           aria-label="Paid by"
           value={mode}
           onChange={(event) => setMode(event.target.value)}

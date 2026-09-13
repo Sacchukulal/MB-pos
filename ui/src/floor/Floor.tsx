@@ -17,6 +17,7 @@ import {
   plural,
   Scroller,
   SectionHeader,
+  Segment,
   Select,
   SideFold,
   Toolbar,
@@ -209,19 +210,12 @@ export function Floor() {
       >
         {/* No rooms, no room picker. */}
         {floor.sections.length > 1 ? (
-          <div className="mb-segment" role="group" aria-label="Which room">
-            {sections.map((name) => (
-              <button
-                key={name}
-                type="button"
-                className="mb-segment__option"
-                aria-pressed={(name === 'All' && section === null) || section === name}
-                onClick={() => setSection(name === 'All' ? null : name)}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
+          <Segment
+            label="Which room"
+            options={sections.map((name) => ({ value: name, label: name }))}
+            value={section ?? 'All'}
+            onChange={(name) => setSection(name === 'All' ? null : name)}
+          />
         ) : null}
       </Toolbar>
 
@@ -472,17 +466,18 @@ function Arrange({
             <li key={s.id} className="mb-arrange__room">
               <span className="mb-arrange__roomname">{s.name}</span>
               <span className="mb-arrange__count">{Number(s.tableCount)}</span>
-              <button
-                type="button"
+              <Button
+                variant="quiet"
+                size="sm"
+                iconOnly
                 className="mb-arrange__drop"
                 title={`Delete the room ${s.name}`}
                 aria-label={`Delete the room ${s.name}`}
                 onClick={() => {
                   call('delete_floor_section', { id: s.id }).then(onChanged).catch(onFailed);
                 }}
-              >
-                <Icon name="trash" size="sm" />
-              </button>
+                icon={<Icon name="trash" size="sm" />}
+              />
             </li>
           ))}
         </ul>

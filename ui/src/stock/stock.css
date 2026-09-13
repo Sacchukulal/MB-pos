@@ -1,14 +1,5 @@
 /* The stock book. */
 
-.mb-stock {
-  /* The page margin is the SHELL's. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
-  height: 100%;
-}
-
 .mb-stock__head {
   flex-wrap: wrap;
   align-items: flex-end;

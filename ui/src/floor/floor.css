@@ -1,12 +1,7 @@
 /* The floor — scope 14.1's plan and 14.3's numbers. */
 
+/* The PAGE does not scroll: the rooms and the arranging panel each scroll on their own. */
 .mb-floor {
-  /* The page margin is the SHELL's. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
-  height: 100%;
   overflow: hidden;
 }
 
@@ -147,24 +142,6 @@
   color: var(--text-muted);
 }
 
-.mb-arrange__drop {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-1);
-  background: none;
-  color: var(--text-faint);
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-/* Destructive is a semantic colour and never the accent. */
-.mb-arrange__drop:hover {
-  color: var(--danger);
-  background: var(--danger-soft);
-}
-
 /* The ticked bar. */
 
 /* It appears because something is ticked. */
@@ -236,4 +213,10 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-2);
+}
+
+/* Destructive is a semantic colour and never the accent. */
+.mb-arrange__drop:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-soft);
 }

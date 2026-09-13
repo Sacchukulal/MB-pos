@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { Button, Card, Checkbox, Choice, SectionHeader, Select, Spinner, Table, useToast, type Column } from '../kit';
+import { Button, Card, Checkbox, Choice, Hint, SectionHeader, Select, Spinner, Table, useToast, type Column } from '../kit';
 import { call, inApp, isUiError } from '../ipc/call';
 import type { PrintersView } from '../ipc/generated/PrintersView';
 import type { RouteView } from '../ipc/generated/RouteView';
@@ -144,9 +144,9 @@ export function Printers() {
                 Alignment slip
               </Button>
               <span className="mb-printers__nudge" role="group" aria-label="Nudge the print">
-                <span className="mb-field__hint">
+                <Hint>
                   {signed(bill.offsetXMm)} mm across, {signed(bill.offsetYMm)} mm down
-                </span>
+                </Hint>
                 {(
                   [
                     ['← 1 mm', -1, 0, 'Move the print 1 mm left'],

@@ -43,9 +43,9 @@
   color: var(--text);
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
-  font: inherit;
+  font: inherit; /* mb-layout-allow: the kitchen screen is touched by a cook, and its cards are its controls */
   font-size: var(--text-lg);
-  cursor: pointer;
+  cursor: pointer; /* mb-layout-allow: the kitchen screen is touched by a cook, and its cards are its controls */
 }
 
 .mb-kds__tab--on {
@@ -129,7 +129,7 @@
  */
 .mb-kds__card--printed {
   border-left-color: var(--text-muted);
-  opacity: 0.72;
+  opacity: var(--dim-quiet);
 }
 
 /* The one thing on this screen allowed to shout. */
@@ -223,10 +223,10 @@
   border: none;
   background: none;
   padding: var(--space-1) 0;
-  font: inherit;
+  font: inherit; /* mb-layout-allow: the kitchen screen is touched by a cook, and its cards are its controls */
   color: inherit;
   text-align: left;
-  cursor: pointer;
+  cursor: pointer; /* mb-layout-allow: the kitchen screen is touched by a cook, and its cards are its controls */
 }
 
 .mb-kds__qty {
@@ -279,10 +279,10 @@
   background: none;
   padding: var(--space-2) var(--space-3);
   min-height: var(--control-md);
-  font: inherit;
+  font: inherit; /* mb-layout-allow: the kitchen screen is touched by a cook, and its cards are its controls */
   font-size: var(--text-sm);
   color: var(--text-muted);
-  cursor: pointer;
+  cursor: pointer; /* mb-layout-allow: the kitchen screen is touched by a cook, and its cards are its controls */
 }
 
 .mb-kds__recall:hover {

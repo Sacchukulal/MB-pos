@@ -435,3 +435,8 @@ export function DateRangePicker({
     </div>
   );
 }
+
+/** The quiet line under a control or a row: the explanation, the last error, the detail. */
+export function Hint({ children, className }: { children: ReactNode; className?: string }) {
+  return <span className={cx('mb-field__hint', className)}>{children}</span>;
+}

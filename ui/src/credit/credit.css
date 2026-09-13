@@ -1,16 +1,7 @@
 /* Customers and what they owe. */
 
+/* The PAGE does not scroll: the panel and the list each scroll on their own, like the floor. */
 .mb-credit {
-  /* The page margin is the SHELL's. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
-  height: 100%;
-  /*
-   * The PAGE does not scroll: the panel and the list each scroll on their own, the same way the
-   * floor works.
-   */
   overflow: hidden;
 }
 

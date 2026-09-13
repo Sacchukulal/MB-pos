@@ -1,13 +1,5 @@
 /* The Phones page: the road's state, the phones on the counter, and the Add phone dialog. */
 
-.mb-phones-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-group);
-  min-height: 0;
-  height: 100%;
-}
-
 .mb-phones__label {
   margin: 0;
   font-size: var(--type-caption);

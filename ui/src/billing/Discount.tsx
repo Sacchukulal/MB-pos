@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { Button, Input, Modal, Select, onlyAmount } from '../kit';
+import { Button, Input, Modal, NumberInput, Select, onlyAmount } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { CartView } from '../ipc/generated/CartView';
@@ -117,7 +117,7 @@ export function DiscountDialog({
         }}
       />
       {/* Money and a percentage are the same characters and not the same thing. */}
-      <Input
+      <NumberInput
         label={kind === 'percent' ? 'Per cent' : 'Rupees'}
         prefix={kind === 'percent' ? undefined : '₹'}
         hint={
@@ -129,8 +129,6 @@ export function DiscountDialog({
         }
         value={value}
         autoFocus
-        inputMode="decimal"
-        className="mb-input--money"
         error={problem ?? undefined}
         onChange={(event) => {
           setValue(onlyAmount(event.target.value));

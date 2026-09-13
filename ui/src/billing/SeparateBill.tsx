@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { Button, Modal, Notice, Numeric, onlyAmount, Input } from '../kit';
+import { Button, Hint, Modal, Notice, NumberInput, Numeric, onlyAmount } from '../kit';
 import { call } from '../ipc/call';
 import type { CartView } from '../ipc/generated/CartView';
 
@@ -34,23 +34,21 @@ export function SeparateBill({
         </Notice>
       ) : (
         <>
-          <p className="mb-field__hint">
+          <Hint>
             Type how many of each item move across. The new bill gets its own
             number and sits at the same table. The kitchen is not told again —
             the food is already cooking.
-          </p>
+          </Hint>
 
           <ul className="mb-split__lines">
             {cart.lines.map((line) => (
               <li key={line.index} className="mb-split__line">
                 <span className="mb-split__name">{line.name}</span>
                 <Numeric>{line.qty}</Numeric>
-                <Input
+                <NumberInput
                   label="Move"
                   value={moving[line.index] ?? ''}
-                  inputMode="decimal"
                   placeholder="0"
-                  className="mb-input--number"
                   onChange={(event) =>
                     setMoving({
                       ...moving,

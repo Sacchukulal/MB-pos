@@ -1,35 +1,10 @@
 /* The Account page: the licence across the top, then backup beside the version. */
 
-.mb-account {
-  /* The page margin is the SHELL's. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-group);
-  min-height: 0;
-  height: 100%;
-}
-
 /* A panel's body is a column of groups. */
 .mb-account .mb-panel__body {
   display: flex;
   flex-direction: column;
   gap: var(--gap-group);
-}
-
-/* Each panel settles into place as it arrives. */
-.mb-account .mb-panel {
-  animation: mb-account-in var(--motion-normal) var(--ease) both;
-}
-
-@keyframes mb-account-in {
-  from {
-    opacity: 0;
-    transform: translateY(var(--space-1));
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 /* Backup takes the room; the version stands beside it. */
@@ -46,12 +21,18 @@
   }
 }
 
-/* The licence facts: four to a row, every row the same four columns. */
-.mb-account__grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--gap-field) var(--gap-group);
-  margin: 0;
+/* A fact that is a row of words — the plan's parts, the cloud copy's state — takes two columns. */
+.mb-account__wide {
+  grid-column: span 2;
+}
+
+.mb-account__wide dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-inline);
+  font-size: var(--type-body);
+  font-weight: var(--weight-normal);
 }
 
 /* The key and its copy button on one line. */
@@ -212,10 +193,4 @@
   display: flex;
   justify-content: space-between;
   font-weight: var(--weight-medium);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mb-account .mb-panel {
-    animation: none;
-  }
 }
