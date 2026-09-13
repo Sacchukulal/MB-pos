@@ -41,7 +41,8 @@ import { PutOnAccount } from '../credit/Credit';
 import { ReasonDialog } from '../corrections/Reason';
 import { DiscountDialog } from './Discount';
 import { Processing, ProcessingHead, processingOrders } from './Processing';
-import { SeparateBill } from './SeparateBill';
+import { MergeBill } from './MergeBill';
+import { SplitBill } from './SplitBill';
 import { TableGrid } from './TableGrid';
 import { Totals } from './Totals';
 import { Before } from '../preview/Before';
@@ -74,11 +75,10 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const [typingQty, setTypingQty] = useState<{ index: number; text: string } | null>(null);
   /** The reason for cancelling a parked order. */
   const [cancelReason, setCancelReason] = useState(false);
-  /**
-   * Moving some of the food onto a second bill — the only part of the old "Split" dialog that
-   * still needs a screen.
-   */
+  /** Some of the food goes onto a second bill. */
   const [splitting, setSplitting] = useState(false);
+  /** Another open order's food joins this bill. */
+  const [merging, setMerging] = useState(false);
   /** Money off this bill — or off the one line named. */
   const [discounting, setDiscounting] = useState<{ line: CartLineView | null } | null>(null);
   // The customer picker for a bill going on an account.
@@ -1161,12 +1161,16 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
               {cart && cart.bill.billDiscount.paise > 0n ? 'Change discount' : 'Discount'}
             </Button>
           ) : null}
+          {/* Both need an order on disk: two bills, or one bill from two. */}
           <Button
             size="sm"
             disabled={!cart || cart.isEmpty || !cart.orderId}
             onClick={() => setSplitting(true)}
           >
-            Separate bill
+            Split bill
+          </Button>
+          <Button size="sm" disabled={!cart || !cart.orderId} onClick={() => setMerging(true)}>
+            Merge bill
           </Button>
           {/*
             A parked order is cancelled with a reason, and cancelling is a permission; a typed
@@ -1225,7 +1229,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       ) : null}
 
       {splitting && cart ? (
-        <SeparateBill
+        <SplitBill
           cart={cart}
           onClose={() => {
             setSplitting(false);
@@ -1238,6 +1242,23 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             toast.show('ok', said);
             call('current_cart').then(setCart).catch(report);
             void refreshFloor();
+          }}
+          onFailed={report}
+        />
+      ) : null}
+
+      {merging && cart ? (
+        <MergeBill
+          cart={cart}
+          orders={tables}
+          onClose={() => setMerging(false)}
+          onMerged={(said) => {
+            setMerging(false);
+            toast.show('ok', said);
+            // Rust let go of the cart when the two became one; the survivor comes back onto
+            // the counter with the other's food on it.
+            const survivor = cart.orderId;
+            if (survivor) void openOrderById(survivor);
           }}
           onFailed={report}
         />
