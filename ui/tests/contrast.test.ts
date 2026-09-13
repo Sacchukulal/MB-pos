@@ -89,8 +89,14 @@ const PAIRS: readonly { ink: string; ground: string; least: number }[] = [
   { ink: '--pick-ink', ground: '--pick-bg', least: 4.5 },
   { ink: '--pick-ink', ground: '--pick-bg-hover', least: 4.5 },
   { ink: '--text', ground: '--pick-hover', least: 4.5 },
-  // The marker down its left edge, on the fill it is drawn over.
-  { ink: '--pick-mark-ink', ground: '--pick-bg', least: 3 },
+  // The quiet second line on the fill: a role under a name, a timer under a table.
+  { ink: '--pick-ink-quiet', ground: '--pick-bg', least: 4.5 },
+  // Ticked: the tint keeps every word readable, and its line is seen against the page.
+  { ink: '--text', ground: '--pick-tint', least: 4.5 },
+  { ink: '--pick-line', ground: '--bg', least: 3 },
+  // The keyboard's ring, on the page and on a panel.
+  { ink: '--focus-ring', ground: '--surface', least: 3 },
+  { ink: '--focus-ring', ground: '--bg', least: 3 },
 
   { ink: '--border-strong', ground: '--surface', least: 3 },
   { ink: '--border-strong', ground: '--bg', least: 3 },

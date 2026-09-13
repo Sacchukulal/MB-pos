@@ -25,7 +25,6 @@ import { call, isUiError } from '../ipc/call';
 import type { LicenceView } from '../ipc/generated/LicenceView';
 import { Backup } from './Backup';
 import { ChangeLicence } from './ChangeLicence';
-import { Version } from './Version';
 
 import './account.css';
 
@@ -241,10 +240,7 @@ export function Account() {
         )}
       </Panel>
 
-      <div className="mb-account__two">
-        <Backup />
-        <Version />
-      </div>
+      <Backup />
 
       <ChangeLicence
         open={dialog === 'change'}

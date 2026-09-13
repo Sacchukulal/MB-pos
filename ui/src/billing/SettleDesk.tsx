@@ -149,7 +149,7 @@ export function SettleDesk() {
         {requests.map((r, i) => (
           <li
             key={r.orderId}
-            className={cx('mb-settle__row', i === index && 'mb-settle__row--on')}
+            className={cx('mb-settle__row', i === index && 'mb-chosen')}
             onClick={() => setIndex(i)}
             aria-current={i === index ? 'true' : undefined}
           >

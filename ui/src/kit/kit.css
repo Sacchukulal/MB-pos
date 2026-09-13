@@ -214,16 +214,29 @@
 }
 
 /*
- * The one in force. A fill that is SEEN: the old chosen row wore the panel's own grey, which on
- * a white sheet was no row at all.
+ * A CHOSEN ROW — the one in force in a list: read off its ARIA state. The accent fill, its
+ * ink, bold words: the same fill as the chosen tab in the top bar, so "this is the one" is
+ * one word everywhere a list is.
+ *
+ * The text tokens are re-pointed for everything inside, so a role under a name or a green
+ * price is drawn in the fill's ink without any screen listing its children. The semantic inks
+ * come along too: red or green on navy is unreadable, and the chosen row is the one the
+ * cashier is already looking at.
  */
 .mb-pick[aria-current='page'],
 .mb-pick[aria-current='true'],
 .mb-pick[aria-selected='true'],
 .mb-button--list[aria-current='page'],
 .mb-button--list[aria-current='true'] {
+  --text: var(--pick-ink);
+  --text-muted: var(--pick-ink-quiet);
+  --text-faint: var(--pick-ink-quiet);
+  --ok: var(--pick-ink);
+  --danger: var(--pick-ink);
+  --warn: var(--pick-ink);
   background: var(--pick-bg);
   color: var(--pick-ink);
+  border-color: var(--pick-bg);
   font-weight: var(--weight-bold);
 }
 
@@ -233,26 +246,113 @@
 .mb-button--list[aria-current='page']:hover,
 .mb-button--list[aria-current='true']:hover {
   background: var(--pick-bg-hover);
+  border-color: var(--pick-bg-hover);
   color: var(--pick-ink);
 }
 
+/* The keyboard on the chosen row: the ring is drawn in the ink, since the fill is the accent. */
+.mb-pick[aria-current='page']:focus-visible,
+.mb-pick[aria-current='true']:focus-visible,
+.mb-pick[aria-selected='true']:focus-visible,
+.mb-button--list[aria-current='page']:focus-visible,
+.mb-button--list[aria-current='true']:focus-visible {
+  outline: var(--focus-ring-width) solid var(--pick-ink);
+  outline-offset: var(--focus-ring-inset);
+}
+
 /*
- * The marker. Colour is never the only signal, and a tint is easy to lose halfway down a long
- * list — so the chosen row carries a shape as well.
+ * A CHOSEN CARD and a TICKED CARD — a table tile, an order card, a settle card. The tint and
+ * the pick line, the look the owner chose on the Floor; the card's own words stay its own.
+ * Chosen is the ONE the till is on; ticked is one of several for a bulk action, and carries a
+ * tick as well (`mb-tick`). The line is an inset outline so it never moves the box, and never
+ * erases a stripe drawn in the shadow.
+ *
+ * A STATE OUTRANKS A LAYOUT. The state classes are written twice on purpose: a screen's sheet
+ * loads with the screen, after this one, and its one-class rule (`.mb-tile--free`, an order
+ * card's own fill) would otherwise paint over the state by coming later. Two classes beat
+ * one whatever order the sheets arrive in, and no screen has to know.
  */
-.mb-pick[aria-current='page']::before,
-.mb-pick[aria-current='true']::before,
-.mb-pick[aria-selected='true']::before,
-.mb-button--list[aria-current='page']::before,
-.mb-button--list[aria-current='true']::before {
+.mb-chosen.mb-chosen,
+.mb-ticked.mb-ticked {
+  background: var(--pick-tint);
+  border-color: var(--pick-line);
+  outline: var(--pick-ring) solid var(--pick-line);
+  outline-offset: calc(var(--pick-ring) * -1);
+}
+
+.mb-chosen.mb-chosen:hover,
+.mb-ticked.mb-ticked:hover {
+  background: var(--pick-tint);
+}
+
+/* The keyboard on a chosen card: the ring stands OUTSIDE the line, so the two are both seen. */
+.mb-chosen.mb-chosen:focus-visible,
+.mb-chosen.mb-chosen:has(:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-width);
+}
+
+/*
+ * The tick itself: a round box drawn on a card. Empty it is a ring; ticked it is the pick
+ * fill with a check inside. Where it sits on the card is the card's business.
+ */
+.mb-tick {
+  position: relative;
+  width: var(--tick-size);
+  height: var(--tick-size);
+  padding: 0;
+  background: var(--surface);
+  border: var(--border-width-thick) solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease);
+}
+
+.mb-tick:hover {
+  border-color: var(--pick-line);
+}
+
+.mb-tick[aria-checked='true'] {
+  background: var(--pick-bg);
+  border-color: var(--pick-bg);
+}
+
+/* The check: two sides of a box, turned. Drawn, not an icon, so it is one element. */
+.mb-tick[aria-checked='true']::after {
   content: '';
   position: absolute;
-  left: var(--pick-mark-inset);
-  top: var(--pick-mark-short);
-  bottom: var(--pick-mark-short);
-  width: var(--pick-mark);
+  left: 50%;
+  top: 46%;
+  width: 28%;
+  height: 52%;
+  border: solid var(--pick-ink);
+  border-width: 0 var(--border-width-thick) var(--border-width-thick) 0;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+/*
+ * A dot beside a timer: a state said as a shape the width of a letter. The late one breathes,
+ * slowly, for as long as it is late — one dot, not a red box round the whole card.
+ */
+.mb-dot {
+  display: inline-block;
+  flex: none;
+  width: var(--dot-size);
+  height: var(--dot-size);
   border-radius: var(--radius-pill);
-  background: var(--pick-mark-ink);
+  background: var(--border-strong);
+  vertical-align: middle;
+}
+
+.mb-dot--warn {
+  background: var(--warn);
+}
+
+.mb-dot--late {
+  background: var(--danger);
+  animation: mb-breathe var(--motion-breathe) var(--ease) infinite;
 }
 
 /*
@@ -313,11 +413,15 @@
   display: inline-flex;
 }
 
+/*
+ * Placed against the window from the button's corner (`--rowmenu-x/y`, set by the component
+ * when it opens), so a table's scrolling edge never cuts it off; over a dialog too.
+ */
 .mb-rowmenu__sheet {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  right: 0;
-  z-index: var(--layer-panel);
+  position: fixed;
+  top: calc(var(--rowmenu-y) + var(--space-1));
+  right: calc(100vw - var(--rowmenu-x));
+  z-index: var(--layer-dropdown);
   min-width: 11rem; /* mb-tokens-allow: the sheet hugs its longest word, and 11rem is that */
 }
 
@@ -329,8 +433,36 @@
 /* A menu near the bottom of the screen opens UPWARD, so it is never cut off by the window. */
 .mb-rowmenu__sheet--up {
   top: auto;
-  bottom: calc(100% + var(--space-1));
+  bottom: calc(100vh - var(--rowmenu-y) + var(--space-1));
   animation-name: mb-rise;
+}
+
+/*
+ * A face: the first letter of a name in a round accent fill — in the top bar, on the lock
+ * screen. On a chosen row it turns inside out, so it is still a face on the fill.
+ */
+.mb-face {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+}
+
+.mb-pick[aria-current='true'] .mb-face,
+.mb-pick[aria-current='page'] .mb-face,
+.mb-pick[aria-selected='true'] .mb-face,
+.mb-button--list[aria-current='true'] .mb-face,
+.mb-button--list[aria-current='page'] .mb-face {
+  background: var(--pick-ink);
+  color: var(--pick-bg);
 }
 
 /* A menu whose button carries a word ("Card") as well as the arrow. */
@@ -787,23 +919,36 @@ textarea.mb-input {
   animation: mb-rise var(--motion-enter) var(--ease-out);
 }
 
+/*
+ * Three widths, by job. A one-question dialog (how many, which table) is narrow, so its box
+ * and its two buttons fill it; a form is the everyday width; a sheet of rows is wide.
+ */
+.mb-modal--small {
+  max-width: var(--modal-width-sm);
+}
+
 .mb-modal--wide {
   max-width: none;
   width: var(--modal-width-wide);
 }
 
+/*
+ * The three parts share ONE side margin, and the head and the body are one block: a title
+ * is the first line of what it titles, not a strip of its own.
+ */
 .mb-modal__head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
-  padding: var(--space-4) var(--space-5) 0;
+  padding: var(--space-5) var(--space-5) 0;
 }
 
 .mb-modal__title {
   margin: 0;
   font-size: var(--text-lg);
   font-weight: var(--weight-bold);
+  line-height: var(--line-tight);
   flex-shrink: 0;
 }
 
@@ -811,14 +956,17 @@ textarea.mb-input {
   display: flex;
   flex-direction: column;
   gap: var(--gap-field);
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--space-5) var(--space-5);
   color: var(--text);
   white-space: pre-line;
   min-height: 0;
   overflow-y: auto;
 }
 
-/* The way out, always in view. */
+/*
+ * The way out, always in view: a quiet foot on the inner surface, the primary last, and every
+ * button at least a hand wide so Cancel and Open stand as a pair rather than two words.
+ */
 .mb-modal__actions {
   display: flex;
   flex-wrap: wrap;
@@ -826,7 +974,18 @@ textarea.mb-input {
   gap: var(--space-2);
   flex-shrink: 0;
   padding: var(--space-3) var(--space-5);
+  background: var(--surface-2);
   border-top: var(--border-width) solid var(--border);
+}
+
+.mb-modal__actions .mb-button {
+  min-width: var(--button-min);
+}
+
+/* A one-question dialog is answered by hand as often as by key: its buttons are touch-sized. */
+.mb-modal--small .mb-modal__actions .mb-button {
+  height: var(--control-lg);
+  flex: 1;
 }
 
 /* Toasts: ONE system, stacked. */
@@ -1675,5 +1834,12 @@ textarea.mb-input {
   from {
     opacity: 0;
     transform: translateX(calc(var(--rise) * -1));
+  }
+}
+
+/* The late dot: full, then half there, then full — a breath, not a blink. */
+@keyframes mb-breathe {
+  50% {
+    opacity: var(--dim-faint);
   }
 }

@@ -534,9 +534,9 @@
   color: var(--text-muted);
 }
 
-/* The icon goes with the words: on the screen you are on, it wears the mark's own colour. */
+/* The icon goes with the words: on the screen you are on, it wears the fill's own ink. */
 .mb-rail__item[aria-current='page'] .mb-rail__icon {
-  color: var(--pick-mark-ink);
+  color: var(--pick-ink);
 }
 
 .mb-rail__label {

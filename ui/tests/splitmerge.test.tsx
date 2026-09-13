@@ -106,6 +106,7 @@ function cart(over: Partial<CartView> = {}): CartView {
     lengthSays: '',
     orderTypeLocked: true,
     kitchenTicketOff: false,
+    tablesOnCounter: true,
     ...over,
   };
 }
@@ -201,6 +202,7 @@ describe('split bill', () => {
     lateMinutes: 30,
     hasLayout: false,
     canArrange: false,
+    tablesOnCounter: true,
   };
 
   it('moves the typed quantities to a new bill on the same table by default', async () => {

@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -25,6 +26,8 @@ export interface ModalProps {
   onClose: () => void;
   children?: ReactNode;
   actions?: ReactNode;
+  /** One question and two buttons: the narrow box. */
+  small?: boolean;
   wide?: boolean;
 }
 
@@ -35,6 +38,7 @@ export function Modal({
   onClose,
   children,
   actions,
+  small,
   wide,
 }: ModalProps) {
   const panel = useRef<HTMLDivElement>(null);
@@ -80,7 +84,7 @@ export function Modal({
     >
       <div
         ref={panel}
-        className={cx('mb-modal', wide && 'mb-modal--wide')}
+        className={cx('mb-modal', small && 'mb-modal--small', wide && 'mb-modal--wide')}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -319,9 +323,13 @@ export function useReport(): (cause: unknown) => void {
 /**
  * The ⋯ that holds the rest of a row's actions. The commands do not change; the buttons do.
  *
- * With `text` it is a word and an arrow ("Card ▾") rather than a bare mark, and with `up` the
- * sheet opens above the button — for a menu near the bottom of the screen.
+ * With `text` it is a word and an arrow ("Card ▾") rather than a bare mark. The sheet is placed
+ * against the WINDOW, not inside the row: a row lives in a scrolling table, and a sheet hung
+ * inside it was cut off by the table's edge for the last rows. Near the bottom of the window
+ * it opens upward by itself; `up` forces that.
  */
+/** Below this much room under the button, the sheet opens upward instead. */
+const SHEET_ROOM_REM = 12;
 export function RowMenu({
   label = 'More',
   children,
@@ -348,6 +356,18 @@ export function RowMenu({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const sheet = useRef<HTMLDivElement>(null);
+  /** Where the button is when the sheet opens, and which way the sheet goes from it. */
+  const [place, setPlace] = useState<{ x: number; y: number; up: boolean } | null>(null);
+  /** Where the button is right now, and which way the sheet should go from it. */
+  const measure = useCallback(() => {
+    const box = anchor.current?.getBoundingClientRect();
+    if (!box) return null;
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const flip = up ?? window.innerHeight - box.bottom < SHEET_ROOM_REM * rem;
+    return { x: box.right, y: flip ? box.top : box.bottom, up: flip };
+  }, [up]);
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (event: KeyboardEvent) => {
@@ -356,11 +376,36 @@ export function RowMenu({
         setOpen(false);
       }
     };
+    // The page moved under it: the sheet follows its button rather than hanging in the air.
+    const onMove = () => setPlace(measure());
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
+    document.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open, measure]);
+  // The sheet reads its place from two custom properties, set here rather than as an inline
+  // style: the kit's sheet rule owns everything else about how it looks.
+  useLayoutEffect(() => {
+    if (!open || !place || !sheet.current) return;
+    sheet.current.style.setProperty('--rowmenu-x', `${place.x}px`);
+    sheet.current.style.setProperty('--rowmenu-y', `${place.y}px`);
+  }, [open, place]);
+  const toggle = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const at = measure();
+    if (!at) return;
+    setPlace(at);
+    setOpen(true);
+  };
   return (
-    <span className={cx('mb-rowmenu', className)}>
+    <span className={cx('mb-rowmenu', className)} ref={anchor}>
       <Button
         variant={text === undefined ? 'quiet' : 'secondary'}
         size={size}
@@ -371,7 +416,7 @@ export function RowMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-pressed={pressed}
-        onClick={() => setOpen((was) => !was)}
+        onClick={toggle}
         icon={text === undefined ? <Icon name={icon} size="sm" /> : undefined}
       >
         {text}
@@ -387,7 +432,8 @@ export function RowMenu({
           />
           {/* A press inside lands on the button and then closes the sheet. */}
           <div
-            className={cx('mb-sheet mb-rowmenu__sheet', up && 'mb-rowmenu__sheet--up')}
+            ref={sheet}
+            className={cx('mb-sheet mb-rowmenu__sheet', place?.up && 'mb-rowmenu__sheet--up')}
             role="menu"
             onClick={() => setOpen(false)}
           >

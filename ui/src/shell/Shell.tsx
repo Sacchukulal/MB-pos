@@ -1034,7 +1034,7 @@ function TopBar({
               aria-label={`Signed in as ${who}${role ? `, ${role}` : ''}. Lock the counter (Ctrl+L)`}
               title={`${role ? `${role} — ` : ''}Lock the counter — Ctrl+L`}
             >
-              <span className="mb-who__face" aria-hidden="true">
+              <span className="mb-face" aria-hidden="true">
                 {who.trim().charAt(0).toUpperCase()}
               </span>
               <span className="mb-who__name">{who}</span>

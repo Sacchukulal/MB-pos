@@ -32,10 +32,10 @@
   min-width: 0;
 }
 
-/* The search box is FIRST, and it is one width. */
+/* The search box is FIRST, and it is one width: a find box, not the whole bar. */
 .mb-billbar__search {
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 1 var(--find-width);
   min-width: var(--field-md);
 }
 
@@ -65,6 +65,12 @@
   grid-template-columns: minmax(0, 1fr) var(--queue-width);
   column-gap: var(--queue-gap);
   transition: none;
+}
+
+/* The tables are off this screen: the orders being cooked take the whole column. */
+.mb-billing__floorrow--orders-only {
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 0;
 }
 
 /* The order type takes the cart's column, and exactly the cart's width. */
@@ -274,25 +280,10 @@
 
 /* WAITING sits between the two and is set further down the file. */
 
-/* SELECTED: the tile the cashier is on. */
-.mb-tile--selected {
-  background: var(--pick-bg);
-  color: var(--pick-ink);
-  border-color: var(--pick-bg);
-  outline: var(--focus-ring-width) solid var(--pick-mark-ink);
-  outline-offset: var(--focus-ring-inset);
-}
-
-/* Everything quiet on the tile stays quiet on the fill: white, a little faded. */
-.mb-tile--selected .mb-tile__meta,
-.mb-tile--selected .mb-tile__seatsline,
-.mb-tile--selected .mb-tile__by,
-.mb-tile--selected .mb-tile__seats,
-.mb-tile--selected .mb-tile__food,
-.mb-tile--selected .mb-tile__print {
-  color: var(--pick-ink);
-  opacity: var(--dim-quiet);
-}
+/*
+ * SELECTED and TICKED are the kit's `mb-chosen` and `mb-ticked` (kit.css): the tile says
+ * nothing about how it looks when chosen, so it looks the same as a chosen order card.
+ */
 
 /*
  * The state's own inset stripe has to survive the ring, and `box-shadow` is one property — so a
@@ -375,40 +366,25 @@
   background: var(--danger-soft);
 }
 
-/* PICKED: ticked for a bulk action. */
-.mb-tile--picked {
-  background: var(--pick-bg);
-  border-color: var(--pick-line);
-  color: var(--pick-ink);
-}
-
-/* The tick, so "ticked" is a shape and not only a colour. */
+/*
+ * The tick, top left, so "ticked" is a shape and not only a colour. The look is the kit's
+ * `mb-tick`; only WHERE it sits, and that it hides until the tile is hovered, is decided here.
+ */
 .mb-tile__tick {
   position: absolute;
   top: var(--space-1);
   left: var(--space-1);
-  width: var(--space-3);
-  height: var(--space-3);
-  padding: 0;
-  background: var(--surface);
-  border: var(--border-width-thick) solid var(--border-strong);
-  border-radius: var(--radius-pill);
-  cursor: pointer; /* mb-layout-allow: a checkbox drawn as a circle on the tile */
   /* Hidden until the tile is hovered — see the reveal rule above. */
   opacity: 0;
-  transition: opacity var(--motion-fast) var(--ease);
+  transition:
+    opacity var(--motion-fast) var(--ease),
+    background-color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease);
 }
 
-.mb-tile__tick:hover {
-  border-color: var(--accent);
-}
-
-/* Ticked: filled, and it stays visible after the pointer leaves. */
-.mb-tile--picked .mb-tile__tick {
+/* Ticked, it stays visible after the pointer leaves. */
+.mb-ticked .mb-tile__tick {
   opacity: 1;
-  background: var(--accent);
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 var(--border-width-thick) var(--accent-ink);
 }
 
 .mb-tile__amount {
@@ -587,18 +563,7 @@
   cursor: pointer; /* mb-layout-allow: a settle card that is chosen as a whole */
 }
 
-.mb-settle__row--on {
-  border-color: var(--pick-bg);
-  background: var(--pick-bg);
-  color: var(--pick-ink);
-}
-
-.mb-settle__row--on .mb-settle__token,
-.mb-settle__row--on .mb-settle__says,
-.mb-settle__row--on .mb-settle__ago {
-  color: var(--pick-ink);
-  opacity: var(--dim-quiet);
-}
+/* The chosen request is the kit's `mb-chosen`. */
 
 .mb-settle__head {
   display: flex;
@@ -752,33 +717,15 @@
   border-color: var(--border-strong);
 }
 
-/* The same stripes as the tile — amber waiting, red late — so it is a shape before a colour. */
-.mb-processing__order--waiting {
-  box-shadow: inset var(--tile-stripe) 0 0 0 var(--warn);
-}
-
-.mb-processing__order--late {
-  border-color: var(--danger);
-  box-shadow: inset var(--tile-stripe) 0 0 0 var(--danger);
-}
-
-/* The one the cart is on. */
-.mb-processing__order--on,
-.mb-processing__order--on:hover {
-  background: var(--pick-bg);
-  color: var(--pick-ink);
-  border-color: var(--pick-bg);
-}
-
-.mb-processing__order--on .mb-processing__timer,
-.mb-processing__order--on .mb-processing__no {
-  color: var(--pick-ink);
-  opacity: var(--dim-quiet);
-}
+/*
+ * Waiting and late are a dot beside the timer (the kit's `mb-dot`), not a stripe or a red
+ * box: on a card that may also be chosen, one small shape says it without fighting the fill.
+ * The one the cart is on is the kit's `mb-chosen`.
+ */
 
 /* The one the arrow keys are on: a ring on the edge, the same ring focus draws. */
 .mb-processing__order--highlighted {
-  outline: var(--focus-ring-width) solid var(--pick-line);
+  outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-inset);
 }
 
@@ -790,6 +737,10 @@
 }
 
 .mb-processing__timer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--gap-inline);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
@@ -891,17 +842,25 @@
 }
 
 /* One line: what, the stepper, how much, and the way off the bill. */
+/*
+ * ONE ROW: the name, the − n + and its tools, the money. The price of one and the tax rate are
+ * not repeated under every line (owner, 2026-09-13: "eating too much space"); a second row
+ * appears only when the line has something to say — more than one, an extra, a note, money off.
+ */
 .mb-cartline {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    'name amount'
-    'about controls';
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: 'name controls amount';
   align-items: center;
   column-gap: var(--space-3);
-  row-gap: var(--space-1);
   padding: var(--space-2);
   border-radius: var(--radius-sm);
+}
+.mb-cartline--more {
+  grid-template-areas:
+    'name controls amount'
+    'about about about';
+  row-gap: var(--space-1);
 }
 
 .mb-cartline:hover {
@@ -982,11 +941,6 @@
   white-space: nowrap;
 }
 
-.mb-cartline__tool--remove:hover:not(:disabled) {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border-color: var(--danger);
-}
 
 /* Totals: a feature, not a footer — a sunk, rounded block the eye goes to. */
 
@@ -1212,16 +1166,14 @@
   overflow-wrap: anywhere;
 }
 
-.mb-suggestion__rate {
-  font-size: var(--text-xs);
-  color: var(--text-faint);
-}
-
 /* A price in the suggestion list. */
+/* Money in, so it wears the money-in colour; on the chosen row that ink is the fill's. */
 .mb-suggestion__price {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ok);
 }
 
 /* How many: the same sheet the suggestions pop in, with one number to type. */

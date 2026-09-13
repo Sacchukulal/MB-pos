@@ -20,11 +20,13 @@ import {
   Segment,
   Select,
   SideFold,
+  Switch,
   Toolbar,
   useReport,
   useToast,
 } from '../kit';
 import { call, subscribe } from '../ipc/call';
+import { useMay } from '../shell/permissions';
 /* The one table tile in the product. */
 import { AddTile, Tile } from '../billing/TableGrid';
 import type { FloorView } from '../ipc/generated/FloorView';
@@ -69,6 +71,25 @@ export function Floor() {
   const load = useCallback(() => {
     call('floor_plan').then(arrived).catch(report);
   }, [arrived, report]);
+
+  const may = useMay();
+  /** Whether the billing screen shows the tables: a shop setting, switched from here. */
+  const showOnCounter = useCallback(
+    (on: boolean) => {
+      call('save_settings', {
+        edits: [{ key: 'billing.tables_on_counter', value: on ? '1' : '0' }],
+      })
+        .then(() => {
+          toast.show(
+            'ok',
+            on ? 'The tables show on the billing screen.' : 'The billing screen shows orders only.',
+          );
+          load();
+        })
+        .catch(report);
+    },
+    [load, report, toast],
+  );
 
   useEffect(load, [load]);
   // A change arrives by push — a settle at the counter, a phone, a merge on another till.
@@ -191,6 +212,15 @@ export function Floor() {
       <Toolbar
         end={
           <>
+          {/* Whether Billing shows these tables at all — a parcel counter turns it off. */}
+          {may('settings.store') ? (
+            <Switch
+              checked={floor.tablesOnCounter}
+              onWord="Tables on the billing screen"
+              offWord="Tables off the billing screen"
+              onChange={(event) => showOnCounter(event.currentTarget.checked)}
+            />
+          ) : null}
           <div className="mb-tabs" role="tablist" aria-label="Which tables">
             {(['all', 'busy', 'attention'] as const).map((which) => (
               <button

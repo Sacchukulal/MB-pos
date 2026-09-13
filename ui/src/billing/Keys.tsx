@@ -30,7 +30,6 @@ export function Suggestions({
             onClick={() => onPick(index)}
           >
             <span className="mb-suggestion__name">{item.name}</span>
-            <span className="mb-suggestion__rate">{item.rateLabel}</span>
             <span className="mb-suggestion__price">{item.price.text}</span>
           </Pick>
         </li>
@@ -65,6 +64,7 @@ export function HowMany({
   return (
     <Modal
       open
+      small
       title={`${mode.item.name} · ${mode.item.price.text}`}
       onClose={onLeave}
       actions={
@@ -121,6 +121,7 @@ export function TableBox({
   return (
     <Modal
       open
+      small
       title="Which table?"
       onClose={onClose}
       actions={

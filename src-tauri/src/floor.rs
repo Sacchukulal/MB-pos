@@ -76,6 +76,8 @@ pub struct FloorView {
     pub has_layout: bool,
     /// Whether this person may change the room.
     pub can_arrange: bool,
+    /// Whether the billing screen shows these tables — the switch on this screen.
+    pub tables_on_counter: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -223,6 +225,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                     grid: crate::ipc::count(mb_db::repo::floor::GRID_CELLS),
                     has_layout: tables.iter().any(|t| t.pos.is_some()),
                     can_arrange,
+                    tables_on_counter: config.billing.tables_on_counter,
                     warn_minutes: crate::ipc::count(warn),
                     late_minutes: crate::ipc::count(late),
                 })

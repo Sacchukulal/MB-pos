@@ -20,4 +20,8 @@ hasLayout: boolean,
 /**
  * Whether this person may change the room.
  */
-canArrange: boolean, };
+canArrange: boolean, 
+/**
+ * Whether the billing screen shows these tables — the switch on this screen.
+ */
+tablesOnCounter: boolean, };

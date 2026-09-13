@@ -196,6 +196,9 @@ pub struct Billing {
     pub kitchen_ticket_off: bool,
     /// Orders go to the Kitchen screen; paper only when nobody sees them in time.
     pub kitchen_screen: bool,
+    /// The billing screen shows the table grid. Off for a counter that bills parcels only:
+    /// the tables are still on the Floor, and a number typed in the box still opens one.
+    pub tables_on_counter: bool,
     /// 0 means never. Read by `session::IDLE_LOCK`'s caller.
     pub idle_lock_minutes: u32,
     /// Basis points, so 5% is 500 — and 0 means the shop does not charge it, which is why there
@@ -219,6 +222,7 @@ impl Default for Billing {
             locked_order_type: mb_core::OrderType::DineIn,
             kitchen_ticket_off: false,
             kitchen_screen: false,
+            tables_on_counter: true,
             idle_lock_minutes: 10,
             // Every charge off by default.
             service_charge_bp: 0,

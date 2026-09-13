@@ -84,9 +84,7 @@ export function Processing({
             type="button"
             className={cx(
               'mb-processing__order',
-              order.state === 'waiting' && 'mb-processing__order--waiting',
-              order.state === 'late' && 'mb-processing__order--late',
-              order.selected && 'mb-processing__order--on',
+              order.selected && 'mb-chosen',
               index === highlighted && 'mb-processing__order--highlighted',
             )}
             aria-pressed={order.selected}
@@ -103,6 +101,12 @@ export function Processing({
                 order.state !== 'occupied' && 'mb-processing__timer--late',
               )}
             >
+              {/* Waiting is a steady amber dot; late breathes red. A shape before a colour. */}
+              {order.state === 'waiting' ? (
+                <span className="mb-dot mb-dot--warn" title="Waiting" aria-label="Waiting" />
+              ) : order.state === 'late' ? (
+                <span className="mb-dot mb-dot--late" title="Late" aria-label="Late" />
+              ) : null}
               {order.minutes === null ? '' : formatMinutes(order.minutes)}
             </span>
             <span className="mb-processing__no">

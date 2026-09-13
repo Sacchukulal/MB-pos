@@ -148,8 +148,8 @@ export function Tile({
     `mb-tile--${table.state}`,
     busy ? 'mb-tile--busy' : '',
     busy && table.byId ? `mb-tile--person-${personSlot(table.byId)}` : '',
-    table.selected ? 'mb-tile--selected' : '',
-    picked ? 'mb-tile--picked' : '',
+    table.selected ? 'mb-chosen' : '',
+    picked ? 'mb-ticked' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -239,7 +239,7 @@ export function Tile({
       {onTick ? (
         <button
           type="button"
-          className="mb-tile__tick"
+          className="mb-tick mb-tile__tick"
           onClick={onTick}
           role="checkbox"
           aria-checked={picked === true}

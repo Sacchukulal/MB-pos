@@ -286,6 +286,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
   /** Once the kitchen has been told, taking a line off is a void, which is its own permission. */
   const mayVoidLine = may('order.item.void');
+  /** Off for a parcel counter (Floor's switch): the orders being cooked take the grid's room. */
+  const tablesOnCounter = cart?.tablesOnCounter ?? true;
 
   const step = useCallback(
     async (line: { index: number; qty: string; name: string }, by: number) => {
@@ -726,6 +728,17 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       */}
       <div className="mb-billing__side">
         <div className="mb-billbar">
+          {/* Straight to the Menu screen, for whoever may add to it. */}
+          {may('menu.manage') ? (
+            <Button
+              variant="secondary"
+              iconOnly
+              title="Add menu items"
+              aria-label="Add menu items"
+              onClick={() => onGoTo('menu')}
+              icon={<Icon name="plus" size="sm" />}
+            />
+          ) : null}
           <div className="mb-billbar__search">
             <SearchField
               what="Item or table number"
@@ -789,9 +802,12 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
         <div
           className={cx(
             'mb-billing__floorrow',
-            processingOpen && 'mb-billing__floorrow--open',
+            (processingOpen || !tablesOnCounter) && 'mb-billing__floorrow--open',
+            !tablesOnCounter && 'mb-billing__floorrow--orders-only',
           )}
         >
+        {/* The shop switched its tables off this screen (Floor): the orders take the room. */}
+        {tablesOnCounter ? (
         <Scroller inset className="mb-billing__floor">
           {/* A shop with nothing in it yet: the three screens that make it a counter. */}
           {tables.length === 0 && menu.length === 0 ? (
@@ -834,12 +850,16 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
           {/* THE MENU GRID IS NOT ON THIS SCREEN. */}
         </Scroller>
+        ) : null}
 
         {/* Folds up under its head. Folded: no height, and nothing in it can take focus. */}
         <div
           id={processingId}
-          className={cx('mb-processing__fold', processingOpen && 'mb-processing__fold--open')}
-          inert={!processingOpen}
+          className={cx(
+            'mb-processing__fold',
+            (processingOpen || !tablesOnCounter) && 'mb-processing__fold--open',
+          )}
+          inert={!(processingOpen || !tablesOnCounter)}
         >
           <div className="mb-processing__panel">
             <Scroller inset className="mb-processing__body">
@@ -943,24 +963,34 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
         <Scroller inset className="mb-cart__lines">
           {cart && cart.lines.length > 0 ? (
-            cart.lines.map((line) => (
-              <div className="mb-cartline" key={line.index}>
+            cart.lines.map((line) => {
+              // The second row exists only when there is something to say on it.
+              const many = line.qty !== '1';
+              const more =
+                many || line.modifiers.length > 0 || line.discount.paise > 0n || Boolean(line.note);
+              return (
+              <div className={cx('mb-cartline', more && 'mb-cartline--more')} key={line.index}>
                 <span className="mb-cartline__name">{line.name}</span>
                 <span className="mb-cartline__amount">{line.amount.text}</span>
-                <div className="mb-cartline__about">
-                  {/* The price of one, its tax rate, the extras on it, and any money off. */}
-                  <span className="mb-cartline__detail">
-                    <span className="mb-cartline__price">{line.unitPrice.text}</span>
-                    <span>{line.rateLabel}</span>
-                    {line.modifiers.length > 0 ? (
-                      <span className="mb-cartline__extras">{line.modifiers.join(', ')}</span>
-                    ) : null}
-                    {line.discount.paise > 0n ? (
-                      <span className="mb-cartline__price">−{line.discount.text}</span>
-                    ) : null}
-                  </span>
-                  {line.note ? <span className="mb-cartline__note">{line.note}</span> : null}
-                </div>
+                {more ? (
+                  <div className="mb-cartline__about">
+                    {/* How the money was reached, the extras on it, and any money off. */}
+                    <span className="mb-cartline__detail">
+                      {many ? (
+                        <span className="mb-cartline__price">
+                          {line.qty} × {line.unitPrice.text}
+                        </span>
+                      ) : null}
+                      {line.modifiers.length > 0 ? (
+                        <span className="mb-cartline__extras">{line.modifiers.join(', ')}</span>
+                      ) : null}
+                      {line.discount.paise > 0n ? (
+                        <span className="mb-cartline__price">−{line.discount.text}</span>
+                      ) : null}
+                    </span>
+                    {line.note ? <span className="mb-cartline__note">{line.note}</span> : null}
+                  </div>
+                ) : null}
                 {/*
                   − qty + and then ✕, in that order, because the quantity is what a cashier
                   changes forty times a shift and the removal is what they do once.
@@ -1008,7 +1038,6 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                     variant="quiet"
                     size="sm"
                     iconOnly
-                    className="mb-cartline__tool"
                     title="Take the weight from the scale"
                     aria-label="Take the weight from the scale"
                     onMouseDown={(e) => e.preventDefault()}
@@ -1028,35 +1057,32 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                     icon={<Icon name="scale" size="sm" />}
                   />
                 ) : null}
-                {/* Money off this one line — only for whoever may give it. */}
-                {may('bill.discount.line') ? (
-                  <Button
-                    variant="quiet"
-                    size="sm"
-                    iconOnly
-                    className="mb-cartline__tool"
-                    title={`Money off ${line.name}`}
-                    aria-label={`Money off ${line.name}`}
-                    onClick={() => setDiscounting({ line })}
-                    icon={<Icon name="tag" size="sm" />}
-                  />
-                ) : null}
-                {/* ✕ is a void once the kitchen has been told, and a void is a permission. */}
-                {!cart.kitchenTold || mayVoidLine ? (
-                  <Button
-                    variant="quiet"
-                    size="sm"
-                    iconOnly
-                    className="mb-cartline__tool mb-cartline__tool--remove"
-                    title={`Remove ${line.name}`}
-                    aria-label={`Remove ${line.name}`}
-                    onClick={() => void takeOffTheBill(line)}
-                    icon={<Icon name="x" size="sm" />}
-                  />
+                {/*
+                  Money off and remove, behind ONE ⋯: the line is one row, and two more buttons
+                  on it were what pushed "Butter Naan" onto two lines. Only what this person may
+                  do is in it; with nothing allowed there is no ⋯ at all.
+                */}
+                {may('bill.discount.line') || !cart.kitchenTold || mayVoidLine ? (
+                  <RowMenu label={`More for ${line.name}`}>
+                    {may('bill.discount.line') ? (
+                      <Button size="sm" variant="quiet" onClick={() => setDiscounting({ line })}>
+                        <Icon name="tag" size="sm" />
+                        Money off
+                      </Button>
+                    ) : null}
+                    {/* ✕ is a void once the kitchen has been told, and a void is a permission. */}
+                    {!cart.kitchenTold || mayVoidLine ? (
+                      <Button size="sm" variant="danger" onClick={() => void takeOffTheBill(line)}>
+                        <Icon name="x" size="sm" />
+                        Remove
+                      </Button>
+                    ) : null}
+                  </RowMenu>
                 ) : null}
                 </div>
               </div>
-            ))
+              );
+            })
           ) : (
             <EmptyState
               small

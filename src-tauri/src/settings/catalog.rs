@@ -1864,6 +1864,17 @@ pub const CATALOG: &[Entry] = &[
         ["kds", "screen", "display", "kitchen"],
         billing.kitchen_screen
     ),
+    // Switched on the Floor screen, where the tables are.
+    flag!(
+        "billing.tables_on_counter",
+        Billing,
+        Row,
+        "Tables on the billing screen",
+        "On, the billing screen shows the table grid. Off, only the orders being cooked show \
+         there; a table number typed in the box still opens that table.",
+        ["tables", "billing screen", "grid", "parcel only", "counter", "hide tables"],
+        billing.tables_on_counter
+    ),
     // The day.
     // First, because it decides whether anything below it happens at all.
     flag!(

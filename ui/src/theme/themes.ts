@@ -42,7 +42,7 @@ export interface TextSize {
 }
 
 /** "no font scaling for older owners". */
-/** The default, as a value rather than an index. */
+/** The middle of the scale, as a value rather than an index. */
 export const NORMAL_TEXT: TextSize = { id: 'normal', name: 'Normal', scale: 1 };
 
 export const TEXT_SIZES: readonly TextSize[] = [
@@ -52,7 +52,11 @@ export const TEXT_SIZES: readonly TextSize[] = [
   { id: 'xlarge', name: 'Extra large', scale: 1.3 },
 ];
 
-export const DEFAULT_TEXT_SIZE = NORMAL_TEXT.id;
+/**
+ * A fresh install comes up LARGE (owner, 2026-09-13): a counter is read from a step back, and
+ * whoever wants it smaller sets Normal once under Settings › How it looks.
+ */
+export const DEFAULT_TEXT_SIZE = 'large';
 
 export function themeById(id: ThemeId): Theme | undefined {
   return THEMES.find((t) => t.id === id);

@@ -28,6 +28,7 @@ import { Appearance } from './Appearance';
 import { Devices } from './Devices';
 import { Field, Section, editsList, withEdit, type Edits } from './Form';
 import { Numbering } from './Numbering';
+import { Version } from '../account/Version';
 import { Printers } from './Printers';
 import { Tax } from './Tax';
 import { Tills } from './Tills';
@@ -35,6 +36,7 @@ import { Tills } from './Tills';
 /** Sections that carry a screen as well as (or instead of) a form. */
 const OWN_SCREEN: Record<string, () => ReactNode> = {
   printers: () => <Printers />,
+  updates: () => <Version />,
   tax: () => <Tax />,
   numbering: () => <Numbering />,
   appearance: () => <Appearance />,
@@ -50,6 +52,9 @@ const DRAWS_OWN_SETTINGS = new Set(['tax']);
 const EXTRA_SECTIONS = [
   // A till is a row, not a setting.
   { code: 'tills', label: 'Tills', canEdit: true, settings: [] },
+  // The version this counter runs and the one on the shelf (owner, 2026-09-13: "so that
+  // they can do updates" from Settings).
+  { code: 'updates', label: 'Updates', canEdit: true, settings: [] },
 ];
 
 /** Which sections show the paper beside them. */

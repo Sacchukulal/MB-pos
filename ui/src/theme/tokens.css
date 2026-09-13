@@ -63,23 +63,24 @@
   --type-caption: var(--text-xs);
 
   /*
-   * THE PICK CONTRACT — what "this is the one" looks like in a LIST.
+   * THE PICK CONTRACT — what "this is the one" looks like, on every screen.
    *
-   * A filled button already says it where two or three stand side by side (a segment, the top
-   * bar). A row in a list somebody scrolls cannot be filled with the accent without shouting,
-   * so it gets a language of its own: a fill, its own ink, bold words and a marker down its
-   * left edge. The colours are a palette and live with each theme; the geometry is the same in
-   * both and lives here.
-   *
-   * The marker is a pill the row draws, not an inset shadow. An inset shadow is clipped by the
-   * row's corner radius, so what a rounded row actually showed was a bracket curling round its
-   * two left corners rather than a straight line.
+   * Two shapes, and no screen invents a third (owner, 2026-09-13: six recipes across the
+   * counter "looked uneven"; a blue fill on a card "still a darker selection, looks odd"):
+   * a ROW  — a dropdown option, a rail item, a person on the lock screen — is FILLED with the
+   *          accent, the same fill the top bar and the Dine-in key wear: navy on white paper,
+   *          white on slate. Ink on the fill follows automatically: the row re-points the text
+   *          tokens for everything inside it (kit.css), so a role line never has to be listed.
+   * a CARD — a table tile, an order card, a settle card — is TINTED with the pick tint and
+   *          ringed with the pick line, the look the owner chose on the Floor's ticked tables;
+   *          its words stay its own. Ticked for a bulk action is the same card with a tick.
+   * The keyboard is a ring on the edge, on either. The colours live with each theme; the
+   * geometry is the same in both.
    */
-  --pick-mark: 3px;
-  /* How far the marker stands off the row's left edge. */
-  --pick-mark-inset: var(--space-1);
-  /* How far short of the row's ends it stops, so it reads as a mark and not as an edge. */
-  --pick-mark-short: var(--space-2);
+  /* The line round a chosen or ticked card. */
+  --pick-ring: var(--border-width-thick);
+  /* The tick on a ticked tile. */
+  --tick-size: 1.125rem;
 
   /*
    * THE ELEVATION CONTRACT — four levels, and no fifth.
@@ -219,6 +220,12 @@
    */
   --motion-beat: 1000ms;
   --beats: 3;
+  /*
+   * The second exception, for the same reason: a late order's dot breathes slowly for as long
+   * as the order is late, so a cashier looking at the queue sees it without a red box round
+   * the whole card.
+   */
+  --motion-breathe: 1800ms;
 
   /*
    * THE CONTROL CONTRACT. Three heights, by job.
@@ -261,8 +268,15 @@
   --rail-sheet-width: 13rem;
   /* A "find something on this screen" box. */
   --find-width: var(--field-lg);
+  /*
+   * Dialogs come in three widths, by job: one question (a number, a table), a form, a sheet
+   * of rows. A one-question dialog in a form's box was the "unsized" popup.
+   */
+  --modal-width-sm: 22rem;
   --modal-width: 28rem;
   --modal-width-wide: 52rem;
+  /* A dialog's buttons never shrink to their word: Cancel and Open stand the same width. */
+  --button-min: 6rem;
   --panel-width: 22rem;
   /* The switch that turns a whole section on: the track, and the knob inside it. */
   --switch-width: 2.25rem;
@@ -426,16 +440,20 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg: #e8edf4;
+  --bg: #edf1f6;
   --surface: #ffffff;
-  --surface-2: #f2f5f9;
-  --surface-sunk: #e1e7ef;
+  --surface-2: #f3f6fa;
+  --surface-sunk: #e3e9f1;
 
-  /* Line — two weights and they do different jobs. */
-  --border: #a8b3c5;
-  --border-strong: #5b6b85;
+  /*
+   * Line — two weights and they do different jobs. The everyday line is a quiet cool grey:
+   * a panel is told apart from the page by its white and its shadow, and the line only
+   * finishes the edge. A heavy mid-grey line on every box was the "old website" look.
+   */
+  --border: #b8c3d3;
+  --border-strong: #6f809c;
   /* A panel's edge. */
-  --panel-border: #aab5c7;
+  --panel-border: #b3bfd0;
 
   /* Text — three steps, all of them dark enough to read from a step back. */
   --text: #0f172a;
@@ -454,19 +472,23 @@
   --brand-soft: #dbe7fd;
 
   /*
-   * The pick — the chosen row of a list, the chosen tile, the chosen report. DARK, in both
-   * themes (owner, 2026-09-13: the pale tint "could not be understood"): the same navy as the
-   * primary button, white ink on it, and a light-blue marker down its left edge that can be
-   * seen on that navy. The row under the hand on the way to it is a tint, so the two are never
-   * confused.
+   * The pick. A chosen ROW is the accent (owner, 2026-09-13 afternoon: "black for the white
+   * theme, white for the black theme"); a chosen CARD is the tint and the line the owner
+   * picked on the Floor. The row under the hand on the way to it is a lighter tint, so the
+   * two are never confused.
    */
-  --pick-hover: #e6edf8;
-  --pick-bg: #111c33;
-  --pick-bg-hover: #1e2b47;
-  --pick-ink: #ffffff;
-  /* The marker on the fill, and the ring round a chosen tile on the page. */
-  --pick-mark-ink: #60a5fa;
+  --pick-hover: #e8eefa;
+  /* A chosen ROW: the accent, so it reads like the chosen tab in the top bar. */
+  --pick-bg: var(--accent);
+  --pick-bg-hover: var(--accent-hover);
+  --pick-ink: var(--accent-ink);
+  /* The quiet second line ON the fill: a role under a name. A shade back from the ink. */
+  --pick-ink-quiet: #c5cfe3;
+  /* A chosen or ticked CARD: a tint, and the line round it. */
+  --pick-tint: #e2ebfc;
   --pick-line: var(--brand);
+  /* The ring the keyboard draws, on anything. */
+  --focus-ring: var(--brand);
 
   /*
    * The charts. One hue for every chart that ranks or runs over time; four fixed identities
@@ -522,15 +544,20 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  /* The ground is the darkest thing on screen; every surface stands clearly off it. */
-  --bg: #070b17;
-  --surface: #131e36;
-  --surface-2: #1b2842;
-  --surface-sunk: #233350;
+  /*
+   * The ground is the darkest thing on screen; every surface stands clearly off it. FOUR
+   * real steps, not one navy a few percent apart (owner, 2026-09-13: the cart box was "too
+   * dark", the borders "too dull"): the ground is a deep slate, a panel a clear step up, a
+   * row inside a panel another, and the line round a panel light enough to be a line.
+   */
+  --bg: #0b1120;
+  --surface: #172033;
+  --surface-2: #1f2a40;
+  --surface-sunk: #28354e;
 
-  --border: #31435f;
-  --border-strong: #5d7191;
-  --panel-border: #31435f;
+  --border: #3a4a66;
+  --border-strong: #71849f;
+  --panel-border: #3d4d6b;
 
   --text: #f1f5f9;
   --text-muted: #b7c3d6;
@@ -546,13 +573,15 @@
   --brand: #60a5fa;
   --brand-soft: #172a4a;
 
-  /* The pick — the same argument, and the same blue, chosen again for navy paper. */
-  --pick-hover: #202e4a;
-  --pick-bg: #1d4ed8;
-  --pick-bg-hover: #2563eb;
-  --pick-ink: #ffffff;
-  --pick-mark-ink: #bfdbfe;
+  /* The pick — the same argument: rows wear the accent (white here), cards the tint. */
+  --pick-hover: #263352;
+  --pick-bg: var(--accent);
+  --pick-bg-hover: var(--accent-hover);
+  --pick-ink: var(--accent-ink);
+  --pick-ink-quiet: #4b5a75;
+  --pick-tint: #1c2f55;
   --pick-line: var(--brand);
+  --focus-ring: var(--brand);
 
   --chart-mono: var(--brand);
   --chart-track: var(--surface-sunk);
@@ -618,8 +647,12 @@ textarea {
   user-select: text;
 }
 
+/*
+ * The keyboard's ring is the brand blue, never the accent: the accent is white in the dark
+ * theme, and a white box round a field was the "glitched" popup.
+ */
 :focus-visible {
-  outline: var(--focus-ring-width) solid var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-inset);
 }
 
@@ -665,6 +698,7 @@ textarea {
     --motion-enter: 0ms;
     --motion-exit: 0ms;
     --motion-beat: 0ms;
+    --motion-breathe: 0ms;
     --beats: 0;
     --rise: 0;
     --press: 1;

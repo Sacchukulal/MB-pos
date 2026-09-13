@@ -1,24 +1,10 @@
-/* The Account page: the licence across the top, then backup beside the version. */
+/* The Account page: the licence across the top, then the backup. Updates live under Settings. */
 
 /* A panel's body is a column of groups. */
 .mb-account .mb-panel__body {
   display: flex;
   flex-direction: column;
   gap: var(--gap-group);
-}
-
-/* Backup takes the room; the version stands beside it. */
-.mb-account__two {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--account-side);
-  gap: var(--gap-group);
-  align-items: start;
-}
-
-@media (max-width: 1100px) { /* mb-tokens-allow: media queries cannot use var() */
-  .mb-account__two {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 /* A fact that is a row of words — the plan's parts, the cloud copy's state — takes two columns. */

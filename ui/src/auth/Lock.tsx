@@ -221,8 +221,13 @@ function People({
               aria-current={person.id === marked?.id ? 'true' : undefined}
               onClick={() => onChoose(person)}
             >
-              <span className="mb-lock__name">{person.name}</span>
-              <span className="mb-lock__role">{person.lockedOut ?? person.role ?? ''}</span>
+              <span className="mb-face" aria-hidden="true">
+                {person.name.trim().charAt(0).toUpperCase()}
+              </span>
+              <span className="mb-lock__who">
+                <span className="mb-lock__name">{person.name}</span>
+                <span className="mb-lock__role">{person.lockedOut ?? person.role ?? ''}</span>
+              </span>
             </Button>
           ))
         )}

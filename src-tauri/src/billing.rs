@@ -293,6 +293,8 @@ pub struct CartView {
     pub order_type_locked: bool,
     /// The shop has no kitchen ticket, so its buttons are not shown.
     pub kitchen_ticket_off: bool,
+    /// The billing screen shows the table grid; off, the orders being cooked take its room.
+    pub tables_on_counter: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -528,6 +530,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         length_says: state.cart.length_says().unwrap_or_default(),
         order_type_locked: config.billing.lock_order_type,
         kitchen_ticket_off: config.billing.kitchen_ticket_off,
+        tables_on_counter: config.billing.tables_on_counter,
     })
 }
 

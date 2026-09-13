@@ -80,10 +80,10 @@ describe('the table grid (scope 1.4)', () => {
       />,
     );
 
-    expect(container.querySelectorAll('.mb-tile--selected')).toHaveLength(2);
-    expect(container.querySelector('.mb-tile--free.mb-tile--selected')).toBeTruthy();
+    expect(container.querySelectorAll('.mb-chosen')).toHaveLength(2);
+    expect(container.querySelector('.mb-tile--free.mb-chosen')).toBeTruthy();
     expect(
-      container.querySelector('.mb-tile--late.mb-tile--selected'),
+      container.querySelector('.mb-tile--late.mb-chosen'),
       'a selected table stopped looking late',
     ).toBeTruthy();
     // And an unselected one is left alone.
@@ -485,9 +485,9 @@ describe('the processing orders (2026-08-27)', () => {
     expect(three.textContent).toContain('B-104');
     expect(three.textContent).toContain('168.00');
     expect(three.textContent).toContain('8m');
-    // A parcel names itself, and a late one carries the form as well as the colour.
+    // A parcel names itself, and a late one carries a dot as well as the colour.
     const parcel = screen.getByRole('button', { name: /^Parcel/ });
-    expect(parcel.className).toContain('mb-processing__order--late');
+    expect(parcel.querySelector('.mb-dot--late')).toBeTruthy();
     expect(parcel.textContent).toContain('1h 10m');
   });
 

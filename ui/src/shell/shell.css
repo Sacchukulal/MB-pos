@@ -246,19 +246,7 @@
   transform: scale(var(--press));
 }
 
-.mb-who__face {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: var(--control-sm);
-  height: var(--control-sm);
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-radius: var(--radius-pill);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-}
+/* The face beside the name is the kit's `mb-face`. */
 
 .mb-who:hover {
   background: var(--surface-2);

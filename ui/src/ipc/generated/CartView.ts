@@ -57,4 +57,8 @@ orderTypeLocked: boolean,
 /**
  * The shop has no kitchen ticket, so its buttons are not shown.
  */
-kitchenTicketOff: boolean, };
+kitchenTicketOff: boolean, 
+/**
+ * The billing screen shows the table grid; off, the orders being cooked take its room.
+ */
+tablesOnCounter: boolean, };
