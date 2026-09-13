@@ -169,11 +169,11 @@ impl<'a> OrderRepo<'a> {
             order_state::OPEN => AnyOrder::Open(OpenOrder {
                 core,
                 token: header.token()?,
-                bill_number: header.bill_number()?,
+                bill_number: header.bill_number_if_any()?,
             }),
             order_state::CANCELLED => AnyOrder::Cancelled(CancelledOrder {
                 token: header.token()?,
-                bill_number: header.bill_number()?,
+                bill_number: header.bill_number_if_any()?,
                 reason: header.required("cancel_reason", header.cancel_reason.clone())?,
                 cancelled_at: header.required("cancelled_at", header.cancelled_at)?,
                 cancelled_by: header.required("cancelled_by", header.cancelled_by.clone())?,
@@ -1166,6 +1166,14 @@ impl Header {
             self.business_day,
             "orders.bill_number_value",
         )
+    }
+
+    /// An open or cancelled order has a bill number only once a bill was made for it.
+    fn bill_number_if_any(&self) -> Result<Option<Claimed>, DbError> {
+        if self.bill_value.is_none() {
+            return Ok(None);
+        }
+        self.bill_number().map(Some)
     }
 
     /// A column the state's CHECK constraint guarantees is present.

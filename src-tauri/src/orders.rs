@@ -717,7 +717,8 @@ fn open_order(
         draft = draft.with_covers(covers);
     }
 
-    // The counter claims the numbers, atomically, in THIS transaction.
+    // The counter claims the token, atomically, in THIS transaction. The bill number waits
+    // for the bill: a table that orders and leaves must not spend one.
     let token = mb_db::numbering::claim(
         repos.tx(),
         OUTLET,
@@ -725,17 +726,10 @@ fn open_order(
         mb_db::numbering::CounterKind::Token,
         day,
     )?;
-    let bill_number = mb_db::numbering::claim(
-        repos.tx(),
-        OUTLET,
-        till,
-        mb_db::numbering::CounterKind::Bill,
-        day,
-    )?;
     let open = mb_core::OpenOrder {
         core: draft.core,
         token,
-        bill_number,
+        bill_number: None,
     };
     repos
         .orders()

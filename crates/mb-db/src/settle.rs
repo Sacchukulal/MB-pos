@@ -21,7 +21,8 @@ impl<'a> Till<'a> {
     }
 }
 
-/// Settle an open order and write it, in one commit.
+/// Settle an open order and write it, in one commit. An order that has not been billed yet
+/// takes its bill number here, in the same transaction, so a settle that fails spends none.
 pub fn settle(
     db: &Db,
     till: Till<'_>,
@@ -32,20 +33,23 @@ pub fn settle(
     by: StaffId,
 ) -> Result<SettledOrder, DbError> {
     let (outlet, terminal) = (till.outlet, till.terminal);
-    let settled = order
-        .settle(bill, settlement, at, by)
-        .map_err(|e| DbError::invariant(format!("this bill cannot be settled: {e}")))?;
-
-    let any = mb_core::AnyOrder::Settled(settled.clone());
     db.transaction(|tx| {
+        let mut order = order;
+        numbering::number_the_bill(tx, outlet, terminal, &mut order)?;
+        let settled = order
+            .settle(bill, settlement, at, by)
+            .map_err(|e| DbError::invariant(format!("this bill cannot be settled: {e}")))?;
+
         let repos = Repos::new(tx);
-        repos.orders().save(outlet, terminal, &any)?;
-        repos.stock().deduct_for_bill(outlet, &settled, at)
-    })?;
-    Ok(settled)
+        repos
+            .orders()
+            .save(outlet, terminal, &mb_core::AnyOrder::Settled(settled.clone()))?;
+        repos.stock().deduct_for_bill(outlet, &settled, at)?;
+        Ok(settled)
+    })
 }
 
-/// Open a draft: claim its token and bill number, and write it.
+/// Open a draft: claim its token, and write it. The bill number waits for the bill.
 pub fn open_draft(
     db: &Db,
     till: Till<'_>,
@@ -56,11 +60,10 @@ pub fn open_draft(
 
     db.transaction(|tx| {
         let token = numbering::claim(tx, outlet, terminal, CounterKind::Token, day)?;
-        let bill_number = numbering::claim(tx, outlet, terminal, CounterKind::Bill, day)?;
         let open = OpenOrder {
             core: draft.core.clone(),
             token,
-            bill_number,
+            bill_number: None,
         };
         Repos::new(tx)
             .orders()

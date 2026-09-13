@@ -1639,7 +1639,7 @@ pub const CATALOG: &[Entry] = &[
         Kitchen,
         Row,
         "Print the bill number",
-        "",
+        "Once the bill has one. A ticket sent before any bill is printed has no number to show.",
         ["kot", "bill number"],
         kitchen.show_bill_number
     ),

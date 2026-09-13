@@ -104,12 +104,12 @@ pub fn sample_order(registration: Registration) -> Result<(Bill, AnyOrder), Prin
             formatted: "7".to_owned(),
             business_day: day,
         },
-        bill_number: Claimed {
+        bill_number: Some(Claimed {
             value: 0,
             // Not a plausible number.
             formatted: "SAMPLE".to_owned(),
             business_day: day,
-        },
+        }),
     };
 
     let mut settlement = Settlement::new();

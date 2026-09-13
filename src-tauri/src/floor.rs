@@ -787,10 +787,10 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                 fresh.core.cart = moved_cart;
                 fresh.core.kitchen = moved_kitchen;
 
-                // Its own token and bill number, claimed in THIS transaction so a failure
-                // cannot consume one — the same rule `open_draft` follows, and claimed against
-                // the ORIGINAL order's business day so a split at 00:15 does not jump to
-                // tomorrow.
+                // Its own token, claimed in THIS transaction so a failure cannot consume one —
+                // the same rule `open_draft` follows, and claimed against the ORIGINAL order's
+                // business day so a split at 00:15 does not jump to tomorrow. Its bill number
+                // comes with its bill, like any other order's.
                 let token = mb_db::numbering::claim(
                     tx,
                     OUTLET,
@@ -798,17 +798,10 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                     mb_db::numbering::CounterKind::Token,
                     day,
                 )?;
-                let bill_number = mb_db::numbering::claim(
-                    tx,
-                    OUTLET,
-                    app.terminal_id(),
-                    mb_db::numbering::CounterKind::Bill,
-                    day,
-                )?;
                 let opened = mb_core::OpenOrder {
                     core: fresh.core,
                     token,
-                    bill_number,
+                    bill_number: None,
                 };
                 let new_id = opened.core.id.as_str().to_owned();
                 repos

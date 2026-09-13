@@ -526,8 +526,9 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
         }
 
         let open = match existing {
-            // Parked already: its numbers stay, the cart as it is now goes in. The time and the
-            // day came from the order itself, through the cart's origin.
+            // Parked already: its token, and any bill number a printed bill gave it, stay; the
+            // cart as it is now goes in. The time and the day came from the order itself,
+            // through the cart's origin.
             Some(AnyOrder::Open(mut open)) => {
                 open.core = core.clone();
                 open
@@ -541,7 +542,8 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
             None => mb_db::open_draft(&shop.db, till, mb_core::DraftOrder { core: core.clone() })
                 .map_err(|e| words::from_db(&e))?,
         };
-        let formatted = open.bill_number.formatted.clone();
+        // The bill number is claimed in there, with the money, if no printed bill gave the
+        // order one already.
         let settled = mb_db::settle(
             &shop.db,
             till,
@@ -552,7 +554,7 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
             settled_by.clone(),
         )
         .map_err(|e| words::from_db(&e))?;
-        Ok((formatted, settled))
+        Ok((settled.bill_number.formatted.clone(), settled))
     })?;
 
     crate::log_bill!(settled.core.id, "settled as {number} by {}", who.name);
@@ -703,6 +705,9 @@ pub fn print_open_bill_on(app: &App, order_id: String) -> UiResult<String> {
         );
     }
 
+    // The paper going to the table is the bill: this is where its number is born, if a
+    // printed bill has not given it one already, and it is on disk before the paper.
+    let open = number_the_bill(app, open)?;
     let order = AnyOrder::Open(open);
     let bill = bill_of(app, &order)?;
     queue_bill(app, &order, &bill, &who.name, Copy::NotPaid)?;
@@ -971,6 +976,28 @@ pub fn clock_time(at: Timestamp) -> String {
 }
 
 // Orders on disk.
+
+/// An open order takes its bill number, once, and is written with it. An order that has one
+/// comes back as it was.
+pub(crate) fn number_the_bill(app: &App, open: mb_core::OpenOrder) -> UiResult<mb_core::OpenOrder> {
+    if open.bill_number.is_some() {
+        return Ok(open);
+    }
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                let mut open = open.clone();
+                mb_db::numbering::number_the_bill(tx, OUTLET, app.terminal_id(), &mut open)?;
+                mb_db::Repos::new(tx).orders().save(
+                    OUTLET,
+                    app.terminal_id(),
+                    &AnyOrder::Open(open.clone()),
+                )?;
+                Ok(open)
+            })
+            .map_err(|e| words::from_db(&e))
+    })
+}
 
 pub(crate) fn find_order(app: &App, id: &OrderId) -> UiResult<Option<AnyOrder>> {
     app.with_shop(|shop| {

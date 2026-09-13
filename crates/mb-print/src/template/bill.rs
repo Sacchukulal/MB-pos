@@ -258,10 +258,10 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
     let s = ctx.settings;
     let core = ctx.order.core();
 
-    let number = ctx
-        .order
-        .bill_number()
-        .ok_or_else(|| PrintError::invalid("a draft order has no bill number to print"))?;
+    // A bill being looked at before it is a bill has no number yet: the number is claimed the
+    // first time the paper is printed or the money is taken, and a placeholder would be a
+    // number the paper will not have.
+    let number = ctx.order.bill_number().map(|n| n.formatted.as_str());
 
     if let Some(title) = title_of(ctx) {
         doc.text(
@@ -307,7 +307,10 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
 
     if s.design == BillDesign::Boxed {
         // Label rows, the way an invoice reads: the label in its own column, the fact beside.
-        let mut rows = vec![vec!["Bill no.".to_owned(), number.formatted.clone()]];
+        let mut rows = Vec::new();
+        if let Some(number) = number {
+            rows.push(vec!["Bill no.".to_owned(), number.to_owned()]);
+        }
         rows.push(vec!["Date".to_owned(), when]);
         let mut place = vec![kind.to_owned()];
         place.extend(table.clone());
@@ -330,7 +333,10 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
     } else if s.design == BillDesign::Centred {
         // Line by line down the middle, each fact parted from the next by a dot.
         doc.text(
-            format!("Bill {}  {when}", number.formatted),
+            match number {
+                Some(number) => format!("Bill {number}  {when}"),
+                None => when,
+            },
             s.sections.meta,
             Align::Centre,
         );
@@ -345,7 +351,7 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
     } else if narrow_table(metrics, ctx) {
         // Two inches: three rows, and no word spent on a label.
         doc.row(
-            &number.formatted,
+            number.unwrap_or(""),
             ctx.time.filter(|_| s.show.time).unwrap_or(""),
             s.sections.meta,
         );
@@ -368,7 +374,7 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
             Column::fill(Align::Right),
         ];
         let mut rows = vec![vec![
-            format!("Bill {}", number.formatted),
+            number.map(|n| format!("Bill {n}")).unwrap_or_default(),
             when,
             kind.to_owned(),
         ]];

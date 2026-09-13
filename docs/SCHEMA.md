@@ -508,8 +508,19 @@ UTC, filtered by local time and grouped reports by the UTC date, so a bill at
 will not tie."*
 
 Table-level CHECKs on this table carry rules the type system carries in
-mb-core: a draft has no numbers, everything past draft has both; a cancelled or
-voided order has a non-blank reason; a dine-in order past draft has a table.
+mb-core: a draft has no numbers; everything past draft has a token; a paid bill
+(settled or voided) has a bill number; a cancelled or voided order has a
+non-blank reason; a dine-in order past draft has a table.
+
+**0015 — the bill number is born with the bill.** Until 0015 an order took its
+bill number the moment it went on disk (the kitchen ticket, or a phone opening
+the table), so a party that ordered and walked out left a cancelled order holding
+a number and a hole in the bill book with nothing printed to show for it. Now an
+open order has no bill number until the first time its bill is printed or paid
+(`numbering::number_the_bill`, called by `settle` and by the bill carried to the
+table), a cancelled order has one only if a bill had been printed for it, and
+the numbers run in the order bills are made. The token and the KOT number are
+unchanged.
 
 | column | type | null | notes |
 |---|---|---|---|
@@ -528,7 +539,7 @@ voided order has a non-blank reason; a dine-in order past draft has a table.
 | note | TEXT | yes | Scope 1.26. |
 | token_value | INTEGER | yes | |
 | token_formatted | TEXT | yes | Stored, not formatted on demand: a **printed** number must not change when the prefix setting does. |
-| bill_number_value | INTEGER | yes | Unique per outlet **and till**, forever — see `idx_orders_bill_number`. What the customer holds is `bill_number_formatted`, which carries the till's prefix, so the value alone was never the identity. |
+| bill_number_value | INTEGER | yes | NULL until the bill is printed or paid (0015). Unique per outlet **and till**, forever — see `idx_orders_bill_number`. What the customer holds is `bill_number_formatted`, which carries the till's prefix, so the value alone was never the identity. |
 | bill_number_formatted | TEXT | yes | Same reason as the token. |
 | settled_at | INTEGER | yes | |
 | settled_by | TEXT | yes | |

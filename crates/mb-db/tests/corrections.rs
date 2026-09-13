@@ -385,8 +385,11 @@ fn a_cancelled_order_keeps_its_number_and_is_counted() {
     draft.core.cart = cart;
 
     let till = mb_db::Till::new(OUTLET, TERMINAL);
+    let issued_before = db
+        .transaction(|tx| mb_db::numbering::last_issued(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill))
+        .expect("last issued");
     let open = mb_db::open_draft(&db, till, draft).expect("opened");
-    let number = open.bill_number.formatted.clone();
+    assert_eq!(open.bill_number, None, "no bill was made, so no number was spent");
 
     let cancelled = open
         .cancel("Customer left", StaffId::new("staff_1"), at(5))
@@ -404,11 +407,15 @@ fn a_cancelled_order_keeps_its_number_and_is_counted() {
         .expect("the order");
     match read {
         AnyOrder::Cancelled(o) => {
-            assert_eq!(o.bill_number.formatted, number);
+            assert_eq!(o.bill_number, None, "a walk-out before any bill leaves no hole");
             assert_eq!(o.reason, "Customer left");
         }
         other => panic!("expected a cancelled order, got {other:?}"),
     }
+    let issued_after = db
+        .transaction(|tx| mb_db::numbering::last_issued(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill))
+        .expect("last issued");
+    assert_eq!(issued_after, issued_before, "the walk-out spent a bill number");
 
     // It is not in the open list any more — which is how the table frees.
     let open_now = db
@@ -635,7 +642,10 @@ fn a_bill_taken_back_keeps_its_number_and_the_register_says_what_it_was() {
         })
         .expect("read back");
     match found {
-        Some(AnyOrder::Open(o)) => assert_eq!(o.bill_number.formatted, number),
+        Some(AnyOrder::Open(o)) => assert_eq!(
+            o.bill_number.as_ref().map(|n| n.formatted.clone()),
+            Some(number.clone())
+        ),
         other => panic!("the bill did not go back to open: {other:?}"),
     }
     assert_eq!(reverts.len(), 1);

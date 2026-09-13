@@ -44,6 +44,10 @@ pub enum OrderError {
     Payment(#[from] crate::payment::PaymentError),
     #[error("a quantity on this order is out of range")]
     Qty(#[from] QtyError),
+    #[error("this order has no bill number yet")]
+    NotBilled,
+    #[error("this order already has a bill number")]
+    AlreadyBilled,
 }
 
 type Result<T> = std::result::Result<T, OrderError>;
@@ -152,12 +156,14 @@ pub struct DraftOrder {
     pub core: OrderCore,
 }
 
-/// An order that has its numbers and is on the floor.
+/// An order that has its token and is on the floor. The bill number comes later: the first
+/// time the bill is printed or paid, never when the food is ordered, so a party that leaves
+/// before any bill exists leaves no hole in the bill book.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenOrder {
     pub core: OrderCore,
     pub token: Claimed,
-    pub bill_number: Claimed,
+    pub bill_number: Option<Claimed>,
 }
 
 /// A paid bill.
@@ -172,12 +178,13 @@ pub struct SettledOrder {
     pub settled_by: StaffId,
 }
 
-/// An open order that never became a bill — the customer walked out.
+/// An open order that never became a paid bill — the customer walked out. It has a bill
+/// number only if a bill had been printed for it, and then that number is used up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CancelledOrder {
     pub core: OrderCore,
     pub token: Claimed,
-    pub bill_number: Claimed,
+    pub bill_number: Option<Claimed>,
     pub reason: String,
     pub cancelled_at: Timestamp,
     pub cancelled_by: StaffId,
@@ -238,9 +245,9 @@ impl AnyOrder {
     pub fn bill_number(&self) -> Option<&Claimed> {
         match self {
             AnyOrder::Draft(_) => None,
-            AnyOrder::Open(o) => Some(&o.bill_number),
+            AnyOrder::Open(o) => o.bill_number.as_ref(),
             AnyOrder::Settled(o) => Some(&o.bill_number),
-            AnyOrder::Cancelled(o) => Some(&o.bill_number),
+            AnyOrder::Cancelled(o) => o.bill_number.as_ref(),
             AnyOrder::Voided(o) => Some(&o.bill_number),
         }
     }
@@ -300,19 +307,29 @@ impl DraftOrder {
         self
     }
 
-    /// Put the order on the floor: claim its token and bill number.
+    /// Put the order on the floor: claim its token. The bill number waits for the bill.
     pub fn open(self, numbering: &mut Numbering) -> Result<OpenOrder> {
-        let (token, bill_number) = numbering.claim_for_new_order(self.core.business_day);
+        let token = numbering.claim_for_new_order(self.core.business_day);
         Ok(OpenOrder {
             core: self.core,
             token,
-            bill_number,
+            bill_number: None,
         })
     }
 }
 
 impl OpenOrder {
-    /// Take payment.
+    /// The bill is being made: the order takes its number, once. A number that has been
+    /// printed never moves, so an order that has one refuses another.
+    pub fn take_bill_number(&mut self, number: Claimed) -> Result<()> {
+        if self.bill_number.is_some() {
+            return Err(OrderError::AlreadyBilled);
+        }
+        self.bill_number = Some(number);
+        Ok(())
+    }
+
+    /// Take payment. Only a numbered bill can be paid.
     pub fn settle(
         self,
         bill: Bill,
@@ -320,6 +337,7 @@ impl OpenOrder {
         at: Timestamp,
         by: StaffId,
     ) -> Result<SettledOrder> {
+        let bill_number = self.bill_number.ok_or(OrderError::NotBilled)?;
         settlement.validate(bill.grand_total)?;
         if !settlement.is_settled(bill.grand_total)? {
             return Err(OrderError::NotFullyPaid);
@@ -328,7 +346,7 @@ impl OpenOrder {
         Ok(SettledOrder {
             core: self.core,
             token: self.token,
-            bill_number: self.bill_number,
+            bill_number,
             bill,
             settlement,
             settled_at: at,
@@ -357,7 +375,7 @@ impl SettledOrder {
         OpenOrder {
             core: self.core,
             token: self.token,
-            bill_number: self.bill_number,
+            bill_number: Some(self.bill_number),
         }
     }
 
@@ -538,6 +556,58 @@ mod tests {
         (order, numbering)
     }
 
+    /// The same, with the bill made: what the counter has the moment before it takes money.
+    fn billed_parcel() -> (OpenOrder, Numbering) {
+        let (mut order, mut numbering) = open_parcel();
+        order
+            .take_bill_number(numbering.claim_bill(day()))
+            .expect("first number");
+        (order, numbering)
+    }
+
+    #[test]
+    fn a_bill_number_is_taken_once_and_only_a_numbered_bill_is_paid() {
+        let (mut order, mut numbering) = open_parcel();
+        order
+            .core
+            .cart
+            .add(item("dosa", 10_000), Qty::ONE, None, vec![])
+            .expect("adds");
+        let bill = compute_bill(
+            BillInput::new(&order.core.cart, crate::tax::Registration::Regular)
+                .with_rounding(RoundingMode::None),
+        )
+        .expect("computes");
+        let mut settlement = Settlement::new();
+        settlement
+            .add(Payment::new(PaymentMode::Cash, bill.grand_total).expect("valid"))
+            .expect("adds");
+
+        // Paid in full, but never billed: refused, and no number was spent.
+        assert_eq!(
+            order
+                .clone()
+                .settle(bill.clone(), settlement.clone(), at(2_500), staff())
+                .err(),
+            Some(OrderError::NotBilled)
+        );
+
+        order
+            .take_bill_number(numbering.claim_bill(day()))
+            .expect("numbered");
+        assert_eq!(
+            order
+                .take_bill_number(numbering.claim_bill(day()))
+                .err(),
+            Some(OrderError::AlreadyBilled),
+            "a printed number never moves"
+        );
+        let settled = order
+            .settle(bill, settlement, at(2_500), staff())
+            .expect("settles");
+        assert_eq!(settled.bill_number.value, 1);
+    }
+
     #[test]
     fn a_table_only_exists_on_a_dine_in_order() {
         assert_eq!(
@@ -580,10 +650,7 @@ mod tests {
         .expect("opens");
 
         assert_eq!(order.token.business_day, BusinessDay::from_ymd(2026, 8, 1));
-        assert_eq!(
-            order.bill_number.business_day,
-            BusinessDay::from_ymd(2026, 8, 1)
-        );
+        assert_eq!(order.bill_number, None, "no bill yet, so no bill number");
         assert_eq!(order.core.business_day, BusinessDay::from_ymd(2026, 8, 1));
     }
 
@@ -620,7 +687,7 @@ mod tests {
 
     /// A ₹100 parcel order, paid in cash.
     fn settled_order() -> SettledOrder {
-        let (mut order, _) = open_parcel();
+        let (mut order, _) = billed_parcel();
         order
             .core
             .cart
@@ -644,7 +711,7 @@ mod tests {
 
     #[test]
     fn a_bill_that_is_not_covered_cannot_be_settled() {
-        let (mut order, _) = open_parcel();
+        let (mut order, _) = billed_parcel();
         order
             .core
             .cart
@@ -733,8 +800,8 @@ mod tests {
 
         // And the number is never handed out again.
         let mut numbering = Numbering::new();
-        numbering.claim_for_new_order(day());
-        let (_, next_bill) = numbering.claim_for_new_order(day());
+        numbering.claim_bill(day());
+        let next_bill = numbering.claim_bill(day());
         assert_ne!(next_bill.value, number.value);
         assert_eq!(next_bill.value, 2);
     }
@@ -1120,9 +1187,10 @@ mod tests {
         ];
 
         assert_eq!(all[0].bill_number(), None, "a draft has no number yet");
-        for order in all.iter().skip(1) {
-            assert!(order.bill_number().is_some());
-        }
+        assert_eq!(all[1].bill_number(), None, "nor an order nobody has billed");
+        assert!(all[2].bill_number().is_some(), "a paid bill has one");
+        assert_eq!(all[3].bill_number(), None, "a walk-out before any bill leaves no hole");
+        assert!(all[4].bill_number().is_some(), "a voided bill keeps its");
         for order in &all {
             assert_eq!(order.core().business_day, day());
         }

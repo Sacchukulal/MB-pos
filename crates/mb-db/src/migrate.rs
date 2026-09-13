@@ -107,6 +107,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0014_shop_rate",
         sql: include_str!("migrations/0014_shop_rate.sql"),
     },
+    // A bill number is born when the bill is, not when the food is ordered.
+    Migration {
+        version: 15,
+        name: "0015_bill_number_when_billed",
+        sql: include_str!("migrations/0015_bill_number_when_billed.sql"),
+    },
 ];
 
 /// The highest version this build understands.

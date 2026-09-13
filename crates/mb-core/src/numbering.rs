@@ -142,9 +142,14 @@ impl Numbering {
         }
     }
 
-    /// Both numbers for a new order, taken together.
-    pub fn claim_for_new_order(&mut self, today: BusinessDay) -> (Claimed, Claimed) {
-        (self.token.claim(today), self.bill.claim(today))
+    /// The token a new order takes. The bill number is not taken here: it waits for the bill.
+    pub fn claim_for_new_order(&mut self, today: BusinessDay) -> Claimed {
+        self.token.claim(today)
+    }
+
+    /// The bill number, taken the first time the bill is printed or paid.
+    pub fn claim_bill(&mut self, today: BusinessDay) -> Claimed {
+        self.bill.claim(today)
     }
 }
 
@@ -256,19 +261,22 @@ mod tests {
     }
 
     #[test]
-    fn an_order_takes_its_token_and_bill_number_together() {
+    fn an_order_takes_its_token_at_once_and_its_bill_number_when_billed() {
         let mut numbering = Numbering::new();
-        let (token, bill) = numbering.claim_for_new_order(day(1));
+        let token = numbering.claim_for_new_order(day(1));
         assert_eq!(token.value, 1);
+        let bill = numbering.claim_bill(day(1));
         assert_eq!(bill.value, 1);
 
-        let (token, bill) = numbering.claim_for_new_order(day(1));
+        let token = numbering.claim_for_new_order(day(1));
         assert_eq!(token.value, 2);
+        let bill = numbering.claim_bill(day(1));
         assert_eq!(bill.value, 2);
 
         // Next day: the token restarts, the bill series does not.
-        let (token, bill) = numbering.claim_for_new_order(day(2));
+        let token = numbering.claim_for_new_order(day(2));
         assert_eq!(token.value, 1, "tokens restart daily");
+        let bill = numbering.claim_bill(day(2));
         assert_eq!(bill.value, 3, "the invoice series runs on");
     }
 

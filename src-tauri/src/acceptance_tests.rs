@@ -816,6 +816,64 @@ fn a_settled_order_is_never_given_a_second_bill_number() {
     );
 }
 
+// The bill number is born with the bill.
+
+/// Ordering spends no bill number, a walk-out spends none, and the numbers run in the order
+/// bills are made: the first bill of the day is 0001 however many tables ordered before it.
+#[test]
+fn a_bill_number_is_born_with_the_bill_not_the_order() {
+    let scratch = Scratch::new("acceptance_number_with_bill");
+    let app = a_shop(&scratch, "number_with_bill");
+    let issued = |app: &App| -> Option<u64> {
+        app.with_shop(|shop| {
+            shop.db
+                .transaction(|tx| {
+                    mb_db::numbering::last_issued(
+                        tx,
+                        OUTLET,
+                        app.terminal_id(),
+                        mb_db::CounterKind::Bill,
+                    )
+                })
+                .map_err(|e| crate::words::from_db(&e))
+        })
+        .expect("the counter reads")
+    };
+    assert_eq!(issued(&app), None, "a new shop has issued nothing");
+
+    // A parcel is ordered and sent to the kitchen: on disk, with a token, and no bill number.
+    crate::ipc::cart_clear_on(&app, false).expect("a fresh cart");
+    app.with_cart_mut(|state| {
+        state.set_order_type(mb_core::OrderType::Parcel);
+        Ok(())
+    })
+    .expect("parcel");
+    crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
+        .expect("added");
+    let parked = crate::flows::park_open_order(&app).expect("parked");
+    assert_eq!(parked.bill_number, None, "ordering spent a bill number");
+    assert_eq!(issued(&app), None);
+
+    // The customer leaves before any bill is made: cancelled, and still nothing spent.
+    crate::corrections::cancel_order_on(
+        &app,
+        parked.core.id.as_str().to_owned(),
+        "Customer left".to_owned(),
+    )
+    .expect("cancelled");
+    let gone = crate::flows::find_order(&app, &parked.core.id)
+        .expect("reads")
+        .expect("still recorded");
+    assert!(matches!(gone, mb_core::AnyOrder::Cancelled(_)));
+    assert_eq!(gone.bill_number(), None, "a walk-out left a hole in the bill book");
+    assert_eq!(issued(&app), None, "a walk-out spent a bill number");
+
+    // The next order is paid: THAT is the first bill, and it is number one.
+    let (number, _) = bill(&app, &[("itm_dosa", "1")], "Cash");
+    assert_eq!(number, "0001", "{number}");
+    assert_eq!(issued(&app), Some(1));
+}
+
 // FIX PLAN 1 — one counter action at a time.
 
 /// A second action waits for the first to finish.

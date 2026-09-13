@@ -145,11 +145,11 @@ fn a_representative_bill() -> (mb_core::Bill, mb_core::AnyOrder) {
             formatted: "42".to_owned(),
             business_day: day,
         },
-        bill_number: mb_core::Claimed {
+        bill_number: Some(mb_core::Claimed {
             value: 1_207,
             formatted: "BIR/1207".to_owned(),
             business_day: day,
-        },
+        }),
     };
 
     // Two payments, so `show.payment_lines` has something to show.

@@ -86,6 +86,24 @@ pub fn claim(
     })
 }
 
+/// The bill is being made: an open order takes its bill number, claimed against the order's
+/// own business day in THIS transaction, so a failure after it cannot spend one. An order
+/// that already has a number keeps it — the number on a printed bill never moves.
+pub fn number_the_bill(
+    tx: &Transaction<'_>,
+    outlet: &str,
+    terminal: &str,
+    order: &mut mb_core::OpenOrder,
+) -> Result<(), DbError> {
+    if order.bill_number.is_some() {
+        return Ok(());
+    }
+    let number = claim(tx, outlet, terminal, CounterKind::Bill, order.core.business_day)?;
+    order
+        .take_bill_number(number)
+        .map_err(|e| DbError::invariant(e.to_string()))
+}
+
 /// What was already handed out, or `None` if nothing has been yet.
 pub fn last_issued(
     tx: &Transaction<'_>,

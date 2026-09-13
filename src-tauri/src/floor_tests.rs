@@ -149,20 +149,13 @@ fn seat(
                     mb_db::numbering::CounterKind::Token,
                     day(),
                 )?;
-                let bill_number = mb_db::numbering::claim(
-                    tx,
-                    OUTLET,
-                    crate::terminals::TERMINAL,
-                    mb_db::numbering::CounterKind::Bill,
-                    day(),
-                )?;
                 repos.orders().save(
                     OUTLET,
                     crate::terminals::TERMINAL,
                     &AnyOrder::Open(mb_core::OpenOrder {
                         core: draft.core.clone(),
                         token,
-                        bill_number,
+                        bill_number: None,
                     }),
                 )
             })
@@ -289,7 +282,11 @@ fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
         matches!(absorbed, AnyOrder::Cancelled(_)),
         "recorded, not deleted"
     );
-    assert!(absorbed.bill_number().is_some(), "and it keeps its number");
+    assert_eq!(
+        absorbed.bill_number(),
+        None,
+        "no bill was ever made for it, so it spent no number"
+    );
 
     let link: Option<String> = app
         .with_shop(|shop| {
@@ -321,7 +318,7 @@ fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
 }
 
 #[test]
-fn splitting_gives_the_new_bill_its_own_number_and_the_right_ledger() {
+fn splitting_gives_the_new_order_its_own_token_and_the_right_ledger() {
     let scratch = Scratch::new("split");
     let app = a_shop_with_a_room(&scratch);
     // Three dosas, two of them already told to the kitchen, plus a tea so the origin is not
@@ -379,10 +376,11 @@ fn splitting_gives_the_new_bill_its_own_number_and_the_right_ledger() {
         fresh.core().cart.lines()[0].qty,
         Qty::from_whole(2).expect("two")
     );
-    assert_ne!(
-        fresh.bill_number().map(|c| c.formatted.clone()),
-        kept.bill_number().map(|c| c.formatted.clone()),
-        "two bills, two numbers",
+    assert_ne!(fresh.token().map(|c| c.value), kept.token().map(|c| c.value), "two orders, two tokens");
+    assert_eq!(
+        (fresh.bill_number(), kept.bill_number()),
+        (None, None),
+        "neither has been billed, so neither has a bill number yet"
     );
     let pending = fresh
         .core()
@@ -548,9 +546,10 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
         "nothing reached the printer: {slips:?}"
     );
 
-    // And nothing else. Same state, same table, same bill number — a settled order here would
-    // mean the button closed a table that had not paid, which is the failure worth having a
-    // test for.
+    // And nothing else. Same state, same table — a settled order here would mean the button
+    // closed a table that had not paid, which is the failure worth having a test for. The one
+    // thing that DOES change: the paper carried to the table is the bill, so this is where
+    // its number is born, and a second print keeps it.
     let after = read(&app, &order);
     assert!(
         matches!(after, AnyOrder::Open(_)),
@@ -559,9 +558,19 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
     let (AnyOrder::Open(before), AnyOrder::Open(after)) = (&before, &after) else {
         panic!("the order stopped being open");
     };
+    assert_eq!(before.bill_number, None, "a number before any bill was made");
+    let number = after
+        .bill_number
+        .clone()
+        .expect("the bill carried to the table has its number");
+    crate::flows::print_open_bill_on(&app, order.as_str().to_owned()).expect("printed again");
+    let AnyOrder::Open(again) = read(&app, &order) else {
+        panic!("the order stopped being open");
+    };
     assert_eq!(
-        before.bill_number.formatted, after.bill_number.formatted,
-        "printing the bill burned a bill number"
+        again.bill_number,
+        Some(number),
+        "a second print of the same bill moved its number"
     );
     assert_eq!(
         before.core.table(),

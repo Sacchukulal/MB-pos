@@ -152,6 +152,9 @@ fn settle_where_it_stands(app: &App, order_id: &str, staff: &StaffId) {
                 settlement
                     .add(Payment::new(PaymentMode::Cash, bill.grand_total).expect("cash"))
                     .expect("paid");
+                // The bill is made here, so its number is born here.
+                let mut open = open;
+                mb_db::numbering::number_the_bill(tx, OUTLET, "t_a", &mut open)?;
                 let done = open
                     .settle(bill, settlement, crate::flows::now(), staff.clone())
                     .map_err(|e: mb_core::OrderError| mb_db::DbError::invariant(e.to_string()))?;

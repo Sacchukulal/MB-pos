@@ -174,7 +174,7 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
             variant={size === 'md' ? 'primary' : 'secondary'}
             onClick={() => setPending({ kind: 'revert', bill })}
           >
-            Revert
+            Edit bill
           </Button>
         ) : null}
         {view.canReprint ? (
@@ -604,7 +604,7 @@ function Correction({
   // A revert is a void and a fresh bill, so it offers the void reasons.
   const kind: ReasonKind = pending.kind === 'reprint' ? 'reprint' : 'void';
   const what = {
-    revert: `Revert bill ${bill.number} — ${bill.total.text}`,
+    revert: `Edit bill ${bill.number} — ${bill.total.text}. It goes back to the counter under the same number, to be changed and billed again.`,
     void: `Void bill ${bill.number} — ${bill.total.text}`,
     reprint: `Reprint bill ${bill.number}`,
     refund: `Give back ${bill.total.text} on bill ${bill.number}`,

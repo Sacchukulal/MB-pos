@@ -8,7 +8,6 @@ use ts_rs::TS;
 use crate::guard;
 use crate::log_info;
 use crate::state::{App, OUTLET};
-use crate::terminals::TERMINAL;
 use crate::words::{self, UiError, UiResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -128,7 +127,7 @@ pub fn numbering_on(app: &App) -> UiResult<NumberingView> {
     app.with_shop(|shop| {
         let counters = shop
             .db
-            .transaction(|tx| mb_db::numbering::counters(tx, OUTLET, TERMINAL))
+            .transaction(|tx| mb_db::numbering::counters(tx, OUTLET, app.terminal_id()))
             .map_err(|e| words::from_db(&e))?;
         Ok(NumberingView {
             counters: counters.iter().map(view_of).collect(),
@@ -180,7 +179,7 @@ pub fn save_counter_on(app: &App, edit: CounterEdit) -> UiResult<NumberingView> 
     let refusal = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
-                let before = mb_db::numbering::counters(tx, OUTLET, TERMINAL)?
+                let before = mb_db::numbering::counters(tx, OUTLET, app.terminal_id())?
                     .into_iter()
                     .find(|c| c.kind == kind);
                 let issued = before.as_ref().and_then(|c| c.last_issued);
@@ -208,7 +207,7 @@ pub fn save_counter_on(app: &App, edit: CounterEdit) -> UiResult<NumberingView> 
                 mb_db::numbering::set_format(
                     tx,
                     OUTLET,
-                    TERMINAL,
+                    app.terminal_id(),
                     kind,
                     &mb_db::numbering::Format {
                         prefix: edit.prefix.clone(),
@@ -220,7 +219,7 @@ pub fn save_counter_on(app: &App, edit: CounterEdit) -> UiResult<NumberingView> 
                 mb_db::numbering::set_next(
                     tx,
                     OUTLET,
-                    TERMINAL,
+                    app.terminal_id(),
                     kind,
                     u64::from(edit.next_value),
                 )?;

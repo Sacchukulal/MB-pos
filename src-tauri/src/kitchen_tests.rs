@@ -179,20 +179,13 @@ fn seat(app: &App, items: &[&str]) -> String {
                     mb_db::numbering::CounterKind::Token,
                     day,
                 )?;
-                let bill_number = mb_db::numbering::claim(
-                    tx,
-                    OUTLET,
-                    crate::terminals::TERMINAL,
-                    mb_db::numbering::CounterKind::Bill,
-                    day,
-                )?;
                 Repos::new(tx).orders().save(
                     OUTLET,
                     crate::terminals::TERMINAL,
                     &mb_core::AnyOrder::Open(mb_core::OpenOrder {
                         core: draft.core.clone(),
                         token,
-                        bill_number,
+                        bill_number: None,
                     }),
                 )
             })
