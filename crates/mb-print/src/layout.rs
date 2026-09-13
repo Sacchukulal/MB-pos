@@ -517,12 +517,15 @@ fn lay_block(
             columns,
             rows,
             style,
+            measured_as,
         } => {
             // A table needs its fixed columns plus one character of fill.
             let style = fit_at_least(*style, least_for(columns), usable, metrics, notes);
             let size = metrics.size(style);
-            let width = size.chars_across(usable);
-            let widths = fit_columns(columns, width);
+            let widths = match measured_as {
+                Some(table) => in_another_size(columns, *table, size.advance, usable, metrics),
+                None => fit_columns(columns, size.chars_across(usable)),
+            };
             for row in rows {
                 for (line, segments) in lay_row(columns, &widths, row) {
                     lines.push(LaidLine {
@@ -761,6 +764,31 @@ fn fit_row(
         }
     }
     Ok(out)
+}
+
+/// The same columns, worked out in `table`'s size and then counted in characters of
+/// `advance` dots — which is what a row of column names set in a size of its own needs. A
+/// table measures its columns in its OWN characters, so a heading printed at another size
+/// lands between the columns instead of over them; this gives the heading the same dot
+/// boundaries the food below it has.
+fn in_another_size(
+    columns: &[Column],
+    table: Style,
+    advance: u32,
+    usable: u32,
+    metrics: &Metrics,
+) -> Vec<usize> {
+    let table = metrics.size(table);
+    let advance = advance.max(1);
+    fit_columns(columns, table.chars_across(usable))
+        .iter()
+        .map(|width| {
+            let dots = u32::try_from(*width)
+                .unwrap_or(u32::MAX)
+                .saturating_mul(table.advance);
+            usize::try_from(dots / advance).unwrap_or(1).max(1)
+        })
+        .collect()
 }
 
 /// Rule: the columns always add up to the line width, exactly.
@@ -1068,6 +1096,7 @@ mod tests {
                 size: Style::LADDER[5],
                 bold: false,
             },
+            measured_as: None,
         });
 
         let laid = layout_for(&doc, &m).expect("lays out");
@@ -1148,6 +1177,7 @@ mod tests {
                 size: Style::LADDER[8],
                 bold: false,
             },
+            measured_as: None,
         });
         let laid = layout_for(&doc, &m).expect("lays out");
         assert!(

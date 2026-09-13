@@ -76,7 +76,7 @@ pub(crate) fn queue_kitchen_lines(
     let bill_number = order.and_then(|o| o.bill_number().map(|b| b.formatted.clone()));
     let waiter = order.and_then(|o| staff_name(app, &o.core().created_by));
     let note = order.and_then(|o| o.core().note.clone());
-    let time = clock_time(at);
+    let time = clock_stamp(at);
 
     // One ticket per printer, or one per category on it: the shop's two choices under
     // Settings › Printers decide, and a category with no printer of its own falls back to the
@@ -973,6 +973,26 @@ pub fn clock_time(at: Timestamp) -> String {
     let hours = of_day / 3_600;
     let minutes = (of_day % 3_600) / 60;
     format!("{hours:02}:{minutes:02}")
+}
+
+/// The clock a kitchen ticket wants: the date with it, and the seconds.
+///
+/// A cook holds two tickets for one table and has to know which was called first, and a
+/// ticket found on the floor has to say which day it is from. The date is the wall date, not
+/// the business day — a ticket says when the food was ordered.
+#[must_use]
+#[expect(
+    clippy::integer_division,
+    reason = "seconds into hours and minutes for a printed clock; no amount is involved"
+)]
+pub fn clock_stamp(at: Timestamp) -> String {
+    let (day, of_day) = at.to_local_parts(UtcOffset::INDIA);
+    // The one date shape this shop's paper uses.
+    let date = BusinessDay::from_days_since_epoch(day);
+    let hours = of_day / 3_600;
+    let minutes = (of_day % 3_600) / 60;
+    let seconds = of_day % 60;
+    format!("{date} {hours:02}:{minutes:02}:{seconds:02}")
 }
 
 // Orders on disk.

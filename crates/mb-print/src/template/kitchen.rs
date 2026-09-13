@@ -165,6 +165,17 @@ fn time_of<'a>(ctx: &KitchenContext<'a>) -> Option<&'a str> {
     ctx.time.filter(|_| ctx.settings.show_time)
 }
 
+/// The clock, on a line of its own.
+///
+/// The date and the seconds do not fit a cell a third of a 58 mm roll wide: sharing the
+/// table's row broke "2026-02-02" in half across two lines. A whole line holds it on every
+/// roll, and it is the right-hand thing on the head, where it always was.
+fn clock_row(doc: &mut Document, ctx: &KitchenContext<'_>) {
+    if let Some(time) = time_of(ctx) {
+        doc.text(time, ctx.settings.details, Align::Right);
+    }
+}
+
 /// A cancellation says so at the top whatever the format, and a reprint says so too: a ticket
 /// cooked twice is food thrown away. The station line goes with them.
 fn marks(doc: &mut Document, ctx: &KitchenContext<'_>) {
@@ -190,6 +201,7 @@ fn three_across(doc: &mut Document, style: Style, cells: [String; 3]) {
         ],
         rows: vec![cells.to_vec()],
         style,
+        measured_as: None,
     });
 }
 
@@ -264,9 +276,10 @@ fn classic_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
         [
             table_of(ctx).unwrap_or_default(),
             kind_of(ctx).unwrap_or_default().to_owned(),
-            time_of(ctx).unwrap_or_default().to_owned(),
+            String::new(),
         ],
     );
+    clock_row(doc, ctx);
     aside_row(doc, ctx);
     if s.separators.below_details {
         doc.separator(s.pattern);
@@ -289,9 +302,10 @@ fn big_token_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
         [
             table_of(ctx).unwrap_or_default(),
             kind_of(ctx).unwrap_or_default().to_owned(),
-            time_of(ctx).unwrap_or_default().to_owned(),
+            String::new(),
         ],
     );
+    clock_row(doc, ctx);
     aside_row(doc, ctx);
     if s.separators.below_details {
         doc.separator(s.pattern);
@@ -316,9 +330,10 @@ fn table_card_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
         [
             token_of(ctx).unwrap_or_default(),
             kind_of(ctx).unwrap_or_default().to_owned(),
-            time_of(ctx).unwrap_or_default().to_owned(),
+            String::new(),
         ],
     );
+    clock_row(doc, ctx);
     aside_row(doc, ctx);
     if s.separators.below_details {
         doc.separator(s.pattern);
@@ -348,8 +363,9 @@ fn slip_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
             size: s.details.size,
             bold: true,
         },
-        [left, middle, time_of(ctx).unwrap_or_default().to_owned()],
+        [left, middle, String::new()],
     );
+    clock_row(doc, ctx);
     let mut second = Vec::new();
     if let Some(token) = token_of(ctx) {
         second.push(token);
@@ -375,16 +391,27 @@ fn slip_head(doc: &mut Document, ctx: &KitchenContext<'_>) {
     }
 }
 
-/// The column names, set over the dishes.
+/// The column names, set over the dishes in the shop's own size for them.
 ///
-/// A table's columns are measured in characters of its own size, so a heading printed smaller
-/// than the food lands between the columns instead of over them — which is what a ticket with
-/// a quantity heading sitting halfway across the paper was. Same size as the dishes, lighter
-/// weight, so it reads as a caption and not as a dish.
-const fn heading_over(items: Style) -> Style {
-    Style {
-        size: items.size,
-        bold: false,
+/// A table's columns are measured in characters of its own size, so a heading printed at
+/// another size would land between the columns instead of over them — which is what a ticket
+/// with a quantity heading sitting halfway across the paper was. The heading carries the
+/// food's size with it, and the layout works the columns out in that.
+fn column_names(
+    doc: &mut Document,
+    ctx: &KitchenContext<'_>,
+    columns: &[Column],
+    cells: Vec<String>,
+) {
+    let s = ctx.settings;
+    doc.push(Block::Columns {
+        columns: columns.to_vec(),
+        rows: vec![cells],
+        style: s.column_names,
+        measured_as: Some(s.items),
+    });
+    if s.separators.below_column_names {
+        doc.separator(s.pattern);
     }
 }
 
@@ -399,14 +426,12 @@ fn one_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
     ];
 
     if s.show_column_names {
-        doc.push(Block::Columns {
-            columns: columns.clone(),
-            rows: vec![vec!["Qty".to_owned(), String::new(), "Item".to_owned()]],
-            style: heading_over(s.items),
-        });
-        if s.separators.below_column_names {
-            doc.separator(s.pattern);
-        }
+        column_names(
+            doc,
+            ctx,
+            &columns,
+            vec!["Qty".to_owned(), String::new(), "Item".to_owned()],
+        );
     }
 
     let gap = usize::from(s.row_height.gap());
@@ -426,6 +451,7 @@ fn one_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
         columns,
         rows,
         style: s.items,
+        measured_as: None,
     });
 }
 
@@ -434,14 +460,12 @@ fn two_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
     let columns = vec![Column::fill(Align::Left), Column::fill(Align::Left)];
 
     if s.show_column_names {
-        doc.push(Block::Columns {
-            columns: columns.clone(),
-            rows: vec![vec!["Item".to_owned(), "Item".to_owned()]],
-            style: heading_over(s.items),
-        });
-        if s.separators.below_column_names {
-            doc.separator(s.pattern);
-        }
+        column_names(
+            doc,
+            ctx,
+            &columns,
+            vec!["Item".to_owned(), "Item".to_owned()],
+        );
     }
 
     let cells: Vec<String> = ctx
@@ -473,6 +497,7 @@ fn two_column_items(doc: &mut Document, ctx: &KitchenContext<'_>) {
         columns,
         rows,
         style: s.items,
+        measured_as: None,
     });
 }
 

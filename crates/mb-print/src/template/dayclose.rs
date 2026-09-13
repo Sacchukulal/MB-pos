@@ -99,6 +99,7 @@ pub fn day_close_document(paper: Paper, context: &DayCloseContext<'_>) -> Docume
                     })
                     .collect(),
                 style: Style::NORMAL,
+                measured_as: None,
             });
     }
 

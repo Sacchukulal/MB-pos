@@ -130,12 +130,14 @@ fn table(doc: &mut Document, ctx: &ReportContext<'_>) {
         columns: columns.clone(),
         rows: vec![ctx.columns.iter().map(|c| c.header.clone()).collect()],
         style: Style::new(1, true),
+        measured_as: None,
     })
     .separator(Pattern::Solid)
     .push(Block::Columns {
         columns: columns.clone(),
         rows: ctx.rows.to_vec(),
         style: Style::NORMAL,
+        measured_as: None,
     });
 
     if let Some(totals) = ctx.totals {
@@ -143,6 +145,7 @@ fn table(doc: &mut Document, ctx: &ReportContext<'_>) {
             columns,
             rows: vec![totals.to_vec()],
             style: Style::new(1, true),
+            measured_as: None,
         });
     }
 }
@@ -236,5 +239,6 @@ fn slip(
             .collect(),
         columns,
         style: Style::NORMAL,
+        measured_as: None,
     });
 }

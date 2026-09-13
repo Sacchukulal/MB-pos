@@ -112,8 +112,16 @@ fn seed(app: &App) {
                             category_id: Some(CategoryId::new(category)),
                             name: name.to_owned(),
                             unit_price: Money::from_paise(9_000),
-                            tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").0,
-                            price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(TaxRate::from_percent(5).expect("5%"))).expect("a seeded slab").1,
+                            tax_class_id: mb_core::seeded_placement(mb_core::TaxSpec::gst(
+                                TaxRate::from_percent(5).expect("5%"),
+                            ))
+                            .expect("a seeded slab")
+                            .0,
+                            price_basis: mb_core::seeded_placement(mb_core::TaxSpec::gst(
+                                TaxRate::from_percent(5).expect("5%"),
+                            ))
+                            .expect("a seeded slab")
+                            .1,
                             hsn: None,
                             cost_price: None,
                             short_code: None,
@@ -967,4 +975,18 @@ fn a_dine_in_order_with_no_table_prints_nothing() {
         "paper went out before the table was asked for: {:?}",
         kitchen_paper(&app)
     );
+}
+
+/// The kitchen ticket's clock: the date with it, and the seconds.
+///
+/// A cook holding two tickets for one table reads the seconds to know which was called
+/// first, and a ticket found on the floor has to say which day it is from.
+#[test]
+fn the_ticket_clock_carries_the_date_and_the_seconds() {
+    // 2026-02-02, ten past eight in the morning, in India.
+    let at = mb_core::Timestamp::from_millis(1_770_000_000_000);
+    assert_eq!(crate::flows::clock_stamp(at), "2026-02-02 08:10:00");
+    // Seven seconds later says seven seconds later.
+    let later = mb_core::Timestamp::from_millis(1_770_000_007_000);
+    assert_eq!(crate::flows::clock_stamp(later), "2026-02-02 08:10:07");
 }

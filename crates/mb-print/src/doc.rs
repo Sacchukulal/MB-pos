@@ -250,6 +250,12 @@ pub enum Block {
         columns: Vec<Column>,
         rows: Vec<Vec<String>>,
         style: Style,
+        /// Set only on the row of names over a table, and only when those names are set in a
+        /// size of their own: the size the table underneath is set in. The widths are worked
+        /// out in that size and then counted in this one, so the names stand over the columns
+        /// they name however big they are.
+        #[serde(default)]
+        measured_as: Option<Style>,
     },
     Separator {
         pattern: Pattern,

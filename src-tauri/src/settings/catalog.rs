@@ -1665,9 +1665,10 @@ pub const CATALOG: &[Entry] = &[
         "kitchen.show_time",
         Kitchen,
         Row,
-        "Print the time",
-        "",
-        ["kot", "time", "clock"],
+        "Print the date and time",
+        "The day and the clock to the second, so two tickets for one table are 
+         told apart.",
+        ["kot", "time", "clock", "date", "seconds"],
         kitchen.show_time
     ),
     // A cook could not say "KOT 14", because there was no such number.
@@ -1795,6 +1796,24 @@ pub const CATALOG: &[Entry] = &[
         ["kot", "bold", "items"],
         kitchen.items.bold
     ),
+    size!(
+        "kitchen.column_names.scale",
+        Kitchen,
+        "Column names size",
+        "The \"Qty  Item\" caption over the food. It stands over its columns 
+         whatever size you give it.",
+        ["kot", "size", "columns", "heading", "qty", "item"],
+        kitchen.column_names
+    ),
+    flag!(
+        "kitchen.column_names.bold",
+        Kitchen,
+        Row,
+        "Column names in bold",
+        "",
+        ["kot", "bold", "columns", "heading"],
+        kitchen.column_names.bold
+    ),
     // Billing behaviour.
     pick!(
         "billing.search_mode",
@@ -1872,7 +1891,14 @@ pub const CATALOG: &[Entry] = &[
         "Tables on the billing screen",
         "On, the billing screen shows the table grid. Off, only the orders being cooked show \
          there; a table number typed in the box still opens that table.",
-        ["tables", "billing screen", "grid", "parcel only", "counter", "hide tables"],
+        [
+            "tables",
+            "billing screen",
+            "grid",
+            "parcel only",
+            "counter",
+            "hide tables"
+        ],
         billing.tables_on_counter
     ),
     // The day.
@@ -2198,6 +2224,7 @@ const TOPICS: &[(&str, &str)] = &[
     ("kitchen.title", "Text sizes"),
     ("kitchen.details", "Text sizes"),
     ("kitchen.items", "Text sizes"),
+    ("kitchen.column_names", "Text sizes"),
     ("billing.search_mode", "At the counter"),
     ("billing.rounding", "At the counter"),
     ("billing.lock_order_type", "At the counter"),
@@ -2239,6 +2266,7 @@ const ROWS: &[(&str, &str)] = &[
     ("kitchen.title.", "Title"),
     ("kitchen.details.", "Ticket details"),
     ("kitchen.items.", "Item list"),
+    ("kitchen.column_names.", "Column names"),
     ("billing.service_charge", "Service charge"),
     ("billing.packing_charge", "Packing charge"),
     ("billing.delivery_charge", "Delivery charge"),

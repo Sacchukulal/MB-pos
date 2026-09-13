@@ -325,8 +325,17 @@ pub struct KitchenSettings {
     pub title: Style,
     pub details: Style,
     pub items: Style,
+    /// The "Qty  Item" row over the food. Its own size, because a caption read once is not
+    /// the food read across the room — the names stay over their columns whatever it is.
+    #[serde(default = "column_names")]
+    pub column_names: Style,
     #[serde(default)]
     pub format: TicketFormat,
+}
+
+/// Serde default for the column names, added after shops had saved their ticket.
+fn column_names() -> Style {
+    dots(Style::LADDER[8], false)
 }
 
 impl Default for KitchenSettings {
@@ -351,6 +360,8 @@ impl Default for KitchenSettings {
             title: dots(Style::HEADING, true),
             details: dots(Style::BODY, true),
             items: dots(Style::LADDER[8], true),
+            // The food's size, lighter: a heading reads as a caption, not as a dish.
+            column_names: column_names(),
             format: TicketFormat::Classic,
         }
     }

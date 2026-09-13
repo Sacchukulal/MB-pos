@@ -9,7 +9,7 @@ mod common;
 use common::Fixture;
 use mb_core::{ItemId, LineIdentity, Money, OrderType, Qty};
 use mb_print::doc::{Align, Block, Column, Document, Style};
-use mb_print::layout::{LaidContent, LaidLine, Note, layout};
+use mb_print::layout::{LaidContent, LaidLine, Note, layout, layout_for};
 use mb_print::paper::{Offset, Paper, PaperKind};
 use mb_print::settings::KitchenSettings;
 use mb_print::template::{
@@ -69,6 +69,7 @@ fn t3_a_long_name_wraps_and_loses_nothing() {
         ],
         rows: vec![vec![name.to_owned(), "2".to_owned(), "480.00".to_owned()]],
         style: Style::NORMAL,
+        measured_as: None,
     });
     let rendered = text::to_text(&layout(&doc).expect("lays out"));
 
@@ -360,8 +361,14 @@ fn t13_the_kitchen_ticket_is_a_delta_in_cart_order() {
     assert!(rendered.contains("Idli"));
     // Read across the wrap: the big kitchen type breaks a modifier over two lines.
     let flat = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(flat.contains("extra cheese"), "a modifier is missing: {rendered}");
-    assert!(flat.contains("extra crispy"), "a note is missing: {rendered}");
+    assert!(
+        flat.contains("extra cheese"),
+        "a modifier is missing: {rendered}"
+    );
+    assert!(
+        flat.contains("extra crispy"),
+        "a note is missing: {rendered}"
+    );
 
     // Cart order, not alphabetical and not grouped.
     let dosa = rendered.find("Masala Dosa").expect("dosa");
@@ -477,7 +484,17 @@ fn line_with<'a>(laid: &'a mb_print::layout::Laid, wanted: &str) -> &'a LaidLine
         .unwrap_or_else(|| panic!("nothing on the paper says {wanted:?}"))
 }
 
-/// The column names sit OVER the columns they name.
+/// Where each of a line's boxes starts, in dots — the only measure two lines set in
+/// different sizes can be compared in.
+fn starts_in_dots(line: &LaidLine, metrics: &mb_print::metrics::Metrics) -> Vec<u32> {
+    let advance = metrics.size(line.style).advance;
+    line.segments
+        .iter()
+        .map(|box_| u32::try_from(box_.start).unwrap_or(0) * advance)
+        .collect()
+}
+
+/// The column names sit OVER the columns they name, at whatever size the shop set them.
 ///
 /// A table's columns are measured in characters of its own size, and the kitchen sets its food
 /// far larger than its details — so a heading drawn at the details size had a four-character
@@ -501,6 +518,12 @@ fn the_kitchen_column_names_line_up_with_the_food() {
     ];
     let settings = KitchenSettings {
         show_column_names: true,
+        // A caption well below the food: the size the shop is now free to choose, and the
+        // case that used to slide off its columns.
+        column_names: Style {
+            size: Style::LADDER[3],
+            bold: false,
+        },
         ..KitchenSettings::default()
     };
     let ctx = KitchenContext {
@@ -518,20 +541,31 @@ fn the_kitchen_column_names_line_up_with_the_food() {
         lines: &lines,
         settings: &settings,
     };
-    let laid = layout(&kitchen_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds"))
-        .expect("lays out");
+    let metrics = common::metrics(PaperKind::Mm80);
+    let laid = layout_for(
+        &kitchen_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds"),
+        &metrics,
+    )
+    .expect("lays out");
 
     let heading = line_with(&laid, "Qty");
     let dish = line_with(&laid, "Masala Dosa");
-    // Same size, therefore the same character cell, therefore the same column boundaries.
-    assert_eq!(
+    assert_ne!(
         heading.style.size, dish.style.size,
-        "the heading is set at a different size from the food, so it cannot line up"
+        "this test is about two different sizes"
     );
-    assert_eq!(
-        heading.segments, dish.segments,
-        "the heading's boxes are not the food's boxes"
-    );
+    // A character of the heading is the most a box may be out by: the widths are worked out
+    // in the food's size and then counted in whole characters of the heading's.
+    let slack = metrics.size(heading.style).advance;
+    for (name, food) in starts_in_dots(heading, &metrics)
+        .iter()
+        .zip(starts_in_dots(dish, &metrics))
+    {
+        assert!(
+            name.abs_diff(food) <= slack,
+            "a column name starts {name} dots across and its food {food}"
+        );
+    }
     assert_eq!(heading.indent_dots, dish.indent_dots);
     // And it is the quieter of the two: a caption, not a dish.
     assert!(!heading.style.bold);
@@ -551,6 +585,10 @@ fn the_two_column_ticket_names_its_columns_at_the_food_size() {
     let settings = KitchenSettings {
         show_column_names: true,
         two_column: true,
+        column_names: Style {
+            size: Style::LADDER[3],
+            bold: false,
+        },
         ..KitchenSettings::default()
     };
     let ctx = KitchenContext {
@@ -568,10 +606,69 @@ fn the_two_column_ticket_names_its_columns_at_the_food_size() {
         lines: &lines,
         settings: &settings,
     };
-    let laid = layout(&kitchen_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds"))
-        .expect("lays out");
+    let metrics = common::metrics(PaperKind::Mm80);
+    let laid = layout_for(
+        &kitchen_document(Paper::new(PaperKind::Mm80), &ctx).expect("builds"),
+        &metrics,
+    )
+    .expect("lays out");
     let heading = line_with(&laid, "Item");
     let dish = line_with(&laid, "Tea");
-    assert_eq!(heading.style.size, dish.style.size);
-    assert_eq!(heading.segments, dish.segments);
+    let slack = metrics.size(heading.style).advance;
+    for (name, food) in starts_in_dots(heading, &metrics)
+        .iter()
+        .zip(starts_in_dots(dish, &metrics))
+    {
+        assert!(name.abs_diff(food) <= slack);
+    }
+}
+
+/// The ticket's clock — the date and the seconds — stays on one line, on every format and on
+/// the narrow roll too. It shares a row with the table and the order type, and a stamp that
+/// wrapped would put the date on one line and the time on the next.
+#[test]
+fn the_ticket_clock_stays_on_one_line() {
+    let lines = vec![TicketLine {
+        name: "Idli".to_owned(),
+        qty: Qty::from_whole(2).expect("qty"),
+        note: None,
+        modifiers: vec![],
+    }];
+    const STAMP: &str = "2026-02-02 08:10:07";
+    for format in [
+        mb_print::settings::TicketFormat::Classic,
+        mb_print::settings::TicketFormat::BigToken,
+        mb_print::settings::TicketFormat::TableCard,
+        mb_print::settings::TicketFormat::Slip,
+    ] {
+        let settings = KitchenSettings {
+            format,
+            ..KitchenSettings::default()
+        };
+        for kind in [PaperKind::Mm58, PaperKind::Mm80] {
+            let ctx = KitchenContext {
+                kind: TicketKind::New,
+                token: Some("7"),
+                bill_number: Some("0023"),
+                kot_number: Some("11"),
+                order_type: OrderType::DineIn,
+                table: Some("18"),
+                time: Some(STAMP),
+                waiter: Some("Suresh"),
+                station: None,
+                reprint: false,
+                note: None,
+                lines: &lines,
+                settings: &settings,
+            };
+            let rendered = text::to_text(
+                &layout(&kitchen_document(Paper::new(kind), &ctx).expect("builds"))
+                    .expect("lays out"),
+            );
+            assert!(
+                rendered.lines().any(|line| line.contains(STAMP)),
+                "{format:?} on {kind:?} broke the clock over two lines:\n{rendered}"
+            );
+        }
+    }
 }

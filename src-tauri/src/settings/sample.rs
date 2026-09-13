@@ -160,6 +160,9 @@ pub struct Around {
     pub table: Option<String>,
     /// Through `flows::clock_time`, against a fixed moment — see `AT`.
     pub time: String,
+    /// The same moment as the kitchen ticket writes it: the date, and the clock to the
+    /// second — through `flows::clock_stamp`.
+    pub stamp: String,
     pub waiter: Option<String>,
     pub cashier: Option<String>,
 }
@@ -180,6 +183,7 @@ impl Around {
             logo: None,
             table: Some("6".to_owned()),
             time: "19:40".to_owned(),
+            stamp: "2026-02-02 19:40:07".to_owned(),
             waiter: Some("Suresh".to_owned()),
             cashier: Some("Ravi".to_owned()),
         }
@@ -223,6 +227,7 @@ pub fn around_for(app: &crate::state::App, group: &str, wanted: &ShopConfig) -> 
         // A fixed moment, for the reason `AT` gives: two renders a second apart must differ
         // only where a setting differs.
         time: crate::flows::clock_time(AT),
+        stamp: crate::flows::clock_stamp(AT),
         waiter: crate::flows::current_staff_name(app),
         cashier: crate::flows::current_staff_name(app),
     }
@@ -283,7 +288,7 @@ pub fn kitchen_preview(config: &ShopConfig, around: &Around) -> Result<PreviewDo
             kot_number: Some("14"),
             order_type: OrderType::DineIn,
             table: around.table.as_deref(),
-            time: Some(around.time.as_str()),
+            time: Some(around.stamp.as_str()),
             waiter: around.waiter.as_deref(),
             station: None,
             reprint: false,

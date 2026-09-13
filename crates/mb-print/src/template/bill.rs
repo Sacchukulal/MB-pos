@@ -329,6 +329,7 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
             ],
             rows,
             style: s.sections.meta,
+            measured_as: None,
         });
     } else if s.design == BillDesign::Centred {
         // Line by line down the middle, each fact parted from the next by a dot.
@@ -395,6 +396,7 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
             columns,
             rows,
             style: s.sections.meta,
+            measured_as: None,
         });
     }
 
@@ -518,6 +520,7 @@ fn wide_items(doc: &mut Document, ctx: &BillContext<'_>) {
         columns: columns.clone(),
         rows: vec![head],
         style: s.sections.items,
+        measured_as: None,
     });
     if s.separators.below_column_names {
         doc.separator(s.pattern);
@@ -552,6 +555,7 @@ fn wide_items(doc: &mut Document, ctx: &BillContext<'_>) {
         columns,
         rows,
         style: s.sections.items,
+        measured_as: None,
     });
     if s.separators.below_items {
         doc.separator(s.pattern);
@@ -831,6 +835,7 @@ fn tax_summary(doc: &mut Document, ctx: &BillContext<'_>) {
         columns,
         rows,
         style: s.sections.subtotals,
+        measured_as: None,
     });
     // A toggle in front of it.
     if s.separators.below_tax_summary {
