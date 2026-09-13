@@ -35,6 +35,15 @@
 }
 
 /*
+ * And folded away when it is not. A `display` an author wrote beats the browser own rule
+ * for `[hidden]`, so a folded group stayed on the screen while every test that asks the
+ * ACCESSIBILITY tree agreed it was gone.
+ */
+.mb-reports__list[hidden] {
+  display: none;
+}
+
+/*
  * A report is a pick (kit.css). The rail holds a long list of them, so its rows are set in the
  * cell size and read quiet until one is chosen.
  */

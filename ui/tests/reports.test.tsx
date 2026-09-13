@@ -1,6 +1,7 @@
 /** The reports screen. */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const call = vi.fn();
@@ -99,6 +100,11 @@ function answer(command: string) {
     });
   }
   return Promise.resolve(null);
+}
+
+/** The screen's own stylesheet, as text. */
+function stylesheet(): string {
+  return readFileSync('src/reports/reports.css', 'utf8');
 }
 
 beforeEach(() => {
@@ -234,6 +240,36 @@ it('opens with every group folded, and remembers the ones that were opened', asy
   // And folding it away puts it back.
   fireEvent.click(screen.getByRole('button', { name: 'Sales' }));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Sales by day' })).toBeNull());
+});
+
+/**
+ * Folded has to be folded ON THE SCREEN, not only in the accessibility tree.
+ * `.mb-reports__list` sets `display: flex`, and an author's `display` beats the browser's own
+ * rule for `[hidden]` — so the first build of this folded nothing a person could see while
+ * `getByRole` agreed it was gone. Caught by running the counter, not by a test.
+ *
+ * jsdom cannot reproduce it: it answers `display: none` for any element carrying `hidden`,
+ * whatever the author said. So the claim here is on the stylesheet — a list this screen gives a
+ * `display` to must also say what `hidden` means for it.
+ */
+it('folds a group out of sight, not just out of the accessibility tree', async () => {
+  open();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Sales' })).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Sales' }));
+
+  const list = await waitFor(() => {
+    const found = document.getElementById('reports-Sales');
+    expect(found).toBeTruthy();
+    return found!;
+  });
+  expect(list.hasAttribute('hidden')).toBe(false);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Sales' }));
+  await waitFor(() => expect(list.hasAttribute('hidden')).toBe(true));
+
+  // And the half the attribute alone does not buy.
+  const css = stylesheet();
+  expect(css).toMatch(/\.mb-reports__list\[hidden\]\s*\{[^}]*display:\s*none/);
 });
 
 /** A licence refusal is an ANSWER, and it stays on the screen. */
