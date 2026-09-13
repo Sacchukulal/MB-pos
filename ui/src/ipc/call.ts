@@ -37,6 +37,7 @@ import type { ModifierGroupView } from './generated/ModifierGroupView';
 import type { GroupEdit } from './generated/GroupEdit';
 import type { ComboView } from './generated/ComboView';
 import type { ComboEdit } from './generated/ComboEdit';
+import type { FloorChangeView } from './generated/FloorChangeView';
 import type { FloorView } from './generated/FloorView';
 import type { TableEdit } from './generated/TableEdit';
 import type { SplitRequest } from './generated/SplitRequest';
@@ -350,11 +351,11 @@ export interface Commands {
     returns: FloorView;
   };
   delete_dining_table: { args: { tableId: string }; returns: FloorView };
-  /** The bulk pair — one transaction, all or nothing. */
-  delete_dining_tables: { args: { tableIds: readonly string[] }; returns: FloorView };
+  /** The bulk pair — every table is judged on its own, and the answer says what it could not do. */
+  delete_dining_tables: { args: { tableIds: readonly string[] }; returns: FloorChangeView };
   set_dining_tables_active: {
     args: { tableIds: readonly string[]; active: boolean };
-    returns: FloorView;
+    returns: FloorChangeView;
   };
   save_floor_thresholds: { args: { warn: number; late: number }; returns: FloorView };
   move_order: { args: { orderId: string; toTable: string }; returns: FloorView };
@@ -658,6 +659,8 @@ export interface Commands {
   open_pairing: { args: void; returns: NetworkView };
   /** One UAC prompt; Windows Firewall then lets phones reach this program. */
   allow_firewall: { args: void; returns: NetworkView };
+  /** Read the firewall rules again rather than trusting the one read at start. */
+  check_firewall: { args: void; returns: NetworkView };
   close_pairing: { args: void; returns: NetworkView };
   allow_device: { args: { requestId: string; staffId: string | null }; returns: NetworkView };
   refuse_device: { args: { requestId: string }; returns: NetworkView };

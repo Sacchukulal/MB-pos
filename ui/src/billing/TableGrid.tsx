@@ -57,10 +57,15 @@ export function TableGrid({
       if (found) found.push(table);
       else groups.set(key, [table]);
     }
+    // The SHOP'S room order, carried on the tile, not the alphabet — so moving a room up on
+    // the Floor screen moves it up here too. A room with no place, and the "No table" group,
+    // go last.
+    const placeOf = (name: string) =>
+      shown.find((t) => (t.section ?? '') === name)?.sectionOrder ?? Number.MAX_SAFE_INTEGER;
     return [...groups.entries()].sort(([a], [b]) => {
       if (a === '') return 1;
       if (b === '') return -1;
-      return a.localeCompare(b);
+      return placeOf(a) - placeOf(b) || a.localeCompare(b);
     });
   }, [shown]);
 

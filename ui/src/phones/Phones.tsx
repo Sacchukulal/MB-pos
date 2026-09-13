@@ -52,6 +52,15 @@ export function Phones() {
     call('network').then(setView).catch(report);
   }, [report]);
 
+  // The rules are read at start and remembered, so a counter blocked since would still say the
+  // phones can get in. The screen paints from the remembered answer above and this replaces it
+  // with a fresh one — asking takes a moment, and nobody waits for it.
+  useEffect(() => {
+    call('check_firewall')
+      .then(setView)
+      .catch(() => undefined);
+  }, []);
+
   // Rust pushes; React subscribes. A phone coming on or off, asking to join, or using the code
   // (which moves the code on) all arrive as one kind.
   useEffect(() => {

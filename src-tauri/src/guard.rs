@@ -384,6 +384,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("phones_now", Access::SignedIn),
     ("open_pairing", Access::Needs(Permission::DevicesPair)),
     ("allow_firewall", Access::Needs(Permission::DevicesPair)),
+    ("check_firewall", Access::Needs(Permission::DevicesPair)),
     ("close_pairing", Access::Needs(Permission::DevicesPair)),
     ("allow_device", Access::Needs(Permission::DevicesPair)),
     ("refuse_device", Access::Needs(Permission::DevicesPair)),

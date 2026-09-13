@@ -395,6 +395,9 @@ pub struct TableView {
     /// The section's name, or `None` for the "No table" group that holds open parcel and
     /// self-service orders — "so no order is ever invisible".
     pub section: Option<String>,
+    /// Where the shop puts that room, so the billing screen groups its tiles in the SAME order
+    /// the floor screen does. `None` goes last, with the "No table" group.
+    pub section_order: Option<i32>,
     pub seats: u32,
     pub state: TableState,
     /// `None` when the table is free.
@@ -688,12 +691,7 @@ pub fn floor_view(
     let mut out = Vec::with_capacity(tables.len() + open.len());
 
     for table in tables.iter().filter(|t| t.is_active) {
-        let section = table.section_id.as_ref().and_then(|id| {
-            sections
-                .iter()
-                .find(|s| &s.id == id)
-                .map(|s| s.name.clone())
-        });
+        let section = room_of(table, sections);
         // Every party on this table. The one with no letter is the table's own tile; every
         // lettered one is its own tile beside it — and stays so when the first party has paid.
         let mut here: Vec<&AnyOrder> = open
@@ -718,6 +716,7 @@ pub fn floor_view(
                 party,
                 Seat {
                     label: format!("{}{seat}", table.label),
+                    // A second party sits in the same room as the table it is beside.
                     section: section.clone(),
                     seats: 0,
                     selected: loaded_order == Some(party.core().id.as_str()),
@@ -746,7 +745,8 @@ pub fn floor_view(
             None => TableView {
                 id: table.id.as_str().to_owned(),
                 label: table.label.clone(),
-                section,
+                section: section.name,
+                section_order: section.order,
                 seats: crate::ipc::count(table.seats),
                 // A free table is free even while it is being looked at.
                 state: TableState::Free,
@@ -778,7 +778,7 @@ pub fn floor_view(
             order,
             Seat {
                 label,
-                section: None,
+                section: InRoom::default(),
                 seats: 0,
                 selected,
                 now,
@@ -796,7 +796,7 @@ pub fn floor_view(
 /// SEAT rather than the order in it, so `tile_for` takes two arguments instead of six.
 struct Seat<'a> {
     label: String,
-    section: Option<String>,
+    section: InRoom,
     seats: i64,
     /// Already decided by `floor_view` — see `TableView::selected`.
     selected: bool,
@@ -856,8 +856,37 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
             _ => id,
         },
         label,
-        section,
+        section: section.name,
+        section_order: section.order,
         seats: crate::ipc::count(seats),
+    }
+}
+
+/// The room a tile sits in: its name, and where the shop puts it. The two always travel
+/// together — a name carried without its place is what left the billing screen sorting rooms
+/// by the alphabet while the floor screen used the shop's own order.
+#[derive(Debug, Clone, Default)]
+struct InRoom {
+    name: Option<String>,
+    order: Option<i32>,
+}
+
+/// Which room this table is in, read from the shop's own list of them.
+fn room_of(
+    table: &mb_db::repo::floor::DiningTable,
+    sections: &[mb_db::repo::floor::Section],
+) -> InRoom {
+    let Some(found) = table
+        .section_id
+        .as_ref()
+        .and_then(|id| sections.iter().find(|s| &s.id == id))
+    else {
+        return InRoom::default();
+    };
+    InRoom {
+        name: Some(found.name.clone()),
+        // The same narrowing `SectionView` does, so the two never disagree.
+        order: Some(i32::try_from(found.sort_order).unwrap_or(0)),
     }
 }
 

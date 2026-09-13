@@ -17,9 +17,20 @@ export function Suggestions({
   highlighted: number;
   onPick: (index: number) => void;
 }) {
+  const list = useRef<HTMLUListElement>(null);
+  // The arrows never leave the chosen row out of sight — the list is taller than its box.
+  useEffect(() => {
+    if (highlighted < 0) return;
+    const row = list.current?.children[highlighted];
+    // A test's DOM has no scrolling to do.
+    if (row instanceof HTMLElement && typeof row.scrollIntoView === 'function') {
+      row.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlighted]);
+
   if (items.length === 0) return null;
   return (
-    <ul className="mb-suggestions mb-sheet" role="listbox" aria-label="Menu suggestions">
+    <ul ref={list} className="mb-suggestions mb-sheet" role="listbox" aria-label="Menu suggestions">
       {items.map((item, index) => (
         <li key={item.id}>
           <Pick

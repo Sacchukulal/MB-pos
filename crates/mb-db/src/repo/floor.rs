@@ -401,16 +401,41 @@ impl<'a> FloorRepo<'a> {
         active: bool,
         at: Timestamp,
     ) -> Result<(), DbError> {
-        if !active && let Some((_, called)) = self.open_order_at(table)? {
-            return Err(DbError::invariant(format!(
-                "there is an open order on this table ({called}) — settle or cancel it first"
-            )));
+        if !active && let Some(why) = self.why_not_hidden(table)? {
+            return Err(DbError::invariant(why));
         }
         self.tx.execute(
             "UPDATE dining_tables SET is_active = ?3 WHERE outlet_id = ?1 AND id = ?2",
             rusqlite::params![outlet, table.as_str(), encode::bool_to_sql(active)],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "dining_tables", table.as_str(), Op::Upsert, at)
+    }
+
+    /// Why this table cannot be taken off the floor, or `None` when it can. The rule lives
+    /// here alone, so a screen about to hide many can ask it before it tries.
+    pub fn why_not_hidden(&self, table: &TableId) -> Result<Option<String>, DbError> {
+        let Some((_, called)) = self.open_order_at(table)? else {
+            return Ok(None);
+        };
+        Ok(Some(format!(
+            "there is an open order on this table ({called}) — settle or cancel it first"
+        )))
+    }
+
+    /// Why this table cannot be deleted, or `None` when it can. As with `why_not_hidden`, the
+    /// rule is asked before a bulk delete rather than discovered by one failing.
+    pub fn why_not_deleted(&self, table: &TableId) -> Result<Option<String>, DbError> {
+        if let Some(why) = self.why_not_hidden(table)? {
+            return Ok(Some(why));
+        }
+        let history = self.orders_against(table)?;
+        if history == 0 {
+            return Ok(None);
+        }
+        Ok(Some(format!(
+            "this table has {history} order(s) against it. Hide it instead — that takes \
+             it off the floor and keeps its history"
+        )))
     }
 
     /// Really delete a table — only ever possible for one nothing points at.
@@ -420,17 +445,8 @@ impl<'a> FloorRepo<'a> {
         table: &TableId,
         at: Timestamp,
     ) -> Result<(), DbError> {
-        if let Some((_, called)) = self.open_order_at(table)? {
-            return Err(DbError::invariant(format!(
-                "there is an open order on this table ({called}) — settle or cancel it first"
-            )));
-        }
-        let history = self.orders_against(table)?;
-        if history > 0 {
-            return Err(DbError::invariant(format!(
-                "this table has {history} order(s) against it. Hide it instead — that takes \
-                 it off the floor and keeps its history"
-            )));
+        if let Some(why) = self.why_not_deleted(table)? {
+            return Err(DbError::invariant(why));
         }
         self.tx.execute(
             "DELETE FROM dining_tables WHERE outlet_id = ?1 AND id = ?2",

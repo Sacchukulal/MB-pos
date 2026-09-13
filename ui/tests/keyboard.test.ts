@@ -33,6 +33,7 @@ function table(label: string, busy = false): TableView {
     id: `tbl_${label}`,
     label,
     section: 'Main Hall',
+    sectionOrder: 0,
     seats: 4,
     state: busy ? 'occupied' : 'free',
     total: busy ? { paise: 64_600n, text: '646.00' } : null,
@@ -101,12 +102,17 @@ describe('searching', () => {
     expect(state.suggestions).toHaveLength(MAX_SUGGESTIONS);
   });
 
-  it('arrows move the highlight and wrap', () => {
+  it('arrows move the highlight and stop at each end', () => {
     const three = [item('a', 'A'), item('b', 'B'), item('c', 'C')];
     let [state] = run(initial(), type('x'), suggest(...three));
     [state] = run(state, press('ArrowDown'));
     expect(state.highlighted).toBe(1);
+    // Up from the first row stays on it — a list taller than its box must not go round, or
+    // the highlight looks like it jumped back on its own.
     [state] = run(state, press('ArrowUp'), press('ArrowUp'));
+    expect(state.highlighted).toBe(0);
+    // And down from the last row stays on the last row.
+    [state] = run(state, press('ArrowDown'), press('ArrowDown'), press('ArrowDown'));
     expect(state.highlighted).toBe(2);
   });
 

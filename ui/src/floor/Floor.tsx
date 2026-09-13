@@ -179,26 +179,26 @@ export function Floor() {
   /** Open on a shop with no tables, folded once there are some. */
   const arranging = arrangeOpen ?? floor.tables.length === 0;
 
-  /** What the ticked tables are about to have done to them. */
-  const act = (what: 'delete' | 'hide' | 'show') => {
-    const how = ticked.length;
+  /**
+   * What the ticked tables are about to have done to them. Rust judges each one on its own and
+   * writes the sentence, so a table it could not touch is named rather than taking the other
+   * thirty-nine down with it.
+   */
+  const act = (what: 'delete' | 'hide' | 'show', ids: readonly string[] = ticked) => {
     const sent =
       what === 'delete'
-        ? call('delete_dining_tables', { tableIds: ticked })
-        : call('set_dining_tables_active', { tableIds: ticked, active: what === 'show' });
+        ? call('delete_dining_tables', { tableIds: ids })
+        : call('set_dining_tables_active', { tableIds: ids, active: what === 'show' });
 
     sent
-      .then((fresh) => {
-        arrived(fresh);
+      .then((change) => {
+        arrived(change.floor);
         setPicked([]);
         setConfirming(null);
         toast.show(
-          'ok',
-          what === 'delete'
-            ? `${plural(how, 'table')} deleted.`
-            : what === 'hide'
-              ? `${plural(how, 'table')} taken off the floor.`
-              : `${plural(how, 'table')} put back.`,
+          change.kept.length > 0 ? 'warn' : 'ok',
+          change.said,
+          change.kept.length > 0 ? change.kept.join('\n') : undefined,
         );
       })
       .catch((cause) => {
@@ -260,7 +260,14 @@ export function Floor() {
         onOpen={() => setArrangeOpen(true)}
         onFold={() => setArrangeOpen(false)}
         allowed={pickable}
-        panel={<Arrange floor={floor} onChanged={arrived} onFailed={report} />}
+        panel={
+          <Arrange
+            floor={floor}
+            onChanged={arrived}
+            onFailed={report}
+            onPutBack={(ids) => act('show', ids)}
+          />
+        }
       >
         {/* Only when there is something ticked. */}
         {pickable && ticked.length > 0 ? (
@@ -272,7 +279,6 @@ export function Floor() {
             onClear={() => setPicked([])}
             onDelete={() => setConfirming('delete')}
             onHide={() => setConfirming('hide')}
-            onShow={() => act('show')}
             onPrint={printTheBill}
           />
         ) : null}
@@ -386,14 +392,16 @@ export function Floor() {
                 ? call('set_dining_tables_active', { tableIds: [one.id], active: false })
                 : call('delete_dining_tables', { tableIds: [one.id] });
             sent
-              .then((fresh) => {
-                arrived(fresh);
+              .then((change) => {
+                arrived(change.floor);
                 setDeletingOne(null);
+                // One table, so its own name reads better than Rust's count of them.
                 toast.show(
-                  'ok',
-                  Number(one.history) > 0
-                    ? `${one.printed} is off the floor.`
-                    : `${one.printed} deleted.`,
+                  change.kept.length > 0 ? 'warn' : 'ok',
+                  change.kept[0] ??
+                    (Number(one.history) > 0
+                      ? `${one.printed} is off the floor.`
+                      : `${one.printed} deleted.`),
                 );
               })
               .catch((cause) => {
@@ -414,8 +422,8 @@ export function Floor() {
           }
           body={
             confirming === 'delete'
-              ? 'A table that has ever had an order on it cannot be deleted. If one of these has, none of them is deleted and nothing changes.'
-              : 'They stay in the shop and keep their history. Put them back at any time.'
+              ? deleteWarning(floor, ticked)
+              : 'They stay in the shop and keep their history. Put them back from Rooms and tables.'
           }
           confirmLabel={confirming === 'delete' ? 'Delete them' : 'Take them off'}
           destructive={confirming === 'delete'}
@@ -425,6 +433,22 @@ export function Floor() {
       ) : null}
     </Page>
   );
+}
+
+/**
+ * What the delete is really about to do, said BEFORE it is pressed. The screen already knows
+ * which of the ticked tables have orders against them, so it need not send forty and find out.
+ */
+function deleteWarning(floor: FloorView, ticked: readonly string[]): string {
+  const rows = floor.tables.filter((t) => ticked.includes(t.id));
+  const kept = rows.filter((t) => Number(t.history) > 0 || t.isBusy).length;
+  if (kept === 0) {
+    return 'None of these has ever had an order on it, so they can all go for good.';
+  }
+  if (kept === rows.length) {
+    return 'Not one of these can be deleted — every one has orders against it. Take them off the floor instead, and they keep their history.';
+  }
+  return `${plural(rows.length - kept, 'table')} can be deleted. ${plural(kept, 'table')} with orders will be left alone — take those off the floor instead.`;
 }
 
 /** The tiles, split by room, in the shop's own room order. */
@@ -439,15 +463,18 @@ function roomsOf(
     .filter((room) => room.tiles.length > 0);
 }
 
-/** The room, as three things you can add to it — sections, tables, timers. */
+/** The room, as four things you can change about it — rooms, tables, what is off the floor, timers. */
 function Arrange({
   floor,
   onChanged,
   onFailed,
+  onPutBack,
 }: {
   floor: FloorView;
   onChanged: (floor: FloorView) => void;
   onFailed: (cause: unknown) => void;
+  /** Put these tables back on the floor — the Floor screen owns the doing and the saying. */
+  onPutBack: (tableIds: readonly string[]) => void;
 }) {
   const [sectionName, setSectionName] = useState('');
   const [rangeSection, setRangeSection] = useState('');
@@ -463,7 +490,9 @@ function Arrange({
     call('save_floor_section', {
       id: freshId('sec'),
       name: sectionName.trim(),
-      sortOrder: floor.sections.length,
+      // One past the last room, NOT the count of them — a room deleted and another added
+      // would otherwise give two rooms the same place.
+      sortOrder: floor.sections.reduce((top, s) => Math.max(top, s.sortOrder + 1), 0),
       isActive: true,
     })
       .then((fresh) => {
@@ -472,6 +501,37 @@ function Arrange({
       })
       .catch(onFailed);
   };
+
+  /**
+   * Move a room one place up or down. Every room is then numbered again from the top, so two
+   * that had somehow ended up sharing a place are straightened out by the same press — and
+   * the billing screen groups its tiles in this order too.
+   */
+  const moveSection = async (at: number, by: number) => {
+    const order = [...floor.sections];
+    const moving = order[at];
+    const other = order[at + by];
+    if (!moving || !other) return;
+    order[at] = other;
+    order[at + by] = moving;
+    try {
+      let fresh = floor;
+      for (const [index, section] of order.entries()) {
+        fresh = await call('save_floor_section', {
+          id: section.id,
+          name: section.name,
+          sortOrder: index,
+          isActive: section.isActive,
+        });
+      }
+      onChanged(fresh);
+    } catch (cause) {
+      onFailed(cause);
+    }
+  };
+
+  /** Every table somebody took off the floor — the only place they can be seen. */
+  const off = floor.tables.filter((t) => !t.isActive);
 
   return (
     <Scroller inset className="mb-arrange">
@@ -493,10 +553,31 @@ function Arrange({
       </div>
       {floor.sections.length > 0 ? (
         <ul className="mb-arrange__rooms">
-          {floor.sections.map((s) => (
+          {floor.sections.map((s, at) => (
             <li key={s.id} className="mb-arrange__room">
               <span className="mb-arrange__roomname">{s.name}</span>
               <span className="mb-arrange__count">{Number(s.tableCount)}</span>
+              {/* This order is the order both screens draw the rooms in. */}
+              <Button
+                variant="quiet"
+                size="sm"
+                iconOnly
+                disabled={at === 0}
+                title={`Move ${s.name} up`}
+                aria-label={`Move ${s.name} up`}
+                onClick={() => void moveSection(at, -1)}
+                icon={<Icon name="chevron-up" size="sm" />}
+              />
+              <Button
+                variant="quiet"
+                size="sm"
+                iconOnly
+                disabled={at === floor.sections.length - 1}
+                title={`Move ${s.name} down`}
+                aria-label={`Move ${s.name} down`}
+                onClick={() => void moveSection(at, 1)}
+                icon={<Icon name="chevron-down" size="sm" />}
+              />
               <Button
                 variant="quiet"
                 size="sm"
@@ -552,6 +633,40 @@ function Arrange({
         </Button>
       </div>
 
+      {/*
+        A table taken off the floor has no tile, so this list is the ONLY way back to it. It
+        appears only when there is something in it — a shop that has never hidden a table is
+        not shown an empty heading.
+      */}
+      {off.length > 0 ? (
+        <>
+          <SectionHeader
+            title="Off the floor"
+            note="Taken off the floor, and still here with every order they ever had. Put one back and its tile returns."
+          />
+          <ul className="mb-arrange__rooms">
+            {off.map((row) => (
+              <li key={row.id} className="mb-arrange__room">
+                <span className="mb-arrange__roomname">{row.printed}</span>
+                <span className="mb-arrange__count">
+                  {plural(Number(row.history), 'order')}
+                </span>
+                <Button size="sm" onClick={() => onPutBack([row.id])}>
+                  Put back
+                </Button>
+              </li>
+            ))}
+          </ul>
+          {off.length > 1 ? (
+            <div className="mb-row mb-row--end">
+              <Button size="sm" onClick={() => onPutBack(off.map((row) => row.id))}>
+                Put all {off.length} back
+              </Button>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
       <SectionHeader
         title="Timers"
         note="A dosa counter turns a table in eight minutes and a dining room takes ninety. These are yours, and the floor colours itself by them."
@@ -582,7 +697,6 @@ function Picked({
   onClear,
   onDelete,
   onHide,
-  onShow,
   onPrint,
 }: {
   floor: FloorView;
@@ -592,20 +706,15 @@ function Picked({
   onClear: () => void;
   onDelete: () => void;
   onHide: () => void;
-  onShow: () => void;
   onPrint: (tile: TableView) => void;
 }) {
   const rows = floor.tables.filter((t) => ticked.includes(t.id));
   const one = rows.length === 1 ? rows[0] : null;
   const tile = one ? floor.tiles.find((t) => t.id === one.id) : undefined;
-  const hidden = rows.filter((r) => !r.isActive).length;
 
   return (
     <div className="mb-picked" role="group" aria-label="What to do with the ticked tables">
-      <span className="mb-picked__count">
-        {rows.length} ticked
-        {hidden > 0 ? ` · ${hidden} off the floor` : ''}
-      </span>
+      <span className="mb-picked__count">{rows.length} ticked</span>
 
       {one ? (
         <Button size="sm" onClick={() => onEdit(one)}>
@@ -627,16 +736,13 @@ function Picked({
         </>
       ) : null}
 
-      {hidden < rows.length ? (
-        <Button size="sm" onClick={onHide}>
-          Take off the floor
-        </Button>
-      ) : null}
-      {hidden > 0 ? (
-        <Button size="sm" onClick={onShow}>
-          Put back
-        </Button>
-      ) : null}
+      {/*
+        Only tables that ARE on the floor have tiles to tick, so this bar never has one to put
+        back — that lives in Rooms and tables, where a table with no tile can still be found.
+      */}
+      <Button size="sm" onClick={onHide}>
+        Take off the floor
+      </Button>
 
       <Button size="sm" variant="danger" onClick={onDelete}>
         <Icon name="trash" size="sm" />

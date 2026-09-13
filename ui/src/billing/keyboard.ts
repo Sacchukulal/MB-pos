@@ -211,6 +211,15 @@ function ask(state: State, item: MenuItemView): [State, Command[]] {
   return [{ ...state, mode: { kind: 'quantity', item, text: '1' } }, []];
 }
 
+/**
+ * One row along the suggestions, and it STOPS at each end rather than going round. A list
+ * taller than its box hides its last rows, and a highlight that wrapped out of one of them
+ * looked like the key had jumped back to the top on its own.
+ */
+function stepRow(at: number, by: number, rows: number): number {
+  return Math.max(0, Math.min(rows - 1, at + by));
+}
+
 /** "2", "0.5", "1.25" — or one, when nothing usable was typed. */
 export function quantityOf(text: string): string {
   const n = Number(text.trim());
@@ -315,7 +324,7 @@ function key(state: State, pressed: string): [State, Command[]] {
 
   if (pressed === 'ArrowDown') {
     if (hasSuggestions) {
-      return [{ ...state, highlighted: (state.highlighted + 1) % rows }, []];
+      return [{ ...state, highlighted: stepRow(state.highlighted, 1, rows) }, []];
     }
     // Down on an empty box with nothing suggested moves into the processing orders — which is
     // how a cashier reaches a bill to complete without the mouse. It starts on the order that
@@ -329,7 +338,7 @@ function key(state: State, pressed: string): [State, Command[]] {
 
   if (pressed === 'ArrowUp') {
     if (hasSuggestions) {
-      return [{ ...state, highlighted: (state.highlighted - 1 + rows) % rows }, []];
+      return [{ ...state, highlighted: stepRow(state.highlighted, -1, rows) }, []];
     }
     return [state, []];
   }

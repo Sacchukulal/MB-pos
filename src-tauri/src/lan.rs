@@ -907,6 +907,24 @@ pub fn allow_firewall(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
     allow_firewall_on(&app)
 }
 
+/// Read the firewall rules again and answer with the fresh view. The rules are otherwise read
+/// once at start and remembered, so a counter blocked AFTER it started would keep saying the
+/// phones can get in — the Phones screen asks this every time it opens.
+pub fn check_firewall_on(app: &App) -> UiResult<NetworkView> {
+    guard::require(app, Permission::DevicesPair)?;
+    let was = crate::firewall::cached();
+    let now = crate::firewall::refresh();
+    if now != was {
+        crate::log_info!("Windows Firewall was {was:?} and is now {now:?}");
+    }
+    view_on(app)
+}
+
+#[tauri::command]
+pub fn check_firewall(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
+    check_firewall_on(&app)
+}
+
 #[tauri::command]
 pub fn network(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
     view_on(&app)

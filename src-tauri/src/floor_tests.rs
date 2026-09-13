@@ -722,44 +722,50 @@ fn the_floor_plan_marks_no_table_because_it_has_no_cart() {
     );
 }
 
-/// Several tables at once, and all or nothing.
+/// Several tables at once: the ones that can go, go, and the one that cannot is NAMED rather
+/// than taking the others down with it.
 #[test]
-fn a_bulk_delete_takes_all_the_tables_or_none_of_them() {
+fn a_bulk_delete_keeps_the_table_it_cannot_take_and_deletes_the_rest() {
     let scratch = Scratch::new("bulk_delete");
     let app = a_shop_with_a_room(&scratch);
 
     // Four tables; table 2 has an order sitting on it.
     seat(&app, "ord_busy", "tbl_2", &[("itm_tea", 2_000, 1)], None);
 
-    let refused = crate::floor::delete_tables_on(
+    let change = crate::floor::delete_tables_on(
         &app,
         vec!["tbl_1".to_owned(), "tbl_2".to_owned(), "tbl_3".to_owned()],
     )
-    .expect_err("a busy table was deleted");
-    assert_eq!(refused.code, "db.failed");
+    .expect("the two free tables");
+    assert_eq!(change.kept.len(), 1, "{:?}", change.kept);
+    let kept = &change.kept[0];
     assert!(
-        refused.detail.unwrap_or_default().contains("open order"),
-        "the refusal must name what stopped it",
+        kept.contains("Hall 2") && kept.contains("open order"),
+        "the line must name the table and why: {kept}",
+    );
+    // The sentence is Rust's, and it counts both halves.
+    assert!(
+        change.said.contains("2 tables") && change.said.contains("1 table"),
+        "{}",
+        change.said,
     );
 
-    let floor = floor_on(&app).expect("the floor");
-    assert_eq!(floor.tables.len(), 4, "part of the set was deleted anyway");
-
-    // Without the busy one, all three go in one command.
-    crate::floor::delete_tables_on(
-        &app,
-        vec!["tbl_1".to_owned(), "tbl_3".to_owned(), "tbl_4".to_owned()],
-    )
-    .expect("three free tables");
-    let floor = floor_on(&app).expect("the floor");
+    // Table 2 is still standing; the other two are gone.
     assert_eq!(
-        floor
+        change
+            .floor
             .tables
             .iter()
             .map(|t| t.label.as_str())
             .collect::<Vec<_>>(),
-        ["2"],
+        ["2", "4"],
     );
+
+    // And a set with nothing in the way keeps nothing back.
+    let change =
+        crate::floor::delete_tables_on(&app, vec!["tbl_4".to_owned()]).expect("one free table");
+    assert!(change.kept.is_empty());
+    assert_eq!(change.said, "1 table deleted.");
 }
 
 /// Hiding is the same bargain, and it is what a table with history gets instead of a delete.
@@ -788,10 +794,80 @@ fn a_bulk_hide_takes_them_off_the_floor_and_keeps_their_history() {
         ["3", "4"],
     );
 
-    // Back again, same command.
-    crate::floor::set_tables_active_on(&app, vec!["tbl_1".to_owned()], true).expect("put back");
-    let floor = floor_on(&app).expect("the floor");
-    assert_eq!(floor.tables.iter().filter(|t| !t.is_active).count(), 1);
+    // Back again, same command. Putting a table back is never refused.
+    let change =
+        crate::floor::set_tables_active_on(&app, vec!["tbl_1".to_owned()], true).expect("put back");
+    assert!(change.kept.is_empty());
+    assert_eq!(change.said, "1 table put back.");
+    assert_eq!(
+        change.floor.tables.iter().filter(|t| !t.is_active).count(),
+        1,
+    );
+}
+
+/// A table somebody is sitting at cannot be taken off the floor — and the other three still go.
+#[test]
+fn a_bulk_hide_keeps_the_busy_table_and_takes_the_rest_off() {
+    let scratch = Scratch::new("bulk_hide_busy");
+    let app = a_shop_with_a_room(&scratch);
+    seat(&app, "ord_busy", "tbl_2", &[("itm_tea", 2_000, 1)], None);
+
+    let change = crate::floor::set_tables_active_on(
+        &app,
+        vec!["tbl_1".to_owned(), "tbl_2".to_owned(), "tbl_3".to_owned()],
+        false,
+    )
+    .expect("the two free tables");
+    assert_eq!(change.kept.len(), 1, "{:?}", change.kept);
+    assert!(change.kept[0].contains("Hall 2"), "{}", change.kept[0]);
+    assert!(
+        change.said.contains("taken off the floor"),
+        "{}",
+        change.said,
+    );
+    // Table 2 kept its tile; the order on it is untouched.
+    assert_eq!(
+        change
+            .floor
+            .tiles
+            .iter()
+            .map(|t| t.label.as_str())
+            .collect::<Vec<_>>(),
+        ["2", "4"],
+    );
+}
+
+/// The billing grid and the floor screen group their tiles by the SAME room order — the shop's,
+/// not the alphabet's. The tile carries the room's place so both can.
+#[test]
+fn a_tile_carries_the_place_its_room_was_put_in() {
+    let scratch = Scratch::new("room_order");
+    let app = a_shop_with_a_room(&scratch);
+
+    // A second room, deliberately named so the alphabet and the shop's order disagree.
+    crate::floor::save_section_on(&app, "sec_ac".to_owned(), "AC".to_owned(), 1, true)
+        .expect("a second room");
+    crate::floor::save_table_on(
+        &app,
+        crate::floor::TableEdit {
+            id: "tbl_ac".to_owned(),
+            label: "9".to_owned(),
+            section_id: Some("sec_ac".to_owned()),
+            seats: 4,
+            is_active: true,
+        },
+    )
+    .expect("a table in it");
+
+    let grid = crate::ipc::open_orders_on(&app).expect("the grid");
+    let place = |label: &str| {
+        grid.iter()
+            .find(|t| t.label == label)
+            .and_then(|t| t.section_order)
+    };
+    // Hall was made first, so Hall comes first — even though "AC" sorts before it.
+    assert_eq!(place("1"), Some(0), "Hall lost its place");
+    assert_eq!(place("9"), Some(1), "AC lost its place");
 }
 
 /// `can_arrange` is the same question the commands ask, answered once for the screen — and it
@@ -815,14 +891,15 @@ fn arranging_the_room_needs_the_permission_and_says_so_before_the_press() {
         "a waiter was offered the arranging panel"
     );
 
-    // And the panel being hidden is not what stops them.
+    // And the panel being hidden is not what stops them. The three answer with different
+    // views, so each is asked for its error alone.
     for refused in [
-        crate::floor::delete_tables_on(&app, vec!["tbl_1".to_owned()]),
-        crate::floor::set_tables_active_on(&app, vec!["tbl_1".to_owned()], false),
-        crate::floor::save_thresholds_on(&app, 5, 10),
+        crate::floor::delete_tables_on(&app, vec!["tbl_1".to_owned()]).err(),
+        crate::floor::set_tables_active_on(&app, vec!["tbl_1".to_owned()], false).err(),
+        crate::floor::save_thresholds_on(&app, 5, 10).err(),
     ] {
         assert_eq!(
-            refused.expect_err("a waiter arranged the room").code,
+            refused.expect("a waiter arranged the room").code,
             "auth.denied",
         );
     }

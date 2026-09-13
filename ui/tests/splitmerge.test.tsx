@@ -27,6 +27,7 @@ function money(paise: number, text: string): MoneyView {
 function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): TableView {
   return {
     section: 'Main Hall',
+    sectionOrder: 0,
     seats: 4,
     state: 'occupied',
     total: null,

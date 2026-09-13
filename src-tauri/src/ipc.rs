@@ -664,6 +664,7 @@ macro_rules! commands {
             $crate::lan::phones_now,
             $crate::lan::open_pairing,
             $crate::lan::allow_firewall,
+            $crate::lan::check_firewall,
             $crate::lan::close_pairing,
             $crate::lan::allow_device,
             $crate::lan::refuse_device,

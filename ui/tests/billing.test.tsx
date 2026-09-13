@@ -2,6 +2,7 @@ import { render, screen, cleanup, within, act, fireEvent } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModes, paymentAnswer } from '../src/billing/Billing';
+import { Suggestions } from '../src/billing/Keys';
 import { Processing, ProcessingHead, processingOrders } from '../src/billing/Processing';
 import { TableGrid } from '../src/billing/TableGrid';
 import { Totals } from '../src/billing/Totals';
@@ -20,6 +21,7 @@ function money(paise: number, text: string): MoneyView {
 function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): TableView {
   return {
     section: 'Main Hall',
+    sectionOrder: 0,
     seats: 4,
     state: 'free',
     total: null,
@@ -169,6 +171,37 @@ describe('the table grid (scope 1.4)', () => {
     );
     expect(screen.getByText('No table')).toBeInTheDocument();
     expect(screen.getByText('Parcel')).toBeInTheDocument();
+  });
+
+  /**
+   * The counter groups its rooms in the SHOP'S order, the one the Floor screen shows — not in
+   * the alphabet's. Sorting by name made the two screens disagree the moment a room was named
+   * something that sorts the other way.
+   */
+  it('puts the rooms in the order the shop put them in, not the alphabet', () => {
+    const { container } = render(
+      <TableGrid
+        tables={[
+          table({ id: 'a', label: '9', section: 'AC', sectionOrder: 1 }),
+          table({ id: 'b', label: '1', section: 'Hall', sectionOrder: 0 }),
+          table({
+            id: 'ord_9',
+            label: 'Parcel',
+            section: null,
+            sectionOrder: null,
+            state: 'occupied',
+            orderId: 'ord_9',
+          }),
+        ]}
+        filter=""
+        onOpen={vi.fn()}
+        onPrintBill={vi.fn()}
+      />,
+    );
+    // Hall was made first, so Hall comes first — and the group with no room is last.
+    expect(
+      [...container.querySelectorAll('.mb-floor__heading')].map((n) => n.textContent),
+    ).toEqual(['Hall', 'AC', 'No table']);
   });
 
   it('filters, because twenty open tables is otherwise a scrolling exercise', () => {
@@ -545,5 +578,41 @@ describe('the processing orders under the arrow keys', () => {
     expect(rows[0]?.className).not.toContain('--highlighted');
     expect(rows[1]?.className).toContain('mb-processing__order--highlighted');
     expect(rows[1]?.getAttribute('aria-current')).toBe('true');
+  });
+});
+
+/**
+ * The list is taller than the box it pops in, so the arrows have to carry the box with them.
+ * They did not, and the last rows were highlighted where nobody could see them.
+ */
+describe('the suggestion list under the arrow keys', () => {
+  const dish = (id: string, name: string) => ({
+    id,
+    name,
+    price: money(12_000, '120.00'),
+    rateLabel: '5%',
+    category: null,
+  });
+
+  it('scrolls the chosen row into sight', () => {
+    const seen: number[] = [];
+    const items = Array.from({ length: 10 }, (_, n) => dish(`i${n}`, `Item ${n}`));
+    const { container, rerender } = render(
+      <Suggestions items={items} highlighted={0} onPick={vi.fn()} />,
+    );
+    // jsdom does not scroll, so each row is asked whether it was told to.
+    for (const [at, row] of [...container.querySelectorAll('li')].entries()) {
+      row.scrollIntoView = () => seen.push(at);
+    }
+    rerender(<Suggestions items={items} highlighted={9} onPick={vi.fn()} />);
+    expect(seen, 'the last row was highlighted out of sight').toEqual([9]);
+  });
+
+  it('marks the chosen row for a screen reader too', () => {
+    const items = [dish('a', 'A'), dish('b', 'B')];
+    render(<Suggestions items={items} highlighted={1} onPick={vi.fn()} />);
+    const rows = screen.getAllByRole('option');
+    expect(rows[0]?.getAttribute('aria-selected')).toBe('false');
+    expect(rows[1]?.getAttribute('aria-selected')).toBe('true');
   });
 });

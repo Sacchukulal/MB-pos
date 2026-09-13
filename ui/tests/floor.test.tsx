@@ -27,6 +27,7 @@ function unfold() {
   fireEvent.click(screen.getByRole('button', { name: 'Rooms and tables' }));
 }
 
+import type { FloorChangeView } from '../src/ipc/generated/FloorChangeView';
 import type { FloorView } from '../src/ipc/generated/FloorView';
 import type { TableRowView } from '../src/ipc/generated/TableRowView';
 import type { TableView } from '../src/ipc/generated/TableView';
@@ -34,6 +35,7 @@ import type { TableView } from '../src/ipc/generated/TableView';
 function tile(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): TableView {
   return {
     section: 'Hall',
+    sectionOrder: 0,
     seats: 4,
     state: 'free',
     total: null,
@@ -94,6 +96,23 @@ function floor(over: Partial<FloorView> = {}): FloorView {
     tablesOnCounter: true,
     ...over,
   };
+}
+
+/** Rust's answer to a bulk change: the floor after it, and what it did and did not do. */
+function change(over: Partial<FloorChangeView> = {}): FloorChangeView {
+  return { floor: floor(), said: 'Done.', kept: [], ...over };
+}
+
+/**
+ * Every command answers with the floor — except the bulk pair, which answers with a change.
+ * A test that gave those two a plain floor would swallow the screen's own mistakes.
+ */
+function answers(view = floor(), outcome: FloorChangeView = change({ floor: view })) {
+  call.mockImplementation((name: string) =>
+    Promise.resolve(
+      name === 'delete_dining_tables' || name === 'set_dining_tables_active' ? outcome : view,
+    ),
+  );
 }
 
 beforeEach(() => {
@@ -247,7 +266,7 @@ describe('arranging the room (2026-08-22)', () => {
 
   /** The point of ticking. */
   it('deletes everything ticked in ONE command', async () => {
-    call.mockResolvedValue(floor());
+    answers();
     show();
     await screen.findByText('4 seats');
 
@@ -264,6 +283,125 @@ describe('arranging the room (2026-08-22)', () => {
     const sent = call.mock.calls.filter((c) => c[0] === 'delete_dining_tables');
     expect(sent, 'a bulk delete became a loop of single deletes').toHaveLength(1);
     expect(sent[0]?.[1]).toEqual({ tableIds: ['tbl_1', 'tbl_2'] });
+  });
+
+  /**
+   * A table taken off the floor loses its tile, so the panel is the only way back to it. It
+   * used to be reachable from nowhere at all.
+   */
+  it('lists the tables that are off the floor, and puts one back', async () => {
+    answers(
+      floor({
+        tables: [
+          row({ id: 'tbl_1', label: '1' }),
+          row({ id: 'tbl_9', label: '9', printed: 'Hall 9', isActive: false, history: 3 }),
+        ],
+      }),
+      change({ said: '1 table put back.' }),
+    );
+    show();
+    await screen.findByText('4 seats');
+
+    unfold();
+    const off = screen.getByRole('heading', { name: 'Off the floor' });
+    expect(off).toBeTruthy();
+    // Named, with the history that is the reason it was hidden rather than deleted.
+    expect(screen.getByText('Hall 9')).toBeTruthy();
+    expect(screen.getByText('3 orders')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Put back' }));
+    expect(call.mock.calls.find((c) => c[0] === 'set_dining_tables_active')?.[1]).toEqual({
+      tableIds: ['tbl_9'],
+      active: true,
+    });
+  });
+
+  it('says nothing about being off the floor when nothing is', async () => {
+    answers();
+    show();
+    await screen.findByText('4 seats');
+    unfold();
+    expect(screen.queryByRole('heading', { name: 'Off the floor' })).toBeNull();
+  });
+
+  /**
+   * The order of the rooms is the shop's, and the billing screen groups by it too — so it has
+   * to be changeable from here.
+   */
+  it('moves a room up, and numbers every room again from the top', async () => {
+    answers(
+      floor({
+        sections: [
+          { id: 'sec_hall', name: 'Hall', sortOrder: 0, isActive: true, tableCount: 2 },
+          { id: 'sec_ac', name: 'AC room', sortOrder: 4, isActive: true, tableCount: 2 },
+        ],
+      }),
+    );
+    show();
+    await screen.findByText('4 seats');
+    unfold();
+
+    // The first room cannot go up and the last cannot go down.
+    expect(screen.getByRole('button', { name: 'Move Hall up' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move AC room down' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move AC room up' }));
+    await screen.findByText('4 seats');
+    const saved = call.mock.calls
+      .filter((c) => c[0] === 'save_floor_section')
+      .map((c) => [(c[1] as { name: string }).name, (c[1] as { sortOrder: number }).sortOrder]);
+    // Both rooms are written, numbered 0 and 1 — the stray 4 is straightened out by the press.
+    expect(saved).toEqual([
+      ['AC room', 0],
+      ['Hall', 1],
+    ]);
+  });
+
+  /** The screen already knows which tables have orders, so it says so before the press. */
+  it('says how many of the ticked tables can really be deleted', async () => {
+    answers(
+      floor({
+        tables: [
+          row({ id: 'tbl_1', label: '1' }),
+          row({ id: 'tbl_2', label: '2', history: 3 }),
+        ],
+      }),
+    );
+    show();
+    await screen.findByText('4 seats');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 2' }));
+    const bar = await screen.findByRole('group', {
+      name: 'What to do with the ticked tables',
+    });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Delete' }));
+
+    expect(await screen.findByText(/1 table can be deleted/)).toBeTruthy();
+    expect(screen.getByText(/1 table with orders will be left alone/)).toBeTruthy();
+  });
+
+  /** A refusal is a rule, and it is named — not "the shop's data could not be read". */
+  it('names the table it could not delete, and keeps the rest deleted', async () => {
+    answers(
+      floor(),
+      change({
+        said: '1 table deleted. 1 table could not be.',
+        kept: ['Hall 2 — this table has 3 order(s) against it. Hide it instead'],
+      }),
+    );
+    show();
+    await screen.findByText('4 seats');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
+    const bar = await screen.findByRole('group', {
+      name: 'What to do with the ticked tables',
+    });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete them' }));
+
+    expect(await screen.findByText('1 table deleted. 1 table could not be.')).toBeTruthy();
+    expect(screen.getByText(/Hall 2 — this table has 3 order/)).toBeTruthy();
   });
 
   it('adds a run of tables from the panel', async () => {
@@ -325,7 +463,7 @@ describe('empty is not a lecture (P30.5)', () => {
 
   /** The floor is drawn room by room. */
   it('groups the tables under their room, and ticks one room at a time', async () => {
-    call.mockResolvedValue(
+    answers(
       floor({
         sections: [
           { id: 'sec_hall', name: 'Hall', sortOrder: 0, isActive: true, tableCount: 2 },

@@ -80,6 +80,19 @@ pub struct FloorView {
     pub tables_on_counter: bool,
 }
 
+/// What a change to several tables at once did — and what it left alone, named, with the
+/// reason. A bulk action that stopped at the first refusal used to undo the other thirty-nine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct FloorChangeView {
+    pub floor: FloorView,
+    /// The headline, in one line.
+    pub said: String,
+    /// One line per table that was left alone: its name, and why.
+    pub kept: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
@@ -424,44 +437,142 @@ pub fn delete_table_on(app: &App, table_id: String) -> UiResult<FloorView> {
     floor_on(app)
 }
 
-/// Several tables at once — one transaction, all or nothing.
-pub fn delete_tables_on(app: &App, table_ids: Vec<String>) -> UiResult<FloorView> {
+/// Several tables at once — one transaction still, but every table is judged on its own, so
+/// one that cannot go no longer undoes the other thirty-nine.
+pub fn delete_tables_on(app: &App, table_ids: Vec<String>) -> UiResult<FloorChangeView> {
     guard::require(app, Permission::TablesManage)?;
     let at = now();
-    app.with_shop(|shop| {
+    let (done, kept) = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let floor = mb_db::Repos::new(tx).floor();
+                let named = Named::read(&floor)?;
+                let mut change = Change::default();
                 for id in &table_ids {
-                    floor.delete_table(OUTLET, &TableId::new(id.clone()), at)?;
+                    let table = TableId::new(id.clone());
+                    match floor.why_not_deleted(&table)? {
+                        Some(why) => change.kept.push(named.line(id, &why)),
+                        None => {
+                            floor.delete_table(OUTLET, &table, at)?;
+                            change.done += 1;
+                        }
+                    }
                 }
-                Ok(())
+                Ok((change.done, change.kept))
             })
             .map_err(|e| words::from_db(&e))
     })?;
-    floor_on(app)
+    changed(app, done, kept, "deleted")
 }
 
-/// The same bargain for hiding and putting back — see `delete_tables_on`.
+/// The same bargain for hiding and putting back — see `delete_tables_on`. Putting a table back
+/// is never refused, so only hiding has anything to keep.
 pub fn set_tables_active_on(
     app: &App,
     table_ids: Vec<String>,
     active: bool,
-) -> UiResult<FloorView> {
+) -> UiResult<FloorChangeView> {
     guard::require(app, Permission::TablesManage)?;
     let at = now();
-    app.with_shop(|shop| {
+    let (done, kept) = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let floor = mb_db::Repos::new(tx).floor();
+                let named = Named::read(&floor)?;
+                let mut change = Change::default();
                 for id in &table_ids {
-                    floor.set_active(OUTLET, &TableId::new(id.clone()), active, at)?;
+                    let table = TableId::new(id.clone());
+                    let why = if active {
+                        None
+                    } else {
+                        floor.why_not_hidden(&table)?
+                    };
+                    match why {
+                        Some(why) => change.kept.push(named.line(id, &why)),
+                        None => {
+                            floor.set_active(OUTLET, &table, active, at)?;
+                            change.done += 1;
+                        }
+                    }
                 }
-                Ok(())
+                Ok((change.done, change.kept))
             })
             .map_err(|e| words::from_db(&e))
     })?;
-    floor_on(app)
+    changed(
+        app,
+        done,
+        kept,
+        if active {
+            "put back"
+        } else {
+            "taken off the floor"
+        },
+    )
+}
+
+/// What a bulk change has managed so far, while it is still going.
+#[derive(Default)]
+struct Change {
+    done: u32,
+    kept: Vec<String>,
+}
+
+/// Every table's name as it prints, read once so a loop over forty of them does not ask
+/// forty times.
+struct Named {
+    tables: Vec<DiningTable>,
+    sections: Vec<Section>,
+}
+
+impl Named {
+    fn read(floor: &mb_db::repo::floor::FloorRepo<'_>) -> Result<Self, mb_db::DbError> {
+        Ok(Self {
+            tables: floor.list_tables(OUTLET)?,
+            sections: floor.list_sections(OUTLET)?,
+        })
+    }
+
+    /// "AC 13 — this table has 3 order(s) against it…": the table a person can walk to, and
+    /// then the reason.
+    fn line(&self, id: &str, why: &str) -> String {
+        let printed = self
+            .tables
+            .iter()
+            .find(|t| t.id.as_str() == id)
+            .map_or_else(
+                || "A table".to_owned(),
+                |table| {
+                    let room = table
+                        .section_id
+                        .as_ref()
+                        .and_then(|want| self.sections.iter().find(|s| &s.id == want));
+                    mb_core::table::printed_name(room.map(|s| s.name.as_str()), &table.label)
+                },
+            );
+        format!("{printed} — {why}")
+    }
+}
+
+/// The floor as it is now, and one line saying what just happened to it.
+fn changed(app: &App, done: u32, kept: Vec<String>, did: &str) -> UiResult<FloorChangeView> {
+    let tables = |how: u32| words::count(i64::from(how), "table", "tables");
+    let could_not = u32::try_from(kept.len()).unwrap_or(u32::MAX);
+    let said = match (done, could_not) {
+        (0, 0) => "Nothing was ticked.".to_owned(),
+        (0, _) => format!("No table was {did}. {} could not be.", tables(could_not)),
+        (_, 0) => format!("{} {did}.", tables(done)),
+        (_, _) => format!(
+            "{} {did}. {} could not be.",
+            tables(done),
+            tables(could_not)
+        ),
+    };
+    Ok(FloorChangeView {
+        floor: floor_on(app)?,
+        said,
+        kept,
+    })
 }
 
 pub fn save_thresholds_on(app: &App, warn: i64, late: i64) -> UiResult<FloorView> {
@@ -923,7 +1034,7 @@ pub fn delete_dining_table(app: tauri::State<'_, App>, table_id: String) -> UiRe
 pub fn delete_dining_tables(
     app: tauri::State<'_, App>,
     table_ids: Vec<String>,
-) -> UiResult<FloorView> {
+) -> UiResult<FloorChangeView> {
     delete_tables_on(&app, table_ids)
 }
 
@@ -932,7 +1043,7 @@ pub fn set_dining_tables_active(
     app: tauri::State<'_, App>,
     table_ids: Vec<String>,
     active: bool,
-) -> UiResult<FloorView> {
+) -> UiResult<FloorChangeView> {
     set_tables_active_on(&app, table_ids, active)
 }
 

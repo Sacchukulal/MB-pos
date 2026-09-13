@@ -202,6 +202,43 @@ describe('ConfirmDialog', () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
+  it('answers on Enter, so a keyboard never has to reach for the mouse', async () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        title="Delete 40 tables?"
+        confirmLabel="Delete them"
+        destructive
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />,
+    );
+    await userEvent.keyboard('{Enter}');
+    expect(onConfirm).toHaveBeenCalledOnce();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('leaves Enter to the button a hand has tabbed to', async () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        title="Delete 40 tables?"
+        confirmLabel="Delete them"
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />,
+    );
+    // Cancel has the focus, so Enter must press CANCEL and not the dialog's own answer.
+    screen.getByRole('button', { name: 'Cancel' }).focus();
+    await userEvent.keyboard('{Enter}');
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it('is a modal dialog, so focus and screen readers stay inside it', () => {
     render(
       <ConfirmDialog

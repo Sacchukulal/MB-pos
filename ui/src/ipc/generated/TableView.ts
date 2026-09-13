@@ -10,7 +10,12 @@ export type TableView = { id: string, label: string,
  * The section's name, or `None` for the "No table" group that holds open parcel and
  * self-service orders — "so no order is ever invisible".
  */
-section: string | null, seats: number, state: TableState, 
+section: string | null, 
+/**
+ * Where the shop puts that room, so the billing screen groups its tiles in the SAME order
+ * the floor screen does. `None` goes last, with the "No table" group.
+ */
+sectionOrder: number | null, seats: number, state: TableState, 
 /**
  * `None` when the table is free.
  */

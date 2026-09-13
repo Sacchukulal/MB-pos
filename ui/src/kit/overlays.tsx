@@ -24,6 +24,8 @@ export interface ModalProps {
   /** What this dialog is for, as something you can ask for. */
   note?: ReactNode;
   onClose: () => void;
+  /** What Enter does, for a dialog that has one answer — see `takesEnter`. */
+  onEnter?: () => void;
   children?: ReactNode;
   actions?: ReactNode;
   /** One question and two buttons: the narrow box. */
@@ -36,6 +38,7 @@ export function Modal({
   title,
   note,
   onClose,
+  onEnter,
   children,
   actions,
   small,
@@ -45,22 +48,31 @@ export function Modal({
   const scrim = useRef<HTMLDivElement>(null);
   const shown = useLeaving(open, scrim);
 
-  // Escape closes — the keyboard-first rule (§1) does not stop at the edge of a modal.
+  // Escape closes, Enter answers — the keyboard-first rule (§1) does not stop at the edge of
+  // a modal.
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' && event.key !== 'Enter') return;
       // One key, one dialog. A dialog opened over another one is further down the page than
       // the one it sits on, so the last one on the page is the one on top.
       const dialogs = document.querySelectorAll('.mb-modal');
       if (dialogs[dialogs.length - 1] !== panel.current) return;
-      // The dialog takes the key: a screen listening on the window must not also act on it.
+      if (event.key === 'Escape') {
+        // The dialog takes the key: a screen listening on the window must not also act on it.
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (!onEnter || !takesEnter(document.activeElement)) return;
+      // A form inside a dialog must not also submit on this key.
+      event.preventDefault();
       event.stopPropagation();
-      onClose();
+      onEnter();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, onClose, onEnter]);
 
   // Focus moves into the dialog ONCE, when it opens.
   useEffect(() => {
@@ -99,6 +111,16 @@ export function Modal({
       </div>
     </div>
   );
+}
+
+/**
+ * Whether Enter is the dialog's to take. A box being typed into and a button being tabbed to
+ * both have their own Enter, and taking the key from either of them would press the wrong
+ * thing; anywhere else in the dialog the key belongs to the dialog.
+ */
+function takesEnter(focused: Element | null): boolean {
+  if (!(focused instanceof HTMLElement)) return true;
+  return !['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(focused.tagName);
 }
 
 /**
@@ -176,6 +198,8 @@ export function ConfirmDialog({
       open={open}
       title={title}
       onClose={onCancel}
+      // The question has one answer, so Enter gives it — Esc is the other way out.
+      onEnter={onConfirm}
       actions={
         <>
           <Button onClick={onCancel}>{cancelLabel}</Button>
