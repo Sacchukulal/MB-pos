@@ -39,7 +39,11 @@ covers: number | null,
  */
 orderId: string | null, 
 /**
- * The bill number it claimed when it was parked, as it will print.
+ * The token it took when it was parked, as it prints — what the screen calls it.
+ */
+token: string | null, 
+/**
+ * The bill number, once the bill is paid.
  */
 billNumber: string | null, 
 /**

@@ -43,7 +43,11 @@ settleAsked: boolean,
  */
 by: string | null, byId: string | null, orderId: string | null, 
 /**
- * The bill number this order has already claimed, formatted as it will be printed.
+ * The token this order took, formatted as it prints — the number on the tile.
+ */
+token: string | null, 
+/**
+ * The bill number, once the bill is paid.
  */
 billNumber: string | null, 
 /**

@@ -110,7 +110,7 @@ export function Processing({
               {order.minutes === null ? '' : formatMinutes(order.minutes)}
             </span>
             <span className="mb-processing__no">
-              {order.billNumber ?? ''}
+              {order.token ? `#${order.token}` : (order.billNumber ?? '')}
               {order.kitchenMinutes === null ? null : (
                 <span
                   className="mb-processing__food"

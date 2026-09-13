@@ -167,6 +167,12 @@ export function Tile({
         {busy ? (
           <span className="mb-tile__row">
             {table.total ? <span className="mb-tile__amount">{table.total.text}</span> : null}
+            {/* The token: the number the kitchen ticket and the bill both carry. */}
+            {table.token ? (
+              <span className="mb-tile__token" title={`Token ${table.token}`}>
+                #{table.token}
+              </span>
+            ) : null}
             {table.by ? (
               <span className="mb-tile__by" title={`Opened by ${table.by}`}>
                 {table.by}

@@ -38,6 +38,7 @@ function table(label: string, busy = false): TableView {
     total: busy ? { paise: 64_600n, text: '646.00' } : null,
     minutes: busy ? 12 : null,
     kitchenTold: true,
+    token: null,
     billNumber: null,
     kitchenMinutes: null,
     billAsked: false,

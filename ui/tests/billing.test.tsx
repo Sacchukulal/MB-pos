@@ -31,6 +31,7 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
     by: null,
     byId: null,
     orderId: null,
+    token: null,
     billNumber: null,
     selected: false,
     ...over,
@@ -61,6 +62,29 @@ describe('the table grid (scope 1.4)', () => {
         `the ${state} state has no form of its own`,
       ).toBeTruthy();
     }
+  });
+
+  it('wears the token beside the money, so a tile can be matched to its kitchen ticket', () => {
+    render(
+      <TableGrid
+        tables={[
+          table({
+            id: '6',
+            label: '6',
+            state: 'occupied',
+            orderId: 'ord_6',
+            total: money(29_500, '295.00'),
+            token: '68',
+          }),
+          table({ id: '7', label: '7', state: 'free' }),
+        ]}
+        filter=""
+        onOpen={vi.fn()}
+        onPrintBill={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('#68')).toBeInTheDocument();
+    expect(screen.getByText('#68').closest('.mb-tile')?.textContent).toContain('295.00');
   });
 
   /** The table you are on is marked, and being on it costs nothing else. */
@@ -494,6 +518,18 @@ describe('the processing orders (2026-08-27)', () => {
   it('says so when nothing is cooking', () => {
     render(<Processing orders={[]} onOpen={vi.fn()} />);
     expect(screen.getByText('Nothing cooking')).toBeInTheDocument();
+  });
+
+  // 2026-09-13: the token is the number on the kitchen ticket and the bill, and the only one
+  // an open order has — the bill number is born when the bill is paid.
+  it('shows the token, the number the kitchen ticket carries', () => {
+    render(
+      <Processing
+        orders={[cooking({ id: '3', label: '3', token: '68', billNumber: null })]}
+        onOpen={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Table 3/ }).textContent).toContain('#68');
   });
 });
 

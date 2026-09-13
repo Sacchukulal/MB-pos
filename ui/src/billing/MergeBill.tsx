@@ -53,7 +53,9 @@ export function MergeBill({
               <li key={other.orderId} className="mb-merge__row">
                 <span className="mb-merge__name">
                   {other.section === null ? other.label : `Table ${other.label}`}
-                  {other.billNumber ? (
+                  {other.token ? (
+                    <span className="mb-merge__no"> · #{other.token}</span>
+                  ) : other.billNumber ? (
                     <span className="mb-merge__no"> · {other.billNumber}</span>
                   ) : null}
                 </span>

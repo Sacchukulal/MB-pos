@@ -547,9 +547,9 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
     );
 
     // And nothing else. Same state, same table — a settled order here would mean the button
-    // closed a table that had not paid, which is the failure worth having a test for. The one
-    // thing that DOES change: the paper carried to the table is the bill, so this is where
-    // its number is born, and a second print keeps it.
+    // closed a table that had not paid, which is the failure worth having a test for. And no
+    // bill number: that is born when the bill is paid, so the paper carried to the table
+    // shows the token, and a print, or two, spends nothing from the bill book.
     let after = read(&app, &order);
     assert!(
         matches!(after, AnyOrder::Open(_)),
@@ -558,19 +558,21 @@ fn the_bill_can_go_to_the_table_without_settling_it() {
     let (AnyOrder::Open(before), AnyOrder::Open(after)) = (&before, &after) else {
         panic!("the order stopped being open");
     };
-    assert_eq!(before.bill_number, None, "a number before any bill was made");
-    let number = after
-        .bill_number
-        .clone()
-        .expect("the bill carried to the table has its number");
+    assert_eq!(
+        before.bill_number, None,
+        "a number before any bill was made"
+    );
+    assert_eq!(
+        after.bill_number, None,
+        "printing the bill spent a bill number before it was paid"
+    );
     crate::flows::print_open_bill_on(&app, order.as_str().to_owned()).expect("printed again");
     let AnyOrder::Open(again) = read(&app, &order) else {
         panic!("the order stopped being open");
     };
     assert_eq!(
-        again.bill_number,
-        Some(number),
-        "a second print of the same bill moved its number"
+        again.bill_number, None,
+        "a second print of the bill spent a bill number"
     );
     assert_eq!(
         before.core.table(),

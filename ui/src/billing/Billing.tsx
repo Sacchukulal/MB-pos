@@ -957,7 +957,11 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             <span className="mb-cart__where">
               {cart.table ? `Table ${cart.table}` : cart.orderType}
             </span>
-            {cart.billNumber ? <span className="mb-cart__no">{cart.billNumber}</span> : null}
+            {cart.billNumber ? (
+              <span className="mb-cart__no">{cart.billNumber}</span>
+            ) : cart.token ? (
+              <span className="mb-cart__no">#{cart.token}</span>
+            ) : null}
             {/* The small lock for the ← → keys, beside the bill they would change. */}
             {cart.orderTypeLocked ? null : (
               <Button

@@ -40,7 +40,9 @@ pub struct CartState {
     order_type: OrderType,
     table: Option<TableSeat>,
     pub origin: Option<Origin>,
-    /// The bill number the order claimed when it was parked.
+    /// The token the order took when it was parked — the number the screen tracks it by.
+    pub token: Option<String>,
+    /// The bill number, once the bill is paid.
     pub bill_number: Option<String>,
     pub settlement: Settlement,
     pub bill_discount: Option<DiscountEntry>,
@@ -70,6 +72,7 @@ impl CartState {
             order_type,
             table: None,
             origin: None,
+            token: None,
             bill_number: None,
             settlement: Settlement::new(),
             bill_discount: None,
@@ -93,6 +96,7 @@ impl CartState {
                 label: table_label.unwrap_or_else(|| id.as_str().to_owned()),
                 seat: core.seat().cloned(),
             }),
+            token: order.token().map(|t| t.formatted.clone()),
             bill_number: order.bill_number().map(|b| b.formatted.clone()),
             origin: Some(Origin {
                 id: core.id.clone(),
@@ -283,7 +287,9 @@ pub struct CartView {
     pub covers: Option<u32>,
     /// The order's id, once it has one.
     pub order_id: Option<String>,
-    /// The bill number it claimed when it was parked, as it will print.
+    /// The token it took when it was parked, as it prints — what the screen calls it.
+    pub token: Option<String>,
+    /// The bill number, once the bill is paid.
     pub bill_number: Option<String>,
     /// What the floor did to this order while the cashier had it open.
     pub from_the_floor: Vec<crate::orders::FloorChange>,
@@ -410,7 +416,9 @@ pub struct TableView {
     pub by: Option<String>,
     pub by_id: Option<String>,
     pub order_id: Option<String>,
-    /// The bill number this order has already claimed, formatted as it will be printed.
+    /// The token this order took, formatted as it prints — the number on the tile.
+    pub token: Option<String>,
+    /// The bill number, once the bill is paid.
     pub bill_number: Option<String>,
     /// This is the tile the cashier is looking at — the cart is on it.
     pub selected: bool,
@@ -525,6 +533,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         kitchen_told: !state.kitchen.told().is_empty(),
         covers: state.covers,
         order_id: state.order_id().map(str::to_owned),
+        token: state.token.clone(),
         bill_number: state.bill_number.clone(),
         from_the_floor: state.from_the_floor.clone(),
         length_says: state.cart.length_says().unwrap_or_default(),
@@ -751,6 +760,7 @@ pub fn floor_view(
                 by: None,
                 by_id: None,
                 order_id: None,
+                token: None,
                 bill_number: None,
             },
         });
@@ -837,6 +847,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         by: None,
         by_id: Some(core.created_by.as_str().to_owned()),
         order_id: Some(id.clone()),
+        token: order.token().map(|claimed| claimed.formatted.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
         // A table's tile is the table; a second party's tile, and a tile with no table, is the
         // order itself.
