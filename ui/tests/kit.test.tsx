@@ -319,6 +319,54 @@ describe('one dialog over another', () => {
   });
 });
 
+/** The dark area around a dialog. */
+describe('a press on the scrim', () => {
+  const scrimOf = (dialog: HTMLElement) => dialog.parentElement as HTMLElement;
+
+  it('closes the dialog when the press and the release are both on it', () => {
+    const close = vi.fn();
+    render(
+      <Modal open title="HALL 14" onClose={close}>
+        <Input label="Name" />
+      </Modal>,
+    );
+    const scrim = scrimOf(screen.getByRole('dialog'));
+
+    fireEvent.pointerDown(scrim);
+    fireEvent.pointerUp(scrim);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the dialog when a drag that began in a box ends out here', () => {
+    const close = vi.fn();
+    render(
+      <Modal open title="HALL 14" onClose={close}>
+        <Input label="Name" />
+      </Modal>,
+    );
+    const scrim = scrimOf(screen.getByRole('dialog'));
+
+    // Selecting the text in the box and letting go outside the dialog.
+    fireEvent.pointerDown(screen.getByLabelText('Name'));
+    fireEvent.pointerUp(scrim);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it('keeps the dialog when a press that began out here ends inside it', () => {
+    const close = vi.fn();
+    render(
+      <Modal open title="HALL 14" onClose={close}>
+        <Input label="Name" />
+      </Modal>,
+    );
+    const scrim = scrimOf(screen.getByRole('dialog'));
+
+    fireEvent.pointerDown(scrim);
+    fireEvent.pointerUp(screen.getByLabelText('Name'));
+    expect(close).not.toHaveBeenCalled();
+  });
+});
+
 describe('a dialog and the caret (§1, keyboard-first)', () => {
   it('puts the caret in the first field rather than taking it back out', () => {
     render(

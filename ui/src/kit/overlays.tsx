@@ -47,6 +47,8 @@ export function Modal({
   const panel = useRef<HTMLDivElement>(null);
   const scrim = useRef<HTMLDivElement>(null);
   const shown = useLeaving(open, scrim);
+  /** Whether the press now under way began on the dark area rather than inside the dialog. */
+  const pressedScrim = useRef(false);
 
   // Escape closes, Enter answers — the keyboard-first rule (§1) does not stop at the edge of
   // a modal.
@@ -89,9 +91,14 @@ export function Modal({
     <div
       ref={scrim}
       className={cx('mb-overlay', shown === 'leaving' && 'mb-overlay--closing')}
-      // Touch closes it too: "every popup closes by touch" (§1).
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+      // Touch closes it too: "every popup closes by touch" (§1). The press and the release
+      // must BOTH be on the dark area — a drag that started in a text box and ended out here
+      // is a selection, not a press on the scrim, and must not close the dialog.
+      onPointerDown={(event) => {
+        pressedScrim.current = event.target === event.currentTarget;
+      }}
+      onPointerUp={(event) => {
+        if (pressedScrim.current && event.target === event.currentTarget) onClose();
       }}
     >
       <div
