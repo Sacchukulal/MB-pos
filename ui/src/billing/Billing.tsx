@@ -22,7 +22,6 @@ import {
   RowMenu,
   Scroller,
   SearchField,
-  Stepper,
   useAction,
   useReport,
   useToast,
@@ -291,27 +290,6 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const mayVoidLine = may('order.item.void');
   /** Off for a parcel counter (Floor's switch): the orders being cooked take the grid's room. */
   const tablesOnCounter = cart?.tablesOnCounter ?? true;
-
-  const step = useCallback(
-    async (line: { index: number; qty: string; name: string }, by: number) => {
-      // One less than one is a removal, and a removal after the kitchen has been told is a
-      // void.
-      if (by < 0 && cart?.kitchenTold && line.qty === '1') {
-        if (!mayVoidLine) {
-          toast.show('warn', 'The kitchen has this already. Ask somebody who may void an item.');
-          return;
-        }
-        setVoidingLine({ index: line.index, name: line.name });
-        return;
-      }
-      try {
-        setCart(await call('cart_step_qty', { index: line.index, by }));
-      } catch (cause) {
-        report(cause);
-      }
-    },
-    [cart?.kitchenTold, mayVoidLine, report, toast],
-  );
 
   /** ✕ — and what ✕ means changes the moment the kitchen has been told. */
   const takeOffTheBill = useCallback(
@@ -1014,19 +992,13 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                   </div>
                 ) : null}
                 {/*
-                  − qty + and then ✕, in that order, because the quantity is what a cashier
-                  changes forty times a shift and the removal is what they do once.
+                  The quantity, then ✕. No − +: the number is tapped and typed, and the two
+                  step buttons took the room the name needed (owner, 2026-09-13).
                 */}
                 <div className="mb-cartline__controls">
-                <Stepper
-                  label={`Quantity of ${line.name}`}
-                  what={line.name}
-                  onLess={() => void step(line, -1)}
-                  onMore={() => void step(line, +1)}
-                >
                   {typingQty?.index === line.index ? (
                     <input
-                      className="mb-stepper__value"
+                      className="mb-cartline__qty"
                       autoFocus
                       inputMode="decimal"
                       aria-label={`Quantity of ${line.name}`}
@@ -1047,14 +1019,13 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                   ) : (
                     <button
                       type="button"
-                      className="mb-stepper__value"
+                      className="mb-cartline__qty"
                       aria-label={`Change the quantity of ${line.name}`}
                       onClick={() => setTypingQty({ index: line.index, text: line.qty })}
                     >
                       {line.qty}
                     </button>
                   )}
-                </Stepper>
                 {typingQty?.index === line.index && hasScale ? (
                   <Button
                     variant="quiet"
@@ -1080,26 +1051,29 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                   />
                 ) : null}
                 {/*
-                  Money off and remove, behind ONE ⋯: the line is one row, and two more buttons
-                  on it were what pushed "Butter Naan" onto two lines. Only what this person may
-                  do is in it; with nothing allowed there is no ⋯ at all.
+                  Money off stays behind ⋯ — it is rare, and it is a permission. With nobody
+                  allowed it there is no ⋯ at all.
                 */}
-                {may('bill.discount.line') || !cart.kitchenTold || mayVoidLine ? (
+                {may('bill.discount.line') ? (
                   <RowMenu label={`More for ${line.name}`}>
-                    {may('bill.discount.line') ? (
-                      <Button size="sm" variant="quiet" onClick={() => setDiscounting({ line })}>
-                        <Icon name="tag" size="sm" />
-                        Money off
-                      </Button>
-                    ) : null}
-                    {/* ✕ is a void once the kitchen has been told, and a void is a permission. */}
-                    {!cart.kitchenTold || mayVoidLine ? (
-                      <Button size="sm" variant="danger" onClick={() => void takeOffTheBill(line)}>
-                        <Icon name="x" size="sm" />
-                        Remove
-                      </Button>
-                    ) : null}
+                    <Button size="sm" variant="quiet" onClick={() => setDiscounting({ line })}>
+                      <Icon name="tag" size="sm" />
+                      Money off
+                    </Button>
                   </RowMenu>
+                ) : null}
+                {/* ✕ on the row itself: a void once the kitchen has been told, and a void is
+                    a permission. */}
+                {!cart.kitchenTold || mayVoidLine ? (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    iconOnly
+                    title={`Take ${line.name} off the bill`}
+                    aria-label={`Take ${line.name} off the bill`}
+                    onClick={() => void takeOffTheBill(line)}
+                    icon={<Icon name="x" size="sm" />}
+                  />
                 ) : null}
                 </div>
               </div>
