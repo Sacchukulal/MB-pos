@@ -387,6 +387,8 @@
   --import-box-height: 12rem;
   /* How narrow a table may get before it scrolls sideways instead of wrapping. */
   --table-min: 34rem;
+  /* How wide the quiet second line under a cell may get before it wraps instead. */
+  --cell-second: 16rem;
   /* A table row. */
   --row-height: 2.625rem;
 

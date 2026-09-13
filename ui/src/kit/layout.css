@@ -40,6 +40,30 @@
   scrollbar-gutter: auto;
 }
 
+/*
+ * A scroller that moves sideways as well: a table with more columns than the window is wide.
+ * The bar belongs to the PANE, so it sits at the bottom edge a person can see — a table that
+ * scrolls inside its own box puts the bar under its last row, a screenful below the window.
+ */
+.mb-scroll--wide {
+  overflow-x: auto;
+  /*
+   * And its width is its own business. Without this the table's width is asked of the page
+   * itself, and a bills list with a long column pushes the whole screen wider than the window
+   * instead of scrolling inside this box.
+   */
+  contain: inline-size;
+}
+
+/*
+ * And what is inside it grows to its own width instead of scrolling a second time: the box
+ * around the table keeps its fill and its corners under the columns that were off screen.
+ */
+.mb-scroll--wide > .mb-panel,
+.mb-scroll--wide > .mb-table__wrap {
+  min-width: max-content;
+}
+
 /* Page header: the same shape on every screen. */
 
 .mb-pagehead {

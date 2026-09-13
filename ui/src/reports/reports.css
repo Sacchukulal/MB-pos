@@ -121,18 +121,24 @@
   grid-row: 1 / -1;
 }
 
-/* The only thing on this screen that scrolls. */
+/* The only thing on this screen that scrolls — down the bills, and across the columns. */
 .mb-bills__sheet {
   min-height: 0;
 }
 
-/* The line under a bill number or a state: what it replaced, why it was voided. */
+/*
+ * The line under a bill number or a state: what it replaced, why it was voided. An order id in
+ * it is one unbroken word, and a cell that cannot break it grows until the buttons at the end
+ * of the row are off the screen — so it breaks anywhere.
+ */
 .mb-bills__second {
   display: block;
   font-size: var(--type-caption);
   font-weight: var(--weight-normal);
   color: var(--text-muted);
   white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: var(--cell-second);
 }
 
 /* The totals of an opened bill, on the right, the way the paper has them. */

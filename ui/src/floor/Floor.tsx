@@ -14,6 +14,7 @@ import {
   Icon,
   Input,
   Modal,
+  Page,
   plural,
   Scroller,
   SectionHeader,
@@ -207,7 +208,7 @@ export function Floor() {
   };
 
   return (
-    <div className="mb-floor">
+    <Page scroll={false} className="mb-floor">
       {/* Two choices, and they must not look like one choice. */}
       <Toolbar
         end={
@@ -422,7 +423,7 @@ export function Floor() {
           onConfirm={() => act(confirming)}
         />
       ) : null}
-    </div>
+    </Page>
   );
 }
 

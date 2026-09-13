@@ -24,10 +24,13 @@ export function Page({
 /** An area that scrolls. */
 export const Scroller = forwardRef<
   HTMLDivElement,
-  { children: ReactNode; inset?: boolean; className?: string }
->(function Scroller({ children, inset = false, className }, ref) {
+  { children: ReactNode; inset?: boolean; wide?: boolean; className?: string }
+>(function Scroller({ children, inset = false, wide = false, className }, ref) {
   return (
-    <div ref={ref} className={cx('mb-scroll', inset && 'mb-scroll--inset', className)}>
+    <div
+      ref={ref}
+      className={cx('mb-scroll', inset && 'mb-scroll--inset', wide && 'mb-scroll--wide', className)}
+    >
       {children}
     </div>
   );

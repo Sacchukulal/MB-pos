@@ -344,7 +344,7 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           hint="Pick another day, or clear the search."
         />
       ) : (
-        <Scroller className="mb-bills__sheet">
+        <Scroller wide className="mb-bills__sheet">
           <Panel flush>
             <Table
               rows={view.rows}
