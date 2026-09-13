@@ -584,6 +584,17 @@ fn with_table(mut order: mb_core::AnyOrder, table: TableId) -> mb_core::AnyOrder
     order
 }
 
+/// What to call an order in a sentence a person reads: the table it sits on, by the name the
+/// shop gave the table, else the token the screen shows it by. Never its id.
+fn order_label(app: &App, order: &mb_core::AnyOrder) -> String {
+    if let Some(table) = order.core().table() {
+        return crate::flows::table_name(app, table).unwrap_or_else(|| table.as_str().to_owned());
+    }
+    order
+        .token()
+        .map_or_else(|| "an order".to_owned(), |t| t.formatted.clone())
+}
+
 pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiResult<FloorView> {
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
@@ -612,10 +623,8 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
     })?;
 
     let day = survivor.core().business_day;
-    let absorbed_label = absorbed
-        .core()
-        .table()
-        .map_or_else(|| "an order".to_owned(), |t| t.as_str().to_owned());
+    let absorbed_label = order_label(app, &absorbed);
+    let survivor_label = order_label(app, &survivor);
 
     app.with_shop(|shop| {
         shop.db
@@ -646,7 +655,7 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
                 let closed = match absorbed.clone() {
                     mb_core::AnyOrder::Open(o) => o
                         .cancel(
-                            &format!("merged into {into_order}"),
+                            &format!("merged into {survivor_label}"),
                             who.staff_id.clone(),
                             at,
                         )
@@ -698,7 +707,12 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
         Ok(())
     })?;
 
-    log_info!("{} merged {} into another bill", who.name, absorbed_label);
+    log_info!(
+        "{} merged {} into {}",
+        who.name,
+        absorbed_label,
+        survivor_label
+    );
     floor_on(app)
 }
 

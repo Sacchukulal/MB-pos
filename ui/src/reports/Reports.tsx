@@ -321,7 +321,7 @@ export function Reports({
               </div>
             ) : null}
 
-            <Scroller className="mb-reports__sheet">
+            <Scroller wide className="mb-reports__sheet">
               <Table
                 columns={columns}
                 rows={lines}

@@ -97,7 +97,11 @@
   font-size: var(--text-xs);
 }
 
-/* The only thing on this screen that scrolls sideways. */
+/*
+ * The only thing on this screen that scrolls — down the lines, and across the columns. The GST
+ * and till reports have more columns than the window is wide once the rail has taken its share,
+ * and without the sideways scroll the last of them are off the edge with no way to reach them.
+ */
 .mb-reports__sheet {
   min-width: 0;
   min-height: 0;
