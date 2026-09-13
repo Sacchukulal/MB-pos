@@ -425,7 +425,6 @@ macro_rules! commands {
             $crate::ipc::current_cart,
             $crate::ipc::cart_add,
             $crate::ipc::cart_set_qty,
-            $crate::ipc::cart_step_qty,
             $crate::ipc::cart_remove,
             $crate::ipc::cart_clear,
             $crate::ipc::cart_set_order_type,
@@ -809,50 +808,6 @@ pub fn cart_set_qty(
         state.cart.set_qty(index, parsed).map_err(|e| {
             UiError::new("cart.qty", "That quantity could not be set.").with_detail(e.to_string())
         })?;
-        cart_view(state, &app.shop_config())
-    });
-    shown(&handle, view)
-}
-
-/// One more, or one less — the − and + on a cart line.
-#[tauri::command]
-pub fn cart_step_qty(
-    app: tauri::State<'_, App>,
-    handle: tauri::AppHandle,
-    index: usize,
-    by: i32,
-) -> UiResult<CartView> {
-    guard::require(&app, Permission::BillCreate)?;
-
-    let step = mb_core::Qty::from_whole(i64::from(by)).map_err(|e| {
-        UiError::new("cart.qty", "That step is too big.").with_detail(e.to_string())
-    })?;
-
-    let view = app.with_cart_mut(|state| {
-        let now = state
-            .cart
-            .lines()
-            .get(index)
-            .ok_or_else(|| {
-                UiError::new("cart.qty.gone", "That line is not on this bill any more.")
-            })?
-            .qty;
-        let next = now.add(step).map_err(|e| {
-            UiError::new("cart.qty", "That quantity could not be worked out.")
-                .with_detail(e.to_string())
-        })?;
-
-        if next.is_positive() {
-            state.cart.set_qty(index, next).map_err(|e| {
-                UiError::new("cart.qty", "That quantity could not be set.")
-                    .with_detail(e.to_string())
-            })?;
-        } else {
-            state.cart.remove(index).map_err(|e| {
-                UiError::new("cart.remove", "That line could not be removed.")
-                    .with_detail(e.to_string())
-            })?;
-        }
         cart_view(state, &app.shop_config())
     });
     shown(&handle, view)

@@ -911,36 +911,24 @@
 
 /*
  * The quantity: one box, tapped to type a new one. No − +, so the name gets the room they
- * took.
+ * took. The kit draws the box — a small Button at rest, an Input while it is typed into; this
+ * only places it and lends it the number font.
  */
 .mb-cartline__qty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   min-width: var(--space-8);
-  height: var(--control-sm);
   padding: 0 var(--space-1);
-  background: var(--surface);
-  color: var(--text);
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-sm);
-  font: inherit;
   font-family: var(--font-num);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
   text-align: center;
-  cursor: pointer;
-  transition: background-color var(--motion-fast) var(--ease);
 }
 
-button.mb-cartline__qty:hover {
-  background: var(--surface-2);
-}
-
+/* Typing must not change the row's height, and the tint says which box is being typed into. */
 input.mb-cartline__qty {
+  width: var(--space-8);
+  height: var(--control-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   background: var(--accent-soft);
-  cursor: text;
 }
 
 /* The quantity, then the tools, at the line's right end. */

@@ -160,8 +160,6 @@ export interface Commands {
     returns: CartView;
   };
   cart_set_qty: { args: { index: number; qty: string }; returns: CartView };
-  /** − and + on a cart line. */
-  cart_step_qty: { args: { index: number; by: number }; returns: CartView };
   cart_remove: { args: { index: number }; returns: CartView };
   cart_clear: { args: { keepType: boolean }; returns: CartView };
   cart_set_order_type: { args: { orderType: string }; returns: CartView };

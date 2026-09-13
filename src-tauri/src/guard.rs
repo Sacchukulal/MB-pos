@@ -54,8 +54,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("current_cart", Access::Needs(Permission::BillCreate)),
     ("cart_add", Access::Needs(Permission::BillCreate)),
     ("cart_set_qty", Access::Needs(Permission::BillCreate)),
-    // The - and + on a cart line.
-    ("cart_step_qty", Access::Needs(Permission::BillCreate)),
     ("cart_remove", Access::Needs(Permission::BillCreate)),
     ("cart_clear", Access::Needs(Permission::BillCreate)),
     ("cart_set_order_type", Access::Needs(Permission::BillCreate)),

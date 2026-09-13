@@ -15,6 +15,7 @@ import {
   cx,
   EmptyState,
   Icon,
+  Input,
   MoneyInput,
   onlyAmount,
   Page,
@@ -997,7 +998,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                 */}
                 <div className="mb-cartline__controls">
                   {typingQty?.index === line.index ? (
-                    <input
+                    <Input
                       className="mb-cartline__qty"
                       autoFocus
                       inputMode="decimal"
@@ -1017,14 +1018,14 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                       }}
                     />
                   ) : (
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
                       className="mb-cartline__qty"
                       aria-label={`Change the quantity of ${line.name}`}
                       onClick={() => setTypingQty({ index: line.index, text: line.qty })}
                     >
                       {line.qty}
-                    </button>
+                    </Button>
                   )}
                 {typingQty?.index === line.index && hasScale ? (
                   <Button
