@@ -713,7 +713,26 @@ fn ensure_the_roles_exist(db: &Arc<Db>) {
 
 impl App {
     /// Open unlocked, or open locked.
+    ///
+    /// A shop that still needs its first run — PINs came down from the cloud but the shop
+    /// name is not set yet — keeps the stand-in so the setup wizard's write commands
+    /// (`save_settings`, `save_staff_member`) can proceed without a real session.  The
+    /// stand-in is retired the moment the wizard finishes and a real login happens.
     fn open_or_lock(&self, db: &Arc<Db>) {
+        // A shop mid-setup must not lock itself: the wizard needs to write settings and
+        // staff, and those commands require a session.  The stand-in gives it one.
+        if firstrun_still_needed(db) {
+            self.sessions.begin(
+                stand_in_actor("Counter", DEFAULT_STAFF),
+                crate::flows::now(),
+                true,
+            );
+            log_info!(
+                "the first run is not finished; keeping the stand-in so the wizard can write"
+            );
+            return;
+        }
+
         match anybody_has_a_pin(db) {
             Ok(true) => {
                 self.sessions.end();
@@ -777,6 +796,28 @@ pub fn anybody_has_a_pin(db: &Arc<Db>) -> Result<bool, mb_db::DbError> {
         .transaction(|tx| mb_db::Repos::new(tx).people().list_staff(OUTLET))?
         .iter()
         .any(|s| s.pin_hash.is_some()))
+}
+
+/// Is the first run still incomplete?  The same two conditions `firstrun::look_on` checks —
+/// a shop name and at least one PIN — read straight from the database so this works before
+/// the shop is placed in `App::shop`.
+fn firstrun_still_needed(db: &Arc<Db>) -> bool {
+    let result = db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        let has_details = repos
+            .settings()
+            .store_profile(OUTLET)?
+            .is_some_and(|p| !p.name.trim().is_empty());
+        let has_pin = repos
+            .people()
+            .list_staff(OUTLET)?
+            .iter()
+            .any(|s| s.pin_hash.is_some());
+        Ok(!(has_details && has_pin))
+    });
+    // If the database cannot be read, assume setup is NOT needed — the error branch in
+    // `open_or_lock` will lock the counter, which is the safe direction.
+    result.unwrap_or(false)
 }
 
 /// The id of the printer that exists when no printer exists.
