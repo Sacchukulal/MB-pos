@@ -59,25 +59,24 @@ Until that box is ticked, assume the worst case.
 
 ## 2. Cutting a release
 
-1. **Decide the version.** `Cargo.toml`, `tauri.conf.json` and `ui/package.json`
-   all carry it and they must agree; `Cargo.lock` and `ui/package-lock.json`
-   follow them (`cargo metadata` at the root and `npm install` in `ui/` after
-   the bump). It is three numbers — see D96, and ANDROID-G4 for what a version
-   *name* cost. The last number is the one that moves: a round of fixes is a
-   patch, not a minor.
-2. **Run the gates here first.** `cargo test --workspace`, clippy on the newest
-   stable, and `npm run check` in `ui/` — CI runs the same ones and a red run
-   is twenty minutes.
-3. **Tag it, with the notes, and push both.** `git tag -a v1.6.3 -m "<two
-   sentences>" && git push origin main v1.6.3`. The tag's message is what a
-   shopkeeper reads. CI publishes from the tag, never from a branch, so what
-   shipped can always be rebuilt. The push to main runs the same workflow
-   without publishing and is what fills the caches — GitHub keeps caches per
-   ref and a tag is its own ref. `gh run watch` the tag's run. **A red run
-   keeps its version number:** re-run it when the runner was the cause, or
-   move the tag onto the fix (`git tag -f`, `git push -f origin v1.6.3`) when
-   code changed. Nothing was published, so nothing is being replaced.
-4. CI (`.github/workflows/release.yml`) then, in two jobs side by side:
+1. **One command does the version, the gates, the tag and the push:**
+   `node scripts/release.mjs`. It picks the next number itself: always one step,
+   1.7.2 -> 1.7.3, fix or feature alike. A digit never reaches 10, it rolls over:
+   1.7.9 -> 1.8.0, 1.9.9 -> 2.0.0. Never a jump, never a two-digit part.
+   It bumps `Cargo.toml`, `Cargo.lock`, `tauri.conf.json`, `ui/package.json` and
+   `ui/package-lock.json` together, runs clippy, `cargo test --workspace` and
+   `npm run check` (the same gates CI runs), commits `release: vX.Y.Z`, tags
+   it and pushes main and the tag. **Nobody edits a version number by hand.**
+   Pass `--notes "<two sentences>"` for the tag message a shopkeeper reads.
+   It refuses a second release on the same day (`--force` if the owner says so),
+   a dirty tree, a branch other than main, and any number that is not above
+   the current one. `node scripts/release.mjs --check` runs only the gates.
+2. **Watch it:** `gh run watch`. **A red run keeps its version number:**
+   re-run it when the runner was the cause, or fix the code, then
+   `git tag -f vX.Y.Z && git push -f origin main vX.Y.Z`. Nothing was published,
+   so nothing is being replaced. CI publishes from the tag, never from a
+   branch, so what shipped can always be rebuilt.
+3. CI (`.github/workflows/release.yml`) then, in two jobs side by side:
    * *checks*: the versions agree with the tag, the front-end types, guards
      and tests, the whole suite, clippy;
    * *build*: `tauri build` — the npm CLI in `ui/devDependencies`, the same
