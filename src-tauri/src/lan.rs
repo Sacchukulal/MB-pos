@@ -902,9 +902,11 @@ pub fn allow_firewall_on(app: &App) -> UiResult<NetworkView> {
     view_on(app)
 }
 
+// PowerShell — and a person at a UAC prompt — off the window thread: a plain command runs on
+// it, and the whole window, every other command with it, stood still until PowerShell answered.
 #[tauri::command]
-pub fn allow_firewall(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
-    allow_firewall_on(&app)
+pub async fn allow_firewall(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
+    crate::ipc::blocking(|| allow_firewall_on(&app)).await
 }
 
 /// Read the firewall rules again and answer with the fresh view. The rules are otherwise read
@@ -921,8 +923,8 @@ pub fn check_firewall_on(app: &App) -> UiResult<NetworkView> {
 }
 
 #[tauri::command]
-pub fn check_firewall(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
-    check_firewall_on(&app)
+pub async fn check_firewall(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
+    crate::ipc::blocking(|| check_firewall_on(&app)).await
 }
 
 #[tauri::command]
