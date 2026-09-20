@@ -68,13 +68,15 @@ impl PaymentMode {
 pub struct Payment {
     pub mode: PaymentMode,
     pub amount: Money,
-    /// A UPI reference, a card approval code, a cheque number.
+    /// A UPI reference, a card approval code, a cheque number. Left off the wire when there
+    /// is none, like every optional field a bill carries (see `CartLine`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
     pub settles_credit: bool,
     #[serde(default)]
     pub confirmed: bool,
     /// Which provider answered. `None` on the modes nobody has to be asked about.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
 }
 

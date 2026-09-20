@@ -42,5 +42,9 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 base64 = "0.22"
 
+# The day file. Already in the tree via `zip` / `png` behind src-tauri; gzip for the one file
+# per business day the counter builds for the cloud's Storage.
+flate2 = "1"
+
 [dev-dependencies]
 serde_json = "1"

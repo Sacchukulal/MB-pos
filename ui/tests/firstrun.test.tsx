@@ -8,6 +8,8 @@ vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
   inApp: () => true,
   isUiError: (v: unknown) => typeof v === 'object' && v !== null && 'code' in v,
+  // Rust pushes the restore's progress; nothing is pushed in a test.
+  subscribe: () => Promise.resolve(() => undefined),
 }));
 
 const { FirstRun } = await import('../src/setup/FirstRun');

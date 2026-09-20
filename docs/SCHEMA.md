@@ -980,6 +980,7 @@ somebody's role changes.
 | is_builtin | INTEGER | no | A shipped role the owner cannot delete out from under themselves. |
 | max_discount_bp | INTEGER | yes | Basis points. NULL is no limit; 0 is a role that may not discount at all, and a waiter has exactly that. |
 | max_discount_paise | INTEGER | yes | Paise. NULL is no limit. |
+| updated_at | INTEGER | no | The row's own moment (0019). Newest wins per row, from the counter or the phone; rows from before the column are stamped 0 so any real stamp wins. |
 
 ### permissions
 
@@ -1383,6 +1384,29 @@ reads this. `seen_at` is the counter's own record; the cloud never keeps read st
 | updated_at | INTEGER | no | The cloud's stamp; an older copy never overwrites a newer one. |
 | seen_at | INTEGER | yes | When the bell was opened. |
 | is_deleted | INTEGER | no | Withdrawn by us; kept, hidden. |
+
+---
+
+### archive_days
+
+The day file's ledger (migration 0017). A shop's permanent history is one gzip of JSON lines
+per business day in the cloud's Storage, built from this database once the day is sealed
+(locked, or `SEAL_AFTER_DAYS` = 3 days old) and uploaded once under the counter's own login.
+This table says when a day sealed, when a bill of it was last saved, when its file last went
+up and what that file was. Nothing here is money; a row is derived from the bills and can be
+rebuilt by uploading again. Pending is: sealed AND (never uploaded OR dirty after the upload).
+
+| column | type | null | notes |
+|---|---|---|---|
+| outlet_id | TEXT | no | |
+| business_day | INTEGER | no | Days since 1970-01-01. Part of the key. |
+| sealed_at | INTEGER | yes | When the archive step first saw the day sealed. |
+| dirty_at | INTEGER | yes | The last moment a bill, refund or revert of this day was saved — set at the one place every bill save passes through. |
+| uploaded_at | INTEGER | yes | When the file last went up. NULL is never. |
+| sha256 | TEXT | yes | Of the gzip that went up, lowercase hex. |
+| bills | INTEGER | no | Bills in the file that went up. |
+| bytes | INTEGER | no | Its size. |
+| last_error | TEXT | yes | Why the last upload failed; cleared by the next success. |
 
 ---
 
@@ -2368,18 +2392,15 @@ directions**: a missing index fails, and so does a stray one.
 | `idx_orders_created_by` | orders (created_by, business_day) | sales by cashier (9.6) |
 | `idx_orders_bill_number` | orders (outlet_id, terminal_id, bill_number_value) **unique**, partial | a bill number is never reused. The terminal is in the key because every till issues out of its OWN series (D135), so two tills both have a bill number 1 and they print as `A/0001` and `B/0001` |
 | `idx_orders_token` | orders (outlet_id, terminal_id, business_day, token_value) **unique**, partial | a token is unique within its day and its till, not forever |
-| `idx_order_lines_order` | order_lines (order_id) | loading an order |
 | `idx_order_lines_item` | order_lines (item_id) partial | item-wise sales (10.2) |
 | `idx_bill_lines_order` | bill_lines (order_id) | printing and reprinting |
 | `idx_bill_charges_order` | bill_charges (order_id) | printing |
-| `idx_payments_order` | payments (order_id) | settlement |
 | `idx_payments_day_mode` | payments (business_day, mode) | payment-mode report and the day close |
 | `idx_payments_customer` | payments (customer_id) partial | credit outstanding (10.7) |
 | `idx_items_category` | items (outlet_id, category_id) | the menu screen (R4) |
 | `idx_items_short_code` | items (outlet_id, short_code) partial | scope 1.3, typed at the counter |
 | `idx_expenses_day` | expenses (outlet_id, business_day) | expenses and cash position (10.6) |
 | `idx_customer_payments_customer` | customer_payments (customer_id, business_day) | statements and ageing (5.3, 10.7) |
-| `idx_audit_log_at` | audit_log (at) | the audit trail |
 | `idx_audit_log_staff` | audit_log (staff_id, business_day) | who did what |
 | `idx_order_events_order` | order_events (order_id) | one order's history |
 | `idx_reprints_day` | reprints (business_day) | the reprint report (10.5) |

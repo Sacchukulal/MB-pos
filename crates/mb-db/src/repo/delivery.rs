@@ -273,16 +273,11 @@ impl<'a> DeliveryRepo<'a> {
         at: Timestamp,
     ) -> Result<(), DbError> {
         self.tx.execute(
-            "UPDATE staff SET is_rider = ?3, updated_at = ?4
-              WHERE outlet_id = ?1 AND id = ?2",
-            params![
-                outlet,
-                staff_id,
-                encode::bool_to_sql(is_rider),
-                encode::timestamp_to_sql(at)
-            ],
+            "UPDATE staff SET is_rider = ?3 WHERE outlet_id = ?1 AND id = ?2",
+            params![outlet, staff_id, encode::bool_to_sql(is_rider)],
         )?;
-        Ok(())
+        // Stamped and queued for the cloud in the one place a staff row is.
+        crate::repo::people::PeopleRepo::new(self.tx).queue_staff(outlet, staff_id, at)
     }
 
     /// Money handed over the counter by a rider.

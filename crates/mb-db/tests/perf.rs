@@ -671,3 +671,49 @@ fn r1_r2_r3_the_report_budgets() {
         );
     }
 }
+
+/// The day file: a thousand bills of a day built into their gzip well inside the two seconds
+/// the plan gives it on the reference machine, and the bytes per bill are what the free tier
+/// was worked out on.
+#[test]
+fn the_day_file_of_a_busy_day_is_built_in_time() {
+    const BILLS: u64 = 1_000;
+    let scratch = Scratch::new("perf_day_file");
+    let db = scratch.open();
+    seed_a_shop(&db);
+    // `write_one_bill` spreads bills at 205 a day; the first five days hold a thousand bills
+    // and the busiest of them is measured. Every settled bill of one day is what the file is.
+    for n in 0..BILLS {
+        write_one_bill(&db, n);
+    }
+    let day = BusinessDay::from_days_since_epoch(20_000);
+    let bills_that_day: i64 = db
+        .read(|c| Ok(c.query_row("SELECT count(*) FROM orders WHERE business_day = ?1", [encode::business_day_to_sql(day)], |r| r.get(0))?))
+        .expect("count");
+
+    let started = Instant::now();
+    let file = db
+        .read_transaction(|tx| mb_db::Repos::new(tx).archive().day_file("outlet_default", day, Timestamp::from_millis(1), "perf"))
+        .expect("the day file");
+    let took = started.elapsed();
+    let per_bill = file.gz.len() / usize::try_from(bills_that_day.max(1)).unwrap_or(1);
+    // Scaled to a thousand bills of this day's shape.
+    let scaled = took.mul_f64(1_000.0 / f64::from(u32::try_from(bills_that_day.max(1)).unwrap_or(1)));
+
+    println!("\n--- the day file ---");
+    println!("  bills in the day     {bills_that_day} ({LINES_PER_BILL} lines each)");
+    println!("  gzip bytes           {} ({per_bill} per bill)", file.gz.len());
+    println!("  built in             {took:.2?} (scaled to 1,000 bills: {scaled:.2?})");
+    println!("  budget               2 s for 1,000 bills of 5 lines\n");
+    assert_eq!(usize::try_from(bills_that_day).unwrap_or(0), file.bills);
+    assert!(per_bill < 1_000, "a compressed bill of {LINES_PER_BILL} lines should be well under 1 KB, was {per_bill}");
+
+    if cfg!(debug_assertions) {
+        println!("  (debug build - measured and printed, not asserted)\n");
+        return;
+    }
+    assert!(
+        scaled < std::time::Duration::from_secs(2),
+        "a thousand bills took {scaled:.2?} to build into their day file, over the 2 s budget"
+    );
+}

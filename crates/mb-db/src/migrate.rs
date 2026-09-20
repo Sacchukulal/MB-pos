@@ -119,6 +119,25 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0016_report_on_paper",
         sql: include_str!("migrations/0016_report_on_paper.sql"),
     },
+    // The day file's ledger: which sealed days have gone up to the cloud's Storage, and which
+    // are dirty since.
+    Migration {
+        version: 17,
+        name: "0017_archive_days",
+        sql: include_str!("migrations/0017_archive_days.sql"),
+    },
+    // Three indexes with no reader go; the log tables gain a retention in code.
+    Migration {
+        version: 18,
+        name: "0018_history_retention",
+        sql: include_str!("migrations/0018_history_retention.sql"),
+    },
+    // A role wears its own stamp, so newest-wins applies to it like every other row.
+    Migration {
+        version: 19,
+        name: "0019_roles_updated_at",
+        sql: include_str!("migrations/0019_roles_updated_at.sql"),
+    },
 ];
 
 /// The highest version this build understands.

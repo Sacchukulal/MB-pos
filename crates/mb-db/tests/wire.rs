@@ -13,7 +13,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use mb_core::Timestamp;
-use mb_db::repo::wire::{ROW_KEY, ROW_TABLE_KEY, Restored, WireRow};
+use mb_db::repo::wire::{ROW_KEY, ROW_TABLE_KEY, RestoreReport, WireRow, cloud_name};
 use mb_db::Repos;
 
 use common::{OUTLET, Scratch, TERMINAL, shop};
@@ -37,49 +37,20 @@ fn everything_on_the_wire(db: &mb_db::Db) -> Vec<WireRow> {
     .expect("read")
 }
 
-/// Everything the cloud hands back, written into an empty shop the way the restore writes it:
-/// the box first, then the typed tables, then the bills. Returns (written, skipped).
+/// Everything the cloud hands back, written into an empty shop by the one ordered writer the
+/// restore uses. Returns (written, skipped).
 fn bring_down(rows: &[WireRow], down: &mb_db::Db) -> (usize, usize) {
-    let mut written = 0;
-    let mut skipped = 0;
+    let mut report = RestoreReport::default();
     down.transaction(|tx| {
-        tx.execute_batch("PRAGMA defer_foreign_keys = ON")?;
         let repos = Repos::new(tx);
-        let wire = repos.wire();
-        // The cloud hands the box back first, then the typed tables, then the bills, then the
-        // totals — the order the restore reads them in.
-        let typed = ["orders", "roles", "staff", "items", "categories", "customers", "expenses",
-                     "expense_categories", "cash_movements", "customer_ledger",
-                     "day_totals", "day_item_totals", "day_category_totals"];
-        for row in rows.iter().filter(|r| !typed.contains(&r.table.as_str())) {
-            if wire.write_boxed(&row.table, &row.data)? {
-                written += 1;
-            } else {
-                skipped += 1;
-            }
-        }
-        for row in rows.iter().filter(|r| typed.contains(&r.table.as_str()) && r.table != "orders") {
-            let cloud_name = match row.table.as_str() {
-                "items" => "menu_items",
-                "categories" => "menu_categories",
-                other => other,
-            };
-            match wire.restore_row(OUTLET, cloud_name, &row.id, row.updated_at, &row.data)? {
-                Restored::Written => written += 1,
-                Restored::Skipped => skipped += 1,
-            }
-        }
-        for row in rows.iter().filter(|r| r.table == "orders") {
-            match wire.restore_row(OUTLET, "bills", &row.id, row.updated_at, &row.data)? {
-                Restored::Written => written += 1,
-                Restored::Skipped => skipped += 1,
-            }
-        }
+        repos.wire().restore_rows(OUTLET, rows.to_vec(), &mut report)?;
         repos.outbox().clear_backlog(Timestamp::from_millis(1))?;
         Ok(())
     })
     .expect("everything comes down");
-    (written, skipped)
+    assert!(report.failed.is_empty(), "rows that would not write: {:?}", report.failed);
+    let written = report.bills + report.rows + report.staff + report.roles + report.days;
+    (written as usize, report.skipped as usize)
 }
 
 /// The highest bill number and token the orders of a shop carry.
@@ -123,7 +94,7 @@ fn every_queued_row_of_a_whole_shop_can_be_shaped_for_the_cloud() {
         assert!(row.data.is_object(), "{} {} data is not an object", row.table, row.id);
     }
     // A settled order is a bill with everything a restore needs.
-    let bills: Vec<&WireRow> = rows.iter().filter(|r| r.table == "orders").collect();
+    let bills: Vec<&WireRow> = rows.iter().filter(|r| r.table == "bills").collect();
     assert!(!bills.is_empty(), "no bills travelled: {by_table:?}");
     for bill in &bills {
         for key in ["bill_number", "grand_total_paise", "lines", "payments", "tax_rows", "restore", "business_day"] {
@@ -137,7 +108,7 @@ fn every_queued_row_of_a_whole_shop_can_be_shaped_for_the_cloud() {
     assert!(by_table.contains_key("day_item_totals"), "{by_table:?}");
     // Typed master rows carry the whole counter row, named.
     for typed in ["items", "categories", "staff", "customers", "expenses"] {
-        let Some(row) = rows.iter().find(|r| r.table == typed) else {
+        let Some(row) = rows.iter().find(|r| r.table == cloud_name(typed)) else {
             continue;
         };
         let whole = row.data.get(ROW_KEY).unwrap_or_else(|| panic!("{typed} carries no whole row"));
@@ -152,7 +123,7 @@ fn every_queued_row_of_a_whole_shop_can_be_shaped_for_the_cloud() {
     let boxed: Vec<&WireRow> = rows
         .iter()
         .filter(|r| {
-            !["orders", "day_totals", "day_item_totals", "day_category_totals", "items", "categories", "staff", "roles",
+            !["bills", "day_totals", "day_item_totals", "day_category_totals", "menu_items", "menu_categories", "staff", "roles",
               "customers", "expenses", "expense_categories", "cash_movements", "customer_ledger"]
                 .contains(&r.table.as_str())
         })

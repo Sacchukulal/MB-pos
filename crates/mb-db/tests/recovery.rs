@@ -799,9 +799,10 @@ fn t11_every_write_enqueues_in_the_same_transaction() {
     );
 }
 
-/// A restore re-queues the whole outbox, and the re-queue carries no payload.
+/// A restore hands the shop to `queue_shop`, which re-queues every synced row from the live
+/// rows with a fresh stamp — and a synced row is gone from the outbox, not merely marked.
 #[test]
-fn t12_a_restore_requeues_the_whole_outbox() {
+fn t12_a_restore_requeues_the_whole_shop_from_its_rows() {
     let scratch = Scratch::new("t12");
     let dir = shop::backup_dir(&scratch);
     let db = scratch.open();
@@ -817,27 +818,40 @@ fn t12_a_restore_requeues_the_whole_outbox() {
         })
         .expect("mark synced");
     assert!(total > 0);
-    let still_pending = db
-        .transaction(|tx| Repos::new(tx).outbox().pending_count())
-        .expect("count");
-    assert_eq!(still_pending, 0);
+    db.read(|conn| {
+        let rows: i64 = conn.query_row("SELECT count(*) FROM sync_outbox", [], |r| r.get(0))?;
+        assert_eq!(rows, 0, "a synced entry leaves the outbox");
+        Ok(())
+    })
+    .expect("count");
 
     shop::take_and_verify(&db, &dir, "synced.db");
     drop(db);
     backup::restore(&dir.join("synced.db"), &scratch.db_path()).expect("restore");
 
     let db = scratch.open();
+    let at = Timestamp::from_millis(5_000_000_000_000);
+    let far_back = mb_core::BusinessDay::from_days_since_epoch(0);
+    let queued = db
+        .transaction(|tx| Repos::new(tx).outbox().queue_shop(OUTLET, far_back, at))
+        .expect("queue");
     let after = db
         .transaction(|tx| Repos::new(tx).outbox().pending_count())
         .expect("count");
-    assert_eq!(
-        usize::try_from(after).expect("small"),
-        total,
-        "the restore did not re-queue the whole outbox"
+    assert!(queued > 0);
+    assert!(
+        usize::try_from(after).expect("small") >= total,
+        "the re-queue ({after}) holds less than the shop once queued ({total})"
     );
 
-    // And it is still one narrow row per business row — no payload.
+    // Fresh stamps, and still one narrow row per business row — no payload.
     db.read(|conn| {
+        let stale: i64 = conn.query_row(
+            "SELECT count(*) FROM sync_outbox WHERE created_at <> ?1",
+            [at.millis()],
+            |r| r.get(0),
+        )?;
+        assert_eq!(stale, 0, "a re-queued row kept an old stamp");
         let with_payload: i64 = conn.query_row(
             "SELECT count(*) FROM sync_outbox WHERE op = 'upsert' AND tombstone IS NOT NULL",
             [],

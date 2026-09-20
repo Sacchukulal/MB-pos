@@ -87,8 +87,11 @@ pub struct DiscountOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscountEntry {
     pub discount: Discount,
-    /// Compulsory above a `DiscountPolicy` threshold.
+    /// Compulsory above a `DiscountPolicy` threshold. Both optionals are left off the wire
+    /// when empty (see `CartLine`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authorised_by: Option<StaffId>,
 }
 

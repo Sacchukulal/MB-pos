@@ -131,22 +131,27 @@ pub fn apply(
                     .events()
                     .remember(OUTLET, &intent.id, device_id, &recorded, at)?;
 
-                repos.audit().append(
-                    OUTLET,
-                    &AuditEntry::new(
-                        at,
-                        day,
-                        Some(staff.clone()),
-                        action::INTENT_APPLIED,
-                        "order",
-                    )
-                    .about(intent.order_id.clone().unwrap_or_default())
-                    .with_after(serde_json::json!({
-                        "device": device_id,
-                        "did": intent.what.name(),
-                        "outcome": applied.outcome.message(),
-                    })),
-                )?;
+                // A phone order is audited once, at the moments that matter. A tap that adds
+                // a line or changes a quantity is not: its exactly-once record is
+                // `applied_events`, and the settled bill is audited on its own.
+                if is_audited(&intent.what) {
+                    repos.audit().append(
+                        OUTLET,
+                        &AuditEntry::new(
+                            at,
+                            day,
+                            Some(staff.clone()),
+                            action::INTENT_APPLIED,
+                            "order",
+                        )
+                        .about(intent.order_id.clone().unwrap_or_default())
+                        .with_after(serde_json::json!({
+                            "device": device_id,
+                            "did": intent.what.name(),
+                            "outcome": applied.outcome.message(),
+                        })),
+                    )?;
+                }
                 Ok(applied)
             })
             .map_err(|e| words::from_db(&e))
@@ -193,6 +198,20 @@ pub fn apply(
     }
 
     Ok(applied)
+}
+
+/// The phone intents that go into the history: a bill settled or asked for, an order or a
+/// line voided or cancelled, a discount asked for. A tap that builds the order is not one.
+#[must_use]
+pub const fn is_audited(what: &What) -> bool {
+    matches!(
+        what,
+        What::RequestSettle { .. }
+            | What::RequestBill
+            | What::CancelOrder { .. }
+            | What::VoidItem { .. }
+            | What::RequestDiscount { .. }
+    )
 }
 
 /// True when an intent has been sitting in a phone's pocket too long — measured on the

@@ -2,6 +2,7 @@
 
 #![deny(missing_debug_implementations)]
 
+pub mod archive;
 pub mod backup;
 pub mod conn;
 pub mod encode;
@@ -11,6 +12,7 @@ pub mod locate;
 pub mod migrate;
 pub mod numbering;
 pub mod repo;
+pub mod retention;
 pub mod schema;
 pub mod settle;
 

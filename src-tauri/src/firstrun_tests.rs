@@ -66,6 +66,7 @@ impl Link for OwnerCloud {
     fn download(
         &self,
         _: &str,
+        _: Option<&str>,
         _: &Path,
         _: &mut dyn FnMut(u64, Option<u64>),
     ) -> Result<String, LinkError> {

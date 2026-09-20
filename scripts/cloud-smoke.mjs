@@ -5,9 +5,11 @@
  * Runs against a counter started on an EMPTY data folder with CDP open (the same road
  * `drive.mjs` takes), and a TEST licence made by `MB-backend/tools/make-test-licence.mjs`.
  *
- *   set APPDATA=C:\path\to\empty            (or WEBVIEW2_USER_DATA_FOLDER for a second copy)
- *   target\debug\magic-bill.exe --remote-debugging-port=9222
- *   node scripts/cloud-smoke.mjs --key MB-XXXX-XXXX-XXXX --restaurant <uuid>
+ *   cd ui && npm run build && cd .. && cargo build -p magic-bill --features custom-protocol
+ *   set APPDATA=C:\path\to\empty            (and WEBVIEW2_USER_DATA_FOLDER for a second copy)
+ *   set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222
+ *   target\debug\magic-bill.exe
+ *   node scripts/cloud-smoke.mjs --key MB-XXXX-XXXX-XXXX --restaurant <uuid> --folder C:\path\to\shop
  *
  * What it proves, in order:
  *   1. first run → Bring my shop from the cloud with the key (an empty shop comes down: 0 bills)
@@ -80,13 +82,13 @@ if (args.second) {
   step('T', 'a second computer moves the licence here and brings the shop down');
   const first = await invoke('first_run');
   check(!first.hasShop, 'the second counter starts with no shop');
-  const brought = await invoke('restore_from_cloud', { key: KEY, folder: '', moveHere: true });
+  const brought = await invoke('open_with_key', { key: KEY, folder: args.folder, moveHere: true }); brought.says = brought.cameDown ?? '(nothing came down)'; console.log('  open_with_key reply:', JSON.stringify(brought));
   check(brought.firstRun.hasShop, `the shop came down: ${brought.says}`);
   check(/[1-9]\d* bills?/.test(brought.says), 'bills came back as bills');
   // The PIN hash came down with the staff, so the counter opens locked: the first counter's PIN
   // must work here.
   await invoke('login', { staffId: 'staff_smoke_owner', pin: '1234' });
-  const bills = await invoke('list_bills');
+  const bills = (await invoke('bills', { filter: { period: null, query: null, cashier: null, state: null, mode: null } })).rows;
   check(bills.length > 0, `the Bills screen lists ${bills.length} bills that came down, behind the first counter\x27s PIN`);
   console.log('\nNow sell one more bill on the FIRST counter: its push must be refused (Health → Cloud copy says stopped).');
   process.exit(0);
@@ -98,18 +100,18 @@ if (first.hasShop) {
   console.log('  (a shop is already here from an earlier run of this script — carrying on)');
 } else {
   check(first.needed, 'the counter is on its first run with no shop');
-  const brought = await invoke('restore_from_cloud', { key: KEY, folder: '', moveHere: false });
+  const brought = await invoke('open_with_key', { key: KEY, folder: args.folder, moveHere: false }); brought.says = brought.cameDown ?? '(nothing came down)'; console.log('  open_with_key reply:', JSON.stringify(brought));
   check(brought.firstRun.hasShop, `a shop exists now: ${brought.says}`);
 }
 
 step(2, 'a name, a PIN, three bills');
+if (args.skipSell) { console.log('  (skipped: already sold)'); } else {
 await invoke('save_settings', { edits: [{ key: 'store.name', value: 'TEST smoke shop' }] });
 const staffId = 'staff_smoke_owner';
-await invoke('save_staff_member', { staff: { id: staffId, name: 'Smoke Owner', code: null, roleId: 'role_owner', status: 'active' } });
-await invoke('set_staff_pin', { staffId, pin: '1234' });
+await invoke('save_staff_member', { staff: { id: staffId, name: 'Smoke Owner', roleId: 'role_owner', status: 'active', pin: '1234', phone: '', designation: '', department: '', employmentType: 'full_time', address: '', emergencyName: '', emergencyPhone: '', idProof: '', leftOn: '' } });
 await invoke('login', { staffId, pin: '1234' }).catch(() => undefined);
 await invoke('save_menu_item', {
-  edit: { id: 'itm_smoke_tea', name: 'Tea', categoryId: null, price: '20', taxClassId: null, hsn: null, shortCode: null, cost: null, course: null, prepMinutes: null, isOpenPrice: false, isAvailable: true },
+  edit: { id: 'itm_smoke_tea', name: 'Tea', categoryId: null, price: '20', taxClassId: null, priceBasis: null, hsn: null, shortCode: null, cost: null, course: null, prepMinutes: null, isOpenPrice: false, isAvailable: true },
 });
 const sold = [];
 for (let i = 0; i < 3; i++) {
@@ -120,9 +122,10 @@ for (let i = 0; i < 3; i++) {
   sold.push(await invoke('complete_bill', { mode: 'cash' }));
 }
 check(sold.length === 3, `three bills settled: ${sold.join(', ')}`);
+}
 
 step(3, 'the bills reach the cloud within two minutes');
-const localBills = (await invoke('list_bills')).length;
+const localBills = (await invoke('bills', { filter: { period: null, query: null, cashier: null, state: null, mode: null } })).rows.length;
 const inCloud = await waitFor('the bills in the cloud', async () => {
   const { data } = await db.from('bills').select('id, grand_total_paise, restore').eq('restaurant_id', RID);
   return data && data.length >= localBills ? data : null;
@@ -135,7 +138,7 @@ check(account.restaurantCode.length > 0, `the shop code for phones is shown: ${a
 
 step(4, 'a staff member added on the cloud side reaches the counter');
 const cloudStaffId = `st-cloud-${Date.now().toString(36)}`;
-const { error: e1 } = await db.from('staff').insert({ restaurant_id: RID, id: cloudStaffId, name: 'From The Phone', code: 'F' + cloudStaffId.slice(-3).toUpperCase(), can_login_on_phone: true, updated_by: 'phone:smoke' });
+const { error: e1 } = await db.from('staff').insert({ restaurant_id: RID, id: cloudStaffId, name: 'From The Phone', status: 'active', is_rider: false, employment_type: 'full_time', updated_by: 'phone:smoke' });
 check(!e1, `inserted ${cloudStaffId} in the cloud${e1 ? ': ' + e1.message : ''}`);
 // The cloud answers a pull five seconds behind the clock (SYNC_PROTOCOL §4), so this polls.
 const people = await waitFor('the phone\x27s staff member on the counter', async () => {

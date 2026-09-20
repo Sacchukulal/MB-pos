@@ -344,6 +344,7 @@ impl crate::cloud::Link for OwnerCloud {
     fn download(
         &self,
         _: &str,
+        _: Option<&str>,
         _: &std::path::Path,
         _: &mut dyn FnMut(u64, Option<u64>),
     ) -> Result<String, crate::cloud::LinkError> {

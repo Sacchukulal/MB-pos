@@ -1026,6 +1026,8 @@ pub enum Pushed {
     },
     /// The shelf was read: the version waiting to be installed, or none any more.
     Version { available: Option<String> },
+    /// A shop is coming down from the cloud: how far, in a sentence.
+    Restore { says: String },
 }
 
 /// One line, as the customer sees it.

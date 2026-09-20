@@ -42,17 +42,20 @@ pub struct ItemSnapshot {
     pub unit_price: Money,
     /// The whole tax question, frozen — kind, rate and pricing basis.
     pub tax: TaxSpec,
-    /// The HSN/SAC code printed on the bill.
+    /// The HSN/SAC code printed on the bill. Every optional field here is left off the wire
+    /// when empty and read back as empty (see `CartLine`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hsn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category_id: Option<CategoryId>,
     /// Which kitchen screen this dish belongs on, frozen at the moment it was added.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub station: Option<String>,
     /// Which course, also frozen.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub course: Option<String>,
     /// How long the kitchen is expected to take on this dish.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prep_minutes: Option<u32>,
 }
 

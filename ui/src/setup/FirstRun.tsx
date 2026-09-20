@@ -14,7 +14,7 @@ import {
   PhoneInput,
   Scroller,
 } from '../kit';
-import { call, isUiError } from '../ipc/call';
+import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import { PIN_DIGITS } from '../auth/keyboard';
 import { blankPerson, editOf } from '../auth/person';
 import type { FirstRunView } from '../ipc/generated/FirstRunView';
@@ -75,6 +75,8 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   const [moveHere, setMoveHere] = useState(false);
   /** What came down, in Rust's words. */
   const [cameDown, setCameDown] = useState('');
+  // The shop coming down from the cloud, one sentence at a time; Rust pushes, this shows.
+  const [restoring, setRestoring] = useState('');
   /** The other way in: the licence key from the magicbill.in dashboard. */
   const [keyText, setKeyText] = useState('');
   /** Where Sign up sent them, once the browser has been asked to open it. */
@@ -121,6 +123,19 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
   }, []);
 
   useEffect(() => {
+    if (!inApp()) return undefined;
+    let stop: (() => void) | undefined;
+    subscribe((message) => {
+      if (message.kind === 'restore') setRestoring(message.says);
+    })
+      .then((unlisten) => {
+        stop = unlisten;
+      })
+      .catch(() => undefined);
+    return () => stop?.();
+  }, []);
+
+  useEffect(() => {
     call('first_run')
       .then((fresh) => {
         take(fresh);
@@ -160,6 +175,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
     clear();
     opening
       .then((shop) => {
+        setRestoring('');
         take(shop.firstRun);
         if (shop.cameDown) setCameDown(shop.cameDown);
         setShopName(shop.shop.name);
@@ -528,6 +544,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
           </section>
         ) : null}
 
+        {busy && restoring !== '' ? <Notice tone="info">{restoring}</Notice> : null}
         {cameDown !== '' ? <Notice tone="info">{cameDown}</Notice> : null}
 
         {step === 'details' ? (

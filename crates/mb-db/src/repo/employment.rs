@@ -378,8 +378,7 @@ impl<'a> EmploymentRepo<'a> {
                     emergency_phone = ?8,
                     id_proof        = ?9,
                     employment_type = ?10,
-                    left_on         = ?11,
-                    updated_at      = ?12
+                    left_on         = ?11
               WHERE outlet_id = ?1 AND id = ?2",
             params![
                 outlet,
@@ -393,7 +392,6 @@ impl<'a> EmploymentRepo<'a> {
                 record.id_proof,
                 record.employment_type,
                 record.left_on.map(encode::business_day_to_sql),
-                encode::timestamp_to_sql(at),
             ],
         )?;
         if changed == 0 {
@@ -401,7 +399,8 @@ impl<'a> EmploymentRepo<'a> {
                 "there is nobody on this counter with that id".to_owned(),
             ));
         }
-        Ok(())
+        // Stamped and queued for the cloud in the one place a staff row is.
+        crate::repo::people::PeopleRepo::new(self.tx).queue_staff(outlet, id, at)
     }
 
     /// What the shop took over a window, for the staff-cost percentage.

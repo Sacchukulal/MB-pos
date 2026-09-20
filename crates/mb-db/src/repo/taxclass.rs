@@ -137,6 +137,8 @@ impl<'a> TaxClassRepo<'a> {
                 rusqlite::params![outlet, to.as_str(), encode::timestamp_to_sql(at)],
             )?;
         }
+        // The profile changed: stamped and queued for the cloud in the one place it is.
+        crate::repo::settings::SettingsRepo::new(self.tx).queue_store_profile(outlet, at)?;
         let followers = self.items_on(
             outlet,
             &from,
@@ -166,25 +168,13 @@ impl<'a> TaxClassRepo<'a> {
         }
         let from = self.rate_for(outlet, Some(category))?;
         let n = self.tx.execute(
-            "UPDATE categories SET default_tax_class_id = ?3, updated_at = ?4
-              WHERE outlet_id = ?1 AND id = ?2",
-            rusqlite::params![
-                outlet,
-                category.as_str(),
-                to.map(TaxClassId::as_str),
-                encode::timestamp_to_sql(at)
-            ],
+            "UPDATE categories SET default_tax_class_id = ?3 WHERE outlet_id = ?1 AND id = ?2",
+            rusqlite::params![outlet, category.as_str(), to.map(TaxClassId::as_str)],
         )?;
         if n == 0 {
             return Err(DbError::invariant("that category is gone"));
         }
-        OutboxRepo::new(self.tx).enqueue(
-            outlet,
-            "categories",
-            category.as_str(),
-            Op::Upsert,
-            at,
-        )?;
+        crate::repo::menu::MenuRepo::new(self.tx).queue_category(outlet, category.as_str(), at)?;
         let now = self.rate_for(outlet, Some(category))?;
         if now == from {
             return Ok(0);
@@ -269,11 +259,21 @@ impl<'a> TaxClassRepo<'a> {
                 "A charge (service, packing or delivery) still uses this slab. Change that first.",
             ));
         }
+        let mut stmt = self.tx.prepare(
+            "SELECT id FROM categories WHERE outlet_id = ?1 AND default_tax_class_id = ?2",
+        )?;
+        let followers = stmt
+            .query_map(rusqlite::params![outlet, id.as_str()], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
         self.tx.execute(
             "UPDATE categories SET default_tax_class_id = NULL
               WHERE outlet_id = ?1 AND default_tax_class_id = ?2",
             rusqlite::params![outlet, id.as_str()],
         )?;
+        for category in &followers {
+            crate::repo::menu::MenuRepo::new(self.tx).queue_category(outlet, category, at)?;
+        }
         let n = self.tx.execute(
             "DELETE FROM tax_classes WHERE outlet_id = ?1 AND id = ?2",
             rusqlite::params![outlet, id.as_str()],

@@ -142,6 +142,12 @@ impl<'a> Repos<'a> {
         wire::WireRepo::new(self.tx)
     }
 
+    /// The day file: sealing, the ledger of what went up, the file itself and its reader.
+    #[must_use]
+    pub fn archive(&self) -> crate::archive::ArchiveRepo<'a> {
+        crate::archive::ArchiveRepo::new(self.tx)
+    }
+
     #[must_use]
     pub fn outbox(&self) -> OutboxRepo<'a> {
         OutboxRepo::new(self.tx)

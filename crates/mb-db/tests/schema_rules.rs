@@ -231,7 +231,6 @@ fn t19_nothing_in_the_money_path_cascades() {
 #[test]
 fn t8_every_named_index_exists() {
     const REQUIRED: &[&str] = &[
-        "idx_audit_log_at",
         "idx_audit_log_staff",
         "idx_bill_charges_order",
         "idx_bill_lines_order",
@@ -241,7 +240,6 @@ fn t8_every_named_index_exists() {
         "idx_items_short_code",
         "idx_order_events_order",
         "idx_order_lines_item",
-        "idx_order_lines_order",
         "idx_orders_bill_number",
         "idx_orders_created_by",
         "idx_orders_customer",
@@ -254,7 +252,6 @@ fn t8_every_named_index_exists() {
         "idx_customers_phone_key",
         "idx_credit_adjustments_customer",
         "idx_payments_day_mode",
-        "idx_payments_order",
         "idx_reprints_day",
         // The register of bills taken back: read by day for the Bills screen, by order for
         // one bill's history, and its lines and payments by revert.

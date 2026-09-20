@@ -98,6 +98,22 @@ pub fn open(path: &Path, restored: bool) -> Startup {
     match Db::open(&DbConfig::new(path)) {
         Ok(db) => {
             log_info!("start-up: the shop is open and the schema is up to date");
+            if restored {
+                // A pen-drive restore: the cloud has seen none of this file's rows since the
+                // backup was taken, so the whole shop is queued again, freshly stamped.
+                let at = crate::flows::now();
+                let queued = db.transaction(|tx| {
+                    mb_db::Repos::new(tx).outbox().queue_shop(
+                        crate::state::OUTLET,
+                        crate::sync::unsealed_from(crate::flows::today(at)),
+                        at,
+                    )
+                });
+                match queued {
+                    Ok(n) => log_info!("start-up: {n} row(s) queued for the cloud after the restore"),
+                    Err(e) => log_warn!("start-up: the restored shop could not be queued for the cloud: {e}"),
+                }
+            }
             Startup::Ready {
                 db: Box::new(db),
                 path: path.to_path_buf(),

@@ -11,6 +11,7 @@ use crate::migrate;
 /// The tables whose row counts go into the manifest and are checked on verify.
 pub const COUNTED: &[&str] = &[
     "applied_events",
+    "archive_days",
     "advance_recoveries",
     "attachments",
     "attendance",
@@ -661,16 +662,13 @@ pub fn restore(from: &Path, to: &Path) -> Result<RestoreReport, DbError> {
     // The photographs come back too, and only once the database is known good.
     copy_attachments(&backup_attachments_dir(from), &attachments_dir(to))?;
 
-    // The outbox knows nothing about what the cloud has seen since this backup was taken.
+    // The outbox knows nothing about what the cloud has seen since this backup was taken: the
+    // caller queues the whole shop again (`OutboxRepo::queue_shop`) once the file is open.
     let counts = {
         let conn = Connection::open(to).map_err(|source| DbError::Open {
             path: to.to_path_buf(),
             source,
         })?;
-        conn.execute(
-            "UPDATE sync_outbox SET synced_at = NULL, attempts = 0, last_error = NULL",
-            [],
-        )?;
         count_rows(&conn)?
     };
 

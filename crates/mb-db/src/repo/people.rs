@@ -55,7 +55,8 @@ pub struct CloudStaff {
     pub updated_at: Timestamp,
 }
 
-/// A role as it comes down from the cloud.
+/// A role as it comes down from the cloud — and the shape the counter's own save takes on its
+/// way to the one writer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloudRole {
     pub id: String,
@@ -64,6 +65,16 @@ pub struct CloudRole {
     pub max_discount_bp: Option<i64>,
     pub max_discount_paise: Option<i64>,
     pub permissions: Vec<String>,
+    pub updated_at: Timestamp,
+}
+
+/// What to do with a permission code this build does not have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnknownCode {
+    /// The counter's own save: a typo is an error.
+    Refuse,
+    /// A newer build's phone: the code is the other side's business.
+    Drop,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,47 +135,76 @@ impl<'a> PeopleRepo<'a> {
         Ok(out)
     }
 
-    /// Save a role and the exact set of permissions it grants.
+    /// Save a role and the exact set of permissions it grants. A code this build does not
+    /// have is refused, because a typo here must not become a silent denial.
     pub fn save_role(&self, outlet: &str, role: &RoleShape, at: Timestamp) -> Result<(), DbError> {
-        let id = role.id.as_str();
-        self.tx.execute(
+        let shaped = CloudRole {
+            id: role.id.as_str().to_owned(),
+            name: role.name.clone(),
+            is_builtin: role.is_builtin,
+            max_discount_bp: role.max_discount_bp.map(i64::from),
+            max_discount_paise: role.max_discount.map(encode::money_to_sql),
+            permissions: role.permissions.codes().into_iter().map(str::to_owned).collect(),
+            updated_at: at,
+        };
+        self.write_role(outlet, &shaped, UnknownCode::Refuse)?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "roles", role.id.as_str(), Op::Upsert, at)
+    }
+
+    /// A role the owner's phone wrote, with the exact permissions it grants. Codes this
+    /// program does not know are dropped, not refused. Newest wins: an older copy changes
+    /// nothing. `true` when it was written.
+    pub fn apply_role_from_cloud(&self, outlet: &str, role: &CloudRole) -> Result<bool, DbError> {
+        self.write_role(outlet, role, UnknownCode::Drop)
+    }
+
+    /// The one writer of a role: the row, then its permissions, replaced whole. The row is
+    /// written only when its stamp is newer than what is here, and the permissions follow the
+    /// row — so a phone's older copy cannot undo a counter's later edit, and the counter's own
+    /// save (always freshly stamped) always lands.
+    fn write_role(&self, outlet: &str, role: &CloudRole, unknown: UnknownCode) -> Result<bool, DbError> {
+        let n = self.tx.execute(
             "INSERT INTO roles (id, outlet_id, name, is_builtin, max_discount_bp,
-                                max_discount_paise)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                                max_discount_paise, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT (id) DO UPDATE SET name               = excluded.name,
                                             max_discount_bp    = excluded.max_discount_bp,
-                                            max_discount_paise = excluded.max_discount_paise",
+                                            max_discount_paise = excluded.max_discount_paise,
+                                            updated_at         = excluded.updated_at
+             WHERE roles.updated_at < excluded.updated_at",
             rusqlite::params![
-                id,
+                role.id,
                 outlet,
                 role.name,
                 encode::bool_to_sql(role.is_builtin),
                 role.max_discount_bp,
-                role.max_discount.map(encode::money_to_sql),
+                role.max_discount_paise,
+                encode::timestamp_to_sql(role.updated_at),
             ],
         )?;
+        if n == 0 {
+            return Ok(false);
+        }
         self.tx
-            .execute("DELETE FROM role_permissions WHERE role_id = ?1", [id])?;
-        for code in role.permissions.codes() {
-            // A typo here is a foreign-key violation, not a silent denial.
-            self.tx
-                .execute(
-                    "INSERT INTO role_permissions (role_id, permission_code) VALUES (?1, ?2)",
-                    rusqlite::params![id, code],
-                )
-                .map_err(|e| match e {
-                    rusqlite::Error::SqliteFailure(f, _)
-                        if f.code == rusqlite::ErrorCode::ConstraintViolation =>
-                    {
-                        DbError::invariant(format!(
+            .execute("DELETE FROM role_permissions WHERE role_id = ?1", [&role.id])?;
+        for code in &role.permissions {
+            if Permission::from_code(code).is_err() {
+                match unknown {
+                    UnknownCode::Drop => continue,
+                    UnknownCode::Refuse => {
+                        return Err(DbError::invariant(format!(
                             "\"{code}\" is not a permission this program has — \
                              see the permissions table for the list"
-                        ))
+                        )));
                     }
-                    other => DbError::Sqlite(other),
-                })?;
+                }
+            }
+            self.tx.execute(
+                "INSERT INTO role_permissions (role_id, permission_code) VALUES (?1, ?2)",
+                rusqlite::params![role.id, code],
+            )?;
         }
-        OutboxRepo::new(self.tx).enqueue(outlet, "roles", id, Op::Upsert, at)
+        Ok(true)
     }
 
     /// The identity: name, role, status, PIN. Somebody coming back loses their leaving day here,
@@ -196,7 +236,18 @@ impl<'a> PeopleRepo<'a> {
                 encode::timestamp_to_sql(at),
             ],
         )?;
-        OutboxRepo::new(self.tx).enqueue(outlet, "staff", staff.id.as_str(), Op::Upsert, at)
+        self.queue_staff(outlet, staff.id.as_str(), at)
+    }
+
+    /// A staff row changed — its identity here, its employment side in `EmploymentRepo`, its
+    /// rider flag in `DeliveryRepo` — and the cloud is owed it. The ONE place a staff row is
+    /// stamped and queued.
+    pub fn queue_staff(&self, outlet: &str, id: &str, at: Timestamp) -> Result<(), DbError> {
+        self.tx.execute(
+            "UPDATE staff SET updated_at = ?3 WHERE outlet_id = ?1 AND id = ?2",
+            rusqlite::params![outlet, id, encode::timestamp_to_sql(at)],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "staff", id, Op::Upsert, at)
     }
 
     /// A staff row the owner's phone wrote. Applied when it is newer than what is here; never
@@ -264,38 +315,6 @@ impl<'a> PeopleRepo<'a> {
             rusqlite::params![staff_id, pin_hash],
         )?;
         Ok(n > 0)
-    }
-
-    /// A role the owner's phone wrote, with the exact permissions it grants. Codes this
-    /// program does not know are dropped, not refused.
-    pub fn apply_role_from_cloud(&self, outlet: &str, role: &CloudRole) -> Result<(), DbError> {
-        self.tx.execute(
-            "INSERT INTO roles (id, outlet_id, name, is_builtin, max_discount_bp, max_discount_paise)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT (id) DO UPDATE SET name               = excluded.name,
-                                            max_discount_bp    = excluded.max_discount_bp,
-                                            max_discount_paise = excluded.max_discount_paise",
-            rusqlite::params![
-                role.id,
-                outlet,
-                role.name,
-                encode::bool_to_sql(role.is_builtin),
-                role.max_discount_bp,
-                role.max_discount_paise,
-            ],
-        )?;
-        self.tx
-            .execute("DELETE FROM role_permissions WHERE role_id = ?1", [&role.id])?;
-        for code in &role.permissions {
-            if Permission::from_code(code).is_err() {
-                continue;
-            }
-            self.tx.execute(
-                "INSERT INTO role_permissions (role_id, permission_code) VALUES (?1, ?2)",
-                rusqlite::params![role.id, code],
-            )?;
-        }
-        Ok(())
     }
 
     pub fn list_staff(&self, outlet: &str) -> Result<Vec<StaffMember>, DbError> {

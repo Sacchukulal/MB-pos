@@ -204,6 +204,16 @@ impl<'a> SettingsRepo<'a> {
                 encode::price_basis_to_sql(profile.price_basis),
             ],
         )?;
+        self.queue_store_profile(outlet, at)
+    }
+
+    /// The shop's profile changed — here, or its default slab in `TaxClassRepo` — and the
+    /// cloud is owed it. The ONE place the profile is stamped and queued.
+    pub fn queue_store_profile(&self, outlet: &str, at: Timestamp) -> Result<(), DbError> {
+        self.tx.execute(
+            "UPDATE store_profile SET updated_at = ?2 WHERE outlet_id = ?1",
+            rusqlite::params![outlet, encode::timestamp_to_sql(at)],
+        )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "store_profile", outlet, Op::Upsert, at)
     }
 

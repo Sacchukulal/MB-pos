@@ -122,11 +122,34 @@ impl<'a> OrderRepo<'a> {
         // The outbox entry is written HERE, in the same transaction as the row it describes.
         OutboxRepo::new(self.tx).enqueue(outlet, "orders", id, Op::Upsert, core.created_at)?;
         // A bill changes its day's totals; the sender computes them when it sends. One outbox
-        // row per day per table, however busy the hour.
-        if matches!(order, AnyOrder::Settled(_) | AnyOrder::Voided(_)) {
+        // row per day per table, however busy the hour. And the day's file, if it already has
+        // one, is dirty from this moment.
+        // An order taken back to the counter (open again) or cancelled after it was billed
+        // also moves the day's figures.
+        let was_billed = numbers.is_some();
+        if matches!(order, AnyOrder::Settled(_) | AnyOrder::Voided(_))
+            || (was_billed && matches!(order, AnyOrder::Open(_) | AnyOrder::Cancelled(_)))
+        {
             let day = encode::business_day_to_sql(core.business_day).to_string();
             for table in crate::repo::wire::TOTALS_TABLES {
                 OutboxRepo::new(self.tx).enqueue(outlet, table, &day, Op::Upsert, core.created_at)?;
+            }
+            let at = voided
+                .as_ref()
+                .map(|(at, _, _)| *at)
+                .or_else(|| cancelled.as_ref().map(|(at, _, _)| *at))
+                .or_else(|| settled.as_ref().map(|(at, _)| *at))
+                .unwrap_or(core.created_at);
+            crate::archive::ArchiveRepo::new(self.tx).mark_dirty(outlet, core.business_day, at)?;
+        }
+        // A bill on an account moves the customer's balance, which the cloud's customer row
+        // carries.
+        if let Some((_, settlement)) = bill_and_settlement(order) {
+            for customer in settlement.payments().iter().filter_map(|p| match &p.mode {
+                mb_core::PaymentMode::Credit(customer) => Some(customer),
+                _ => None,
+            }) {
+                crate::repo::money::MoneyRepo::new(self.tx).queue_customer(outlet, customer.as_str(), core.created_at)?;
             }
         }
         Ok(())

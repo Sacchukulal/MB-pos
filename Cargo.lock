@@ -2319,6 +2319,7 @@ name = "mb-db"
 version = "1.7.3"
 dependencies = [
  "base64 0.22.1",
+ "flate2",
  "mb-auth",
  "mb-core",
  "rusqlite",

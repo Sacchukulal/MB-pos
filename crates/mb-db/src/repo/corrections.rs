@@ -293,7 +293,20 @@ impl<'a> CorrectionsRepo<'a> {
             &refund.id,
             Op::Upsert,
             refund.refunded_at,
-        )
+        )?;
+        // The bill's day, not the refund's: the refund travels in the bill's day file.
+        self.mark_bill_day_dirty(outlet, &refund.order_id, refund.refunded_at)
+    }
+
+    /// The day of the bill this row belongs to is dirty from `at`: its file goes up again.
+    fn mark_bill_day_dirty(&self, outlet: &str, order_id: &OrderId, at: Timestamp) -> Result<(), DbError> {
+        let day: i64 = self.tx.query_row(
+            "SELECT business_day FROM orders WHERE id = ?1",
+            [order_id.as_str()],
+            |row| row.get(0),
+        )?;
+        crate::archive::ArchiveRepo::new(self.tx)
+            .mark_dirty(outlet, encode::business_day_from_sql(day, "orders.business_day")?, at)
     }
 
     /// Every refund against one bill, oldest first.
@@ -390,7 +403,10 @@ impl<'a> CorrectionsRepo<'a> {
                 ],
             )?;
         }
-        Ok(())
+        // The register travels with the bill: to the cloud's box now, and in the bill's day
+        // file with its lines and payments.
+        OutboxRepo::new(self.tx).enqueue(outlet, "bill_reverts", &revert.id, Op::Upsert, revert.reverted_at)?;
+        self.mark_bill_day_dirty(outlet, &revert.order_id, revert.reverted_at)
     }
 
     /// A manager signs the revert off. Once.

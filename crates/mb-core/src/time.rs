@@ -59,6 +59,38 @@ impl Timestamp {
         )
     }
 
+    /// `"2026-08-27T10:11:12.123456+00:00"` (or a space, or `Z`, or no zone) → the instant.
+    /// The one reader of the cloud's spelling of a moment; `None` for anything else.
+    #[must_use]
+    pub fn parse_iso(text: &str) -> Option<Self> {
+        let (date, rest) = text.split_once(['T', ' '])?;
+        let day: crate::BusinessDay = date.parse().ok()?;
+        let (clock, zone) = match rest.find(['+', '-', 'Z']) {
+            Some(at) => (&rest[..at], &rest[at..]),
+            None => (rest, "Z"),
+        };
+        let mut hms = clock.split(':');
+        let h: i64 = hms.next()?.parse().ok()?;
+        let m: i64 = hms.next()?.parse().ok()?;
+        let sec = hms.next().unwrap_or("0");
+        let (s, frac) = sec.split_once('.').unwrap_or((sec, ""));
+        let s: i64 = s.parse().ok()?;
+        let millis: i64 = format!("{:0<3}", frac.get(..3).unwrap_or(frac)).parse().ok()?;
+        let offset_min: i64 = match zone {
+            "Z" | "" => 0,
+            z => {
+                let sign = if z.starts_with('-') { -1 } else { 1 };
+                let body = z.get(1..)?;
+                let (zh, zm) = body.split_once(':').unwrap_or((body, "0"));
+                sign * (zh.parse::<i64>().ok()? * 60 + zm.parse::<i64>().ok()?)
+            }
+        };
+        let days = i64::from(day.days_since_epoch());
+        Some(Timestamp(
+            days * 86_400_000 + (h * 3600 + m * 60 + s) * 1000 + millis - offset_min * 60_000,
+        ))
+    }
+
     /// The inverse of `Timestamp::to_local_parts`.
     pub fn from_local_parts(days: i32, seconds: u32, offset: UtcOffset) -> Result<Self> {
         let local = i64::from(days)

@@ -582,7 +582,7 @@ pub fn install_on(
     } else {
         let mut last_told = 0u64;
         app.link()
-            .download(&manifest.url, &to, &mut |bytes, total| {
+            .download(&manifest.url, None, &to, &mut |bytes, total| {
                 // The screen hears every step of one percent, not every packet.
                 let total = total.unwrap_or(0);
                 let a_step_on = bytes.saturating_sub(last_told).saturating_mul(100) >= total;
@@ -718,7 +718,7 @@ impl GitHubReleases {
     fn fetch(&self, asset: &str) -> Result<String, String> {
         let to = self.dir.join("updates").join(asset);
         self.link
-            .download(&GitHubReleases::asset_url(asset), &to, &mut |_, _| {})
+            .download(&GitHubReleases::asset_url(asset), None, &to, &mut |_, _| {})
             .map_err(|e| format!("GitHub did not answer for {asset}: {e:?}"))?;
         std::fs::read_to_string(&to).map_err(|e| format!("{asset} could not be read: {e}"))
     }

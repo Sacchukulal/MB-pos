@@ -95,7 +95,7 @@ pub(crate) fn licence_in(
 }
 
 /// Put a tea in the cart and settle it, the way the billing screen does.
-fn a_bill_is_taken(app: &App) -> String {
+pub(crate) fn a_bill_is_taken(app: &App) -> String {
     let item = app.find_menu_item("itm_tea").expect("on the menu");
     app.with_cart_mut(|state| {
         *state = crate::billing::CartState::new_order(mb_core::OrderType::Parcel);

@@ -22,9 +22,15 @@ type Result<T> = std::result::Result<T, CartError>;
 pub struct CartLine {
     pub snapshot: ItemSnapshot,
     pub qty: Qty,
+    // An empty field is left off the wire and read back as empty: a bill on the cloud, in a
+    // day file and on the LAN is the same shape, only shorter. An older sender's full shape
+    // still parses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modifiers: Vec<Modifier>,
     /// The discount as given, with its reason and who authorised it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_discount: Option<DiscountEntry>,
 }
 

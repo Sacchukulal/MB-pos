@@ -119,7 +119,17 @@ impl<'a> MenuRepo<'a> {
                     .map(TaxClassId::as_str),
             ],
         )?;
-        OutboxRepo::new(self.tx).enqueue(outlet, "categories", category.id.as_str(), Op::Upsert, at)
+        self.queue_category(outlet, category.id.as_str(), at)
+    }
+
+    /// A category changed — here, or its default slab in `TaxClassRepo` — and the cloud is
+    /// owed it. The ONE place a category is stamped and queued.
+    pub fn queue_category(&self, outlet: &str, id: &str, at: Timestamp) -> Result<(), DbError> {
+        self.tx.execute(
+            "UPDATE categories SET updated_at = ?3 WHERE outlet_id = ?1 AND id = ?2",
+            rusqlite::params![outlet, id, encode::timestamp_to_sql(at)],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "categories", id, Op::Upsert, at)
     }
 
     pub fn list_categories(&self, outlet: &str) -> Result<Vec<Category>, DbError> {

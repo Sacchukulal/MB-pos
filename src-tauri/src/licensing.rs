@@ -215,13 +215,23 @@ pub fn cloud_copy_says(app: &App, at: mb_core::Timestamp) -> (String, &'static s
     if let Some(why) = status.stopped {
         return (why, "danger");
     }
-    let waiting = app
+    // What is waiting: rows for the push, and sealed days whose file has not gone up.
+    let (waiting, days_waiting, file_error) = app
         .shop_db()
         .and_then(|db| {
-            db.read_transaction(|tx| mb_db::Repos::new(tx).outbox().pending_count())
-                .ok()
+            db.read_transaction(|tx| {
+                let repos = mb_db::Repos::new(tx);
+                let today = crate::flows::today(at);
+                Ok((
+                    repos.outbox().pending_count()?,
+                    repos.archive().pending_count(crate::state::OUTLET, today)?,
+                    repos.archive().last_error(crate::state::OUTLET)?,
+                ))
+            })
+            .ok()
         })
-        .unwrap_or(0);
+        .unwrap_or((0, 0, None));
+    let days_waiting = i64::try_from(days_waiting).unwrap_or(i64::MAX);
     if let Some(behind) = status.behind_by(at) {
         let hours = i64::try_from(behind.as_secs() / 3600).unwrap_or(0);
         return (
@@ -244,14 +254,22 @@ pub fn cloud_copy_says(app: &App, at: mb_core::Timestamp) -> (String, &'static s
         .last_refusal
         .map(|r| format!(" The cloud refused one row: {r}."))
         .unwrap_or_default();
-    let queue = if waiting == 0 {
-        "Nothing waiting".to_owned()
-    } else {
-        format!("{} waiting", words::count(waiting, "row", "rows"))
+    let queue = match (waiting, days_waiting) {
+        (0, 0) => "Nothing waiting".to_owned(),
+        (rows, 0) => format!("{} waiting", words::count(rows, "row", "rows")),
+        (0, days) => format!("{} of history waiting to go up", words::count(days, "day", "days")),
+        (rows, days) => format!(
+            "{} and {} of history waiting",
+            words::count(rows, "row", "rows"),
+            words::count(days, "day", "days")
+        ),
     };
+    let file_trouble = file_error
+        .map(|e| format!(" The last day file did not go up: {e}."))
+        .unwrap_or_default();
     (
-        format!("Last copied to the cloud: {last}. {queue}.{refusal}"),
-        if refusal.is_empty() { "ok" } else { "warn" },
+        format!("Last copied to the cloud: {last}. {queue}.{refusal}{file_trouble}"),
+        if refusal.is_empty() && file_trouble.is_empty() { "ok" } else { "warn" },
     )
 }
 
@@ -549,8 +567,16 @@ pub fn change_licence_on(
         return Err(crate::firstrun::licence_said(&e));
     }
     note(app, action::LICENCE_ACTIVATED, &key);
-    // The cloud copy starts again under the new licence: the old cursor names the old shop.
+    // The cloud copy starts again under the new licence: the old cursor names the old shop,
+    // and the new shop in the cloud has nothing yet — the whole shop is queued from its rows.
     app.update_sync(|s| *s = crate::sync::SyncFile::default());
+    match crate::sync::queue_whole_shop(app, at) {
+        Ok(n) => {
+            app.update_sync(|s| s.queued_whole_at = Some(at.millis()));
+            log_info!("{n} row(s) queued for the cloud under the new licence");
+        }
+        Err(e) => log_warn!("the shop could not be queued for the cloud under the new licence: {e}"),
+    }
     after_licence_change(app);
 
     // The owner's row is whoever holds the licence now.

@@ -56,12 +56,21 @@ pub struct DayRow {
 }
 
 /// What a day came to, read from the rows as they stand now.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DayFigures {
     pub bills: i64,
     pub net: Money,
     pub cash: Money,
     pub upi_and_card: Money,
+    /// Every payment mode on the day's settled bills, mode by mode, in the mode's stored
+    /// spelling. `cash` and `upi_and_card` above are read off this.
+    pub by_payment: Vec<(String, Money)>,
+    /// Charges on the day's settled bills (service, packing, delivery).
+    pub charges: Money,
+    /// Sold on credit that day.
+    pub credit_given: Money,
+    /// Collected against credit that day.
+    pub credit_collected: Money,
     pub expenses: Money,
     /// Everything else that moved that day: cash in or out of a drawer, credit collected, a
     /// supplier paid. Not shown anywhere — it is only here to answer "was this a holiday?".
@@ -288,8 +297,8 @@ impl<'a> DaysRepo<'a> {
         Ok(at.map(encode::timestamp_from_sql))
     }
 
-    /// What a day came to, from the rows: the bills and net the reconciliation already sums,
-    /// the takings split by how they were paid, and what was spent.
+    /// What the day came to, from the rows as they stand. The ONE place a day's money is
+    /// added up: the close freezes these, the cloud's `day_totals` row is built from them.
     pub fn figures(&self, outlet: &str, day: BusinessDay) -> Result<DayFigures, DbError> {
         let totals = CorrectionsRepo::new(self.tx).day_totals(outlet, day)?;
         let day_sql = encode::business_day_to_sql(day);
@@ -298,22 +307,37 @@ impl<'a> DaysRepo<'a> {
             "SELECT p.mode, COALESCE(SUM(p.amount), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
               WHERE o.outlet_id = ?1 AND o.business_day = ?2 AND o.state = 'settled'
-              GROUP BY p.mode",
+              GROUP BY p.mode ORDER BY p.mode",
         )?;
         let mut rows = stmt.query(rusqlite::params![outlet, day_sql])?;
-        let (mut cash, mut electronic) = (0_i64, 0_i64);
+        let mut by_payment = Vec::new();
+        let (mut cash, mut electronic, mut credit_given) = (0_i64, 0_i64, 0_i64);
         while let Some(row) = rows.next()? {
             let mode: String = row.get(0)?;
             let amount: i64 = row.get(1)?;
             match mode.as_str() {
                 "cash" => cash = cash.saturating_add(amount),
                 "upi" | "card" => electronic = electronic.saturating_add(amount),
+                "credit" => credit_given = credit_given.saturating_add(amount),
                 _ => {}
             }
+            by_payment.push((mode, encode::money_from_sql(amount)));
         }
 
+        let charges: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(b.total_charges), 0) FROM bills b JOIN orders o ON o.id = b.order_id
+              WHERE o.outlet_id = ?1 AND o.business_day = ?2 AND o.state = 'settled'",
+            rusqlite::params![outlet, day_sql],
+            |row| row.get(0),
+        )?;
         let expenses: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(amount), 0) FROM expenses
+              WHERE outlet_id = ?1 AND business_day = ?2",
+            rusqlite::params![outlet, day_sql],
+            |row| row.get(0),
+        )?;
+        let credit_collected: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM customer_payments
               WHERE outlet_id = ?1 AND business_day = ?2",
             rusqlite::params![outlet, day_sql],
             |row| row.get(0),
@@ -337,6 +361,10 @@ impl<'a> DaysRepo<'a> {
             net: totals.net,
             cash: encode::money_from_sql(cash),
             upi_and_card: encode::money_from_sql(electronic),
+            by_payment,
+            charges: encode::money_from_sql(charges),
+            credit_given: encode::money_from_sql(credit_given),
+            credit_collected: encode::money_from_sql(credit_collected),
             expenses: encode::money_from_sql(expenses),
             moved: encode::money_from_sql(moved),
         })

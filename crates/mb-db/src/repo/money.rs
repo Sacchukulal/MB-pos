@@ -208,7 +208,14 @@ impl<'a> MoneyRepo<'a> {
                     .and_then(mb_core::credit::phone_key),
             ],
         )?;
-        OutboxRepo::new(self.tx).enqueue(outlet, "customers", customer.id.as_str(), Op::Upsert, at)
+        self.queue_customer(outlet, customer.id.as_str(), at)
+    }
+
+    /// The customer's cloud row is due again: the row itself, or the balance the cloud row
+    /// carries (computed when sent). The ONE place a customer is queued — every save and every
+    /// credit movement comes through here.
+    pub fn queue_customer(&self, outlet: &str, id: &str, at: Timestamp) -> Result<(), DbError> {
+        OutboxRepo::new(self.tx).enqueue(outlet, "customers", id, Op::Upsert, at)
     }
 
     pub fn list_customers(&self, outlet: &str) -> Result<Vec<Customer>, DbError> {
@@ -384,7 +391,8 @@ impl<'a> MoneyRepo<'a> {
             &adjustment.id,
             Op::Upsert,
             adjustment.at,
-        )
+        )?;
+        self.queue_customer(outlet, adjustment.customer_id.as_str(), adjustment.at)
     }
 
     /// Who owes me money.
@@ -447,7 +455,8 @@ impl<'a> MoneyRepo<'a> {
             &payment.id,
             Op::Upsert,
             payment.received_at,
-        )
+        )?;
+        self.queue_customer(outlet, payment.customer_id.as_str(), payment.received_at)
     }
 
     pub fn list_credit_payments(

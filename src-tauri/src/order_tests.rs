@@ -1141,3 +1141,48 @@ fn a_phone_sending_to_the_kitchen_queues_the_same_ticket() {
     orders::apply_batch(&app, "dev_test", &staff, &may, &batch).expect("replayed");
     assert_eq!(jobs(&app), after, "a replayed batch queues no second ticket");
 }
+
+/// A phone order is audited once, at the moments that matter: the taps that build it are not
+/// history (their exactly-once record is `applied_events`), the void and the settle are.
+#[test]
+fn a_phone_order_is_audited_once_not_per_tap() {
+    let scratch = Scratch::new("audit_once");
+    let app = a_shop(&scratch, "audit_once");
+    let before = audit_rows(&app);
+    let order = open_one(&app, None);
+    for n in 0..10 {
+        let _ = go(
+            &app,
+            &intent(
+                &format!("tap-{n}"),
+                Some(&order),
+                What::AddItem {
+                    item_id: "itm_coffee".to_owned(),
+                    qty: "1".to_owned(),
+                    note: None,
+                    modifiers: vec![],
+                },
+            ),
+        );
+    }
+    let _ = go(&app, &intent("qty", Some(&order), What::SetQty { line: 0, qty: "3".to_owned() }));
+    assert_eq!(audit_rows(&app) - before, 0, "building the order wrote history rows");
+    let _ = go(
+        &app,
+        &intent("void", Some(&order), What::VoidItem { line: 0, reason: "wrong table".to_owned() }),
+    );
+    assert_eq!(audit_rows(&app) - before, 1, "a void is one history row");
+    let _ = go(&app, &intent("bill", Some(&order), What::RequestBill));
+    assert_eq!(audit_rows(&app) - before, 2, "asking for the bill is one history row");
+    assert!(orders::is_audited(&What::RequestSettle { payment: None }));
+    assert!(orders::is_audited(&What::CancelOrder { reason: String::new() }));
+    assert!(!orders::is_audited(&What::SendToKitchen));
+    assert!(!orders::is_audited(&What::SetCovers { covers: Some(2) }));
+}
+
+fn audit_rows(app: &App) -> i64 {
+    app.shop_db()
+        .expect("a shop")
+        .read(|c| Ok(c.query_row("SELECT count(*) FROM audit_log WHERE action = 'intent.applied'", [], |r| r.get(0))?))
+        .expect("count")
+}

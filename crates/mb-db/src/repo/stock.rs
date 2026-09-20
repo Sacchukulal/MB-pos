@@ -482,7 +482,13 @@ impl<'a> StockRepo<'a> {
             )?;
         }
 
-        OutboxRepo::new(self.tx).enqueue(outlet, "materials", material.id.as_str(), Op::Upsert, at)
+        self.queue_material(outlet, material.id.as_str(), at)
+    }
+
+    /// A material changed — its record here, or its average cost as a delivery lands — and
+    /// the cloud is owed it. The ONE place a material is queued.
+    pub fn queue_material(&self, outlet: &str, id: &str, at: Timestamp) -> Result<(), DbError> {
+        OutboxRepo::new(self.tx).enqueue(outlet, "materials", id, Op::Upsert, at)
     }
 
     /// Every material, in the order a screen shows them.
@@ -817,6 +823,7 @@ impl<'a> StockRepo<'a> {
                     encode::timestamp_to_sql(movement.at),
                 ],
             )?;
+            self.queue_material(outlet, movement.material.as_str(), movement.at)?;
         }
 
         self.tx.execute(

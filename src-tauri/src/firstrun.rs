@@ -573,7 +573,7 @@ fn bring_down_and_open(
             match crate::sync::restore_into(app, &db, &login) {
                 Ok(report) => {
                     if report.bills > 0 || report.staff > 0 {
-                        came_down = Some(report.sentence());
+                        came_down = Some(crate::sync::restore_sentence(&report));
                     }
                 }
                 Err(e) => {

@@ -48,6 +48,8 @@ pub fn anon_key() -> String {
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(8);
 /// A download is not a call.
 pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+/// Objects per page of a Storage listing.
+const LIST_PAGE: usize = 1000;
 
 // What a call under the login can come back with.
 
@@ -118,13 +120,39 @@ pub trait Link: Send + Sync + std::fmt::Debug + 'static {
     /// A new access token from the refresh token. The old refresh token is spent either way.
     fn refresh_session(&self, refresh_token: &str) -> Result<Session, LinkError>;
     /// Fetch a file to `to`; answers its SHA-256 as lowercase hex. `progress` hears the bytes
-    /// so far and the whole size when the server said it, as the file comes down.
+    /// so far and the whole size when the server said it, as the file comes down. `token` is
+    /// the login for a file that needs one (a day file); the release shelf needs none.
     fn download(
         &self,
         url: &str,
+        token: Option<&str>,
         to: &Path,
         progress: &mut dyn FnMut(u64, Option<u64>),
     ) -> Result<String, LinkError>;
+    /// `POST /storage/v1/object/{bucket}/{key}` with `x-upsert: true`: the same key is
+    /// replaced. Unmetered: Storage counts bytes, not calls.
+    fn put_object(&self, _bucket: &str, _key: &str, _bytes: &[u8], _content_type: &str, _token: &str) -> Result<(), LinkError> {
+        Err(LinkError::Unreachable)
+    }
+    /// `POST /storage/v1/object/list/{bucket}`: what is under `prefix`, every page. A cloud
+    /// with no Storage (a test's) lists nothing.
+    fn list_objects(&self, _bucket: &str, _prefix: &str, _token: &str) -> Result<Vec<StoredObject>, LinkError> {
+        Ok(Vec::new())
+    }
+    /// Where a stored object is fetched from, under the login.
+    fn object_url(&self, _bucket: &str, _key: &str) -> String {
+        String::new()
+    }
+}
+
+/// One entry of a Storage listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredObject {
+    /// The name inside the listed folder (`2026-09-01.jsonl.gz`), or a sub-folder's name.
+    pub name: String,
+    /// The server's `updated_at`, as it wrote it. Moved when the object was replaced.
+    pub updated_at: String,
+    pub size: u64,
 }
 
 /// The cloud that is not there: what a test `App` starts with.
@@ -146,6 +174,7 @@ impl Link for NoLink {
     fn download(
         &self,
         _: &str,
+        _: Option<&str>,
         _: &Path,
         _: &mut dyn FnMut(u64, Option<u64>),
     ) -> Result<String, LinkError> {
@@ -335,10 +364,20 @@ impl Http {
         request: reqwest::RequestBuilder,
         token: &str,
     ) -> Result<(u16, String, Option<String>), LinkError> {
+        self.under_login_for(request, token, CALL_TIMEOUT)
+    }
+
+    /// The same, with the deadline the caller chose: a file is not a call.
+    fn under_login_for(
+        &self,
+        request: reqwest::RequestBuilder,
+        token: &str,
+        deadline: Duration,
+    ) -> Result<(u16, String, Option<String>), LinkError> {
         let request = request
             .header("apikey", &self.anon)
             .bearer_auth(token)
-            .timeout(CALL_TIMEOUT);
+            .timeout(deadline);
         Http::run(async move {
             let response = request.send().await.map_err(|e| e.to_string())?;
             let status = response.status().as_u16();
@@ -594,9 +633,73 @@ impl Link for Http {
         })
     }
 
+    fn put_object(&self, bucket: &str, key: &str, bytes: &[u8], content_type: &str, token: &str) -> Result<(), LinkError> {
+        let url = format!("{}/storage/v1/object/{bucket}/{key}", self.base);
+        let request = self
+            .client
+            .post(&url)
+            .header("x-upsert", "true")
+            .header("content-type", content_type)
+            .body(bytes.to_vec());
+        // A file is not a call: it gets the download's deadline, not the eight seconds.
+        let (status, text, _) = self.under_login_for(request, token, DOWNLOAD_TIMEOUT)?;
+        if !(200..300).contains(&status) {
+            return Err(Http::link_error(status, &text));
+        }
+        Ok(())
+    }
+
+    fn list_objects(&self, bucket: &str, prefix: &str, token: &str) -> Result<Vec<StoredObject>, LinkError> {
+        let url = format!("{}/storage/v1/object/list/{bucket}", self.base);
+        let mut out = Vec::new();
+        let mut offset = 0_usize;
+        loop {
+            let body = json!({
+                "prefix": prefix,
+                "limit": LIST_PAGE,
+                "offset": offset,
+                "sortBy": { "column": "name", "order": "asc" },
+            });
+            let request = self.client.post(&url).json(&body);
+            let (status, text, _) = self.under_login(request, token)?;
+            if !(200..300).contains(&status) {
+                return Err(Http::link_error(status, &text));
+            }
+            let page: Vec<Value> = serde_json::from_str(&text).map_err(|_| LinkError::Unreadable)?;
+            let got = page.len();
+            for entry in page {
+                let Some(name) = entry.get("name").and_then(Value::as_str) else {
+                    continue;
+                };
+                out.push(StoredObject {
+                    name: name.to_owned(),
+                    updated_at: entry
+                        .get("updated_at")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    size: entry
+                        .get("metadata")
+                        .and_then(|m| m.get("size"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                });
+            }
+            if got < LIST_PAGE {
+                return Ok(out);
+            }
+            offset += got;
+        }
+    }
+
+    fn object_url(&self, bucket: &str, key: &str) -> String {
+        format!("{}/storage/v1/object/authenticated/{bucket}/{key}", self.base)
+    }
+
     fn download(
         &self,
         url: &str,
+        token: Option<&str>,
         to: &Path,
         progress: &mut dyn FnMut(u64, Option<u64>),
     ) -> Result<String, LinkError> {
@@ -605,7 +708,10 @@ impl Link for Http {
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent).map_err(|e| LinkError::Server(e.to_string()))?;
         }
-        let request = self.client.get(url).timeout(DOWNLOAD_TIMEOUT);
+        let mut request = self.client.get(url).timeout(DOWNLOAD_TIMEOUT);
+        if let Some(token) = token {
+            request = request.header("apikey", &self.anon).bearer_auth(token);
+        }
         let file_at = to.to_path_buf();
         // Chunk by chunk to the disk and the hash, so a 60 MB installer is never held whole
         // and the screen can say how far it has got. The runtime downloads; this thread
@@ -613,30 +719,32 @@ impl Link for Http {
         let (heard, hear) = std::sync::mpsc::channel::<Heard>();
         let say = heard.clone();
         let fetch = async move {
-            let mut response = request.send().await.map_err(|e| e.to_string())?;
+            let mut response = request.send().await.map_err(|e| Fell::Over(e.to_string()))?;
             let status = response.status().as_u16();
             if status != 200 {
-                return Err(format!("the file answered {status}"));
+                let text = response.text().await.unwrap_or_default();
+                return Err(Fell::Answered(status, text));
             }
             let total = response.content_length();
-            let mut file = std::fs::File::create(&file_at).map_err(|e| e.to_string())?;
+            let mut file = std::fs::File::create(&file_at).map_err(|e| Fell::Over(e.to_string()))?;
             let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
             let mut so_far = 0u64;
             let _ = say.send(Heard::Bytes(0, total));
-            while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-                file.write_all(&chunk).map_err(|e| e.to_string())?;
+            while let Some(chunk) = response.chunk().await.map_err(|e| Fell::Over(e.to_string()))? {
+                file.write_all(&chunk).map_err(|e| Fell::Over(e.to_string()))?;
                 digest.update(&chunk);
                 so_far = so_far.saturating_add(chunk.len() as u64);
                 let _ = say.send(Heard::Bytes(so_far, total));
             }
-            file.flush().map_err(|e| e.to_string())?;
+            file.flush().map_err(|e| Fell::Over(e.to_string()))?;
             Ok(hex_of(digest.finish().as_ref()))
         };
         let outcome = Http::start(async move {
             let _ = heard.send(Heard::Done(fetch.await));
         })
+        .map_err(Fell::Over)
         .and_then(|()| {
-            let mut done = Err("the download was lost before it finished".to_owned());
+            let mut done = Err(Fell::Over("the download was lost before it finished".to_owned()));
             for word in hear {
                 match word {
                     Heard::Bytes(bytes, total) => progress(bytes, total),
@@ -645,10 +753,24 @@ impl Link for Http {
             }
             done
         });
-        outcome.map_err(|why| {
-            log_warn!("the download failed: {why}");
+        outcome.map_err(|fell| {
             let _ = std::fs::remove_file(to);
-            LinkError::Server(why)
+            match fell {
+                // Under a login the server's no is read like a call's: a 401 is refreshed, a
+                // 403 is the login's end. The release shelf has no login and no such answers.
+                Fell::Answered(status, text) if token.is_some() => {
+                    log_warn!("the file answered {status}");
+                    Http::link_error(status, &text)
+                }
+                Fell::Answered(status, _) => {
+                    log_warn!("the file answered {status}");
+                    LinkError::Server(format!("the file answered {status}"))
+                }
+                Fell::Over(why) => {
+                    log_warn!("the download failed: {why}");
+                    LinkError::Server(why)
+                }
+            }
         })
     }
 }
@@ -656,7 +778,13 @@ impl Link for Http {
 /// What a download says as it comes down, on the channel between the runtime and the caller.
 enum Heard {
     Bytes(u64, Option<u64>),
-    Done(Result<String, String>),
+    Done(Result<String, Fell>),
+}
+
+/// How a download failed: the server answered with a status, or it never got that far.
+enum Fell {
+    Answered(u16, String),
+    Over(String),
 }
 
 fn hex_of(bytes: &[u8]) -> String {
@@ -994,7 +1122,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mb-download-{}", std::process::id()));
         let to = dir.join("incoming").join("x.exe");
         let sha = http
-            .download(&format!("{base}/x.exe"), &to, &mut |_, _| {})
+            .download(&format!("{base}/x.exe"), None, &to, &mut |_, _| {})
             .expect("downloaded");
         assert_eq!(std::fs::read_to_string(&to).expect("the file"), "hello installer");
         assert_eq!(sha, sha256_hex(b"hello installer"));
