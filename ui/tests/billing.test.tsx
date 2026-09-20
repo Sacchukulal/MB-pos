@@ -433,14 +433,16 @@ describe('the answer beside the cash box (2026-09-03)', () => {
 
   it('gives change back in green, whichever mode is lit', () => {
     const cart = cartWith({ change: 1000n, payments: 1 });
-    expect(paymentAnswer(cart, 'Cash')).toEqual({ tone: 'back', text: 'Return 10.00' });
-    expect(paymentAnswer(cart, 'Card')).toEqual({ tone: 'back', text: 'Return 10.00' });
+    const back = { tone: 'back', text: '10.00', means: 'Return' };
+    expect(paymentAnswer(cart, 'Cash')).toEqual(back);
+    expect(paymentAnswer(cart, 'Card')).toEqual(back);
   });
 
-  it('asks for the rest in red once some cash is down', () => {
+  it('asks for the rest in red once some cash is down — the figure alone (2026-09-20)', () => {
     expect(paymentAnswer(cartWith({ balance: 1000n, payments: 1 }), 'Cash')).toEqual({
       tone: 'short',
-      text: 'Need 10.00',
+      text: '10.00',
+      means: 'Still to pay',
     });
     // Nothing typed yet: nothing to say.
     expect(paymentAnswer(cartWith({ balance: 2000n }), 'Cash')).toBeNull();
@@ -449,18 +451,21 @@ describe('the answer beside the cash box (2026-09-03)', () => {
   it('sends the rest by card or UPI — the whole bill, or what the cash left', () => {
     expect(paymentAnswer(cartWith({ balance: 2000n }), 'UPI')).toEqual({
       tone: 'by',
-      text: '20.00 by UPI',
+      text: '20.00',
+      means: 'By UPI',
     });
     expect(paymentAnswer(cartWith({ balance: 500n, payments: 1 }), 'Card')).toEqual({
       tone: 'by',
-      text: '5.00 by Card',
+      text: '5.00',
+      means: 'By Card',
     });
   });
 
-  it('says so when the cash was exact', () => {
+  it('shows nothing to return when the cash was exact', () => {
     expect(paymentAnswer(cartWith({ payments: 1 }), 'Cash')).toEqual({
       tone: 'back',
-      text: 'Paid exactly',
+      text: '0.00',
+      means: 'Paid exactly',
     });
   });
 });

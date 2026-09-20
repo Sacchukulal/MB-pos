@@ -1334,25 +1334,30 @@ const OTHER_MODES = ['Card', 'UPI'] as const;
 
 /**
  * What the row says beside the cash box, and in which colour. Rust worked the figures out;
- * this only picks the sentence.
+ * this only picks which one, and the colour carries the meaning. Owner, 2026-09-20: the figure
+ * alone — "Return 74.00" and "Need 74.00" were eating the row and showing as "Need 7…".
  */
 export function paymentAnswer(
   cart: CartView | null,
   mode: string,
-): { tone: 'back' | 'short' | 'by'; text: string } | null {
+): { tone: 'back' | 'short' | 'by'; text: string; means: string } | null {
   if (!cart || cart.isEmpty) return null;
   // Cash over the total comes back, whichever mode is lit.
-  if (cart.change.paise > 0n) return { tone: 'back', text: `Return ${cart.change.text}` };
+  if (cart.change.paise > 0n) return { tone: 'back', text: cart.change.text, means: 'Return' };
   if (cart.balance.paise > 0n) {
     // Card or UPI: the rest goes that way when the bill is completed — a split, if some cash
     // was typed first.
-    if (mode !== 'Cash') return { tone: 'by', text: `${cart.balance.text} by ${mode}` };
+    if (mode !== 'Cash') return { tone: 'by', text: cart.balance.text, means: `By ${mode}` };
     // Cash, and some was typed: how much more the customer has to find.
-    if (cart.payments.length > 0) return { tone: 'short', text: `Need ${cart.balance.text}` };
+    if (cart.payments.length > 0) {
+      return { tone: 'short', text: cart.balance.text, means: 'Still to pay' };
+    }
     return null;
   }
   // Taken in full, nothing to hand back.
-  if (cart.payments.length > 0) return { tone: 'back', text: 'Paid exactly' };
+  if (cart.payments.length > 0) {
+    return { tone: 'back', text: cart.change.text, means: 'Paid exactly' };
+  }
   return null;
 }
 
@@ -1424,6 +1429,8 @@ export function PaymentModes({
         <span
           className={`mb-payment__answer mb-payment__answer--${answer.tone}`}
           role="status"
+          title={answer.means}
+          aria-label={`${answer.means} ${answer.text}`}
         >
           {answer.text}
         </span>
