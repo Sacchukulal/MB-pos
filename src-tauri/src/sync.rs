@@ -1024,7 +1024,7 @@ pub fn restore_into(app: &App, db: &Db, login: &DeviceLogin) -> UiResult<Restore
     // The permanent history: every day file, newest first, each in its own transaction, and
     // each noted as here so the sender never uploads what came down.
     let mut files = list_day_files(link.as_ref(), token, rid).map_err(|e| words::from_link(&e))?;
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|a| std::cmp::Reverse(a.0));
     let total = files.len();
     let scratch = std::env::temp_dir().join(format!("magicbill-restore-{}", std::process::id()));
     for (n, (day, key)) in files.iter().enumerate() {
