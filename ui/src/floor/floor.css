@@ -51,11 +51,6 @@
   color: var(--text);
 }
 
-/* Inside a group the tiles do not scroll — the column above them does. */
-.mb-floor__roomgroup .mb-floor__grid {
-  overflow: visible;
-}
-
 /* Arrange: sections, a run of tables, the timers. */
 
 .mb-arrange {
@@ -165,33 +160,33 @@
 }
 
 /*
- * The fallback, and it is NOT a degraded mode: a shop that has never drawn a floor plan gets
- * this and everything works.
+ * The rooms' grid (`.mb-floor__grid`) is the billing screen's — `billing.css`, beside the tile
+ * it lays out. It is NOT a degraded mode: a shop that has never drawn a floor plan gets it and
+ * everything works.
  */
-.mb-floor__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr));
-  gap: var(--space-2);
-  min-height: 0;
-}
 
 /*
  * The plan itself. A grid of squares, because "two tables in the same place" should be a
  * comparison of two integers rather than a rectangle intersection — and because a dropped tile
- * that snaps looks deliberate.
+ * that snaps looks deliberate. A square is exactly one tile, so a placed table is the same card
+ * as on the rooms and the billing screen; sixteen of them are wider than the window, and the
+ * plan scrolls sideways for that.
  */
 .mb-plan {
   display: grid;
-  grid-template-columns: repeat(var(--plan-cells), minmax(0, 1fr));
+  grid-template-columns: repeat(var(--plan-cells), max-content);
   gap: var(--space-1);
   min-height: 0;
   overflow: auto; /* mb-layout-allow: the plan is the one thing that scrolls SIDEWAYS too (§1) */
 }
 
+/* The line is drawn OUTSIDE the tile's box, so the tile inside keeps its one size. */
 .mb-plan__cell {
-  min-height: var(--plan-cell-size);
+  box-sizing: content-box;
+  width: var(--tile-width);
+  height: var(--tile-height);
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
 .mb-floor__hint {

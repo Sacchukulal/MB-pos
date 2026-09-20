@@ -298,17 +298,20 @@
    * the panel is what should be wide there, not the air beside it.
    */
   --queue-gap: var(--space-2);
-  --tile-min: 9rem;
-  /* A tile's FLOOR. It grows for its content; it never cuts a timer in half. */
-  --tile-height: 6.5rem;
+  /*
+   * THE tile size. One box, free or busy, on the billing grid, the floor and the plan: a tile
+   * never grows for its content and a row never grows for a tile. What does not fit ellipsises.
+   */
+  --tile-width: 9.5rem;
+  --tile-height: 7rem;
   /* Print, edit, delete — the small buttons that sit on a tile. */
   --tile-button: 1.625rem;
   /* The state stripe down a tile's left edge. */
   --tile-stripe: 3px;
   --suggestions-height: 22rem;
   /* The floor plan. */
+  /* A square on the plan is exactly one tile, so a placed table is the same card as everywhere. */
   --plan-cells: 16;
-  --plan-cell-size: 3.5rem;
   --help-keys-width: 9rem;
   --group-route-width: 12rem;
   --group-name-min: 9rem;

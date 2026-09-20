@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactNode } from 'react';
 
-import { Button, cx, EmptyState, Icon, Scroller } from '../kit';
+import { Button, cx, EmptyState, Icon } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 
 /* The tile brings its own styling. */
@@ -85,7 +85,8 @@ export function TableGrid({
       {sections.map(([name, group]) => (
         <div className="mb-floor__section" key={name || 'no-table'}>
           <span className="mb-floor__heading">{name || 'No table'}</span>
-          <Scroller className="mb-floor__grid">
+          {/* A plain grid: the page scrolls, a room never scrolls inside itself. */}
+          <div className="mb-floor__grid">
             {group.map((table) => (
               <Tile
                 key={table.id}
@@ -95,7 +96,7 @@ export function TableGrid({
                 onSplit={onSplit ? () => onSplit(table) : undefined}
               />
             ))}
-          </Scroller>
+          </div>
         </div>
       ))}
     </div>
@@ -106,14 +107,16 @@ export function TableGrid({
  * THE table tile. There is one, and this is it — the billing grid, the floor plan and the
  * phone's Orders screen all draw the same card:
  *
- *   number ……………… print
- *   amount ……………… who opened it        (a free table: "4 seats")
- *   timer · chips ……… seats
+ *   number ……………………… + print
+ *   amount ……………………… token              (a free table: "4 seats")
+ *   who opened it
+ *   timer · food · chips … seats
  *
  * A busy table wears its PERSON's colour on the border, so a room reads at a glance whose
  * tables are whose. Late and waiting stay in the timer: bold red, or amber — a state is a
  * form as well as a colour, and the person's colour is not overwritten by it. Every floor,
- * however big, draws the tile at the one size.
+ * however big, draws the tile at the ONE size (`--tile-width` × `--tile-height`): each row is
+ * one line and nothing on it wraps — a name that does not fit ellipsises.
  */
 export function Tile({
   table,
@@ -147,11 +150,20 @@ export function Tile({
   const late = table.state === 'late';
   const waiting = table.state === 'waiting';
   const busy = table.state !== 'free';
+  // The + is offered, so the corner holds two buttons and the number leaves room for both.
+  const splits = Boolean(onSplit && table.orderId && table.id !== table.orderId);
+  /*
+   * A phone asked for the bill, or for it to be settled: the meal is over. The chip takes the
+   * bottom row — the food timer and the seats have nothing left to say, and the three of them
+   * do not fit one line of a fixed box anyway.
+   */
+  const asked = table.settleAsked || table.billAsked;
   // Two classes, never one.
   const classes = [
     'mb-tile',
     `mb-tile--${table.state}`,
     busy ? 'mb-tile--busy' : '',
+    splits ? 'mb-tile--splits' : '',
     busy && table.byId ? `mb-tile--person-${personSlot(table.byId)}` : '',
     table.selected ? 'mb-chosen' : '',
     picked ? 'mb-ticked' : '',
@@ -168,7 +180,7 @@ export function Tile({
           {table.label}
         </span>
 
-        {/* The second row: the money and whose it is, or how big the table is. */}
+        {/* The second row: the money and the token, or how big the table is. */}
         {busy ? (
           <span className="mb-tile__row">
             {table.total ? <span className="mb-tile__amount">{table.total.text}</span> : null}
@@ -178,11 +190,6 @@ export function Tile({
                 #{table.token}
               </span>
             ) : null}
-            {table.by ? (
-              <span className="mb-tile__by" title={`Opened by ${table.by}`}>
-                {table.by}
-              </span>
-            ) : null}
           </span>
         ) : (
           <span className="mb-tile__seatsline">
@@ -190,7 +197,19 @@ export function Tile({
           </span>
         )}
 
-        {/* The third row: the timers and the chips, and the seats at the far end. */}
+        {/* The third row: whose it is, on a line of its own so a long name never wraps. */}
+        {busy && table.by ? (
+          <span className="mb-tile__by" title={`Opened by ${table.by}`}>
+            {table.by}
+          </span>
+        ) : null}
+
+        {/*
+          The last row: the timers and the chips, and the seats at the far end. Only a busy
+          table has it — a free one already said "4 seats" above, and a fact said twice on one
+          card reads as two facts.
+        */}
+        {busy ? (
         <span className="mb-tile__meta">
             {table.minutes === null ? null : (
               <span
@@ -205,9 +224,11 @@ export function Tile({
             )}
             {/*
               2's second timer — food went to the kitchen and nothing has since, which is the
-              number that catches a forgotten table.
+              number that catches a forgotten table. Reading the same as the table timer it says
+              only "told at opening", which the table timer already says — so it is drawn once it
+              has a number of its own.
             */}
-            {table.kitchenMinutes === null ? null : (
+            {asked || table.kitchenMinutes === null || table.kitchenMinutes === table.minutes ? null : (
               <span
                 className="mb-tile__food"
                 title="Since the kitchen was last told"
@@ -237,13 +258,14 @@ export function Tile({
                 Bill
               </span>
             ) : null}
-            {table.seats > 0 ? (
+            {table.seats > 0 && !asked ? (
               <span className="mb-tile__seats" title={`${table.seats} seats`}>
                 <Icon name="users" size="sm" />
                 {table.seats}
               </span>
             ) : null}
         </span>
+        ) : null}
       </Face>
 
       {/* The tick, top left: an empty circle on hover, filled once ticked. */}
@@ -275,9 +297,11 @@ export function Tile({
 
       {/*
         The + : another party on the same table. Only on the table's own tile — a second
-        party's tile is its order, not the table — and only once the table is busy.
+        party's tile is its order, not the table — and only once the table is busy. It sits in
+        the top corner beside the printer, so the bottom row keeps its whole width for the
+        timers and the seats.
       */}
-      {onSplit && table.orderId && table.id !== table.orderId ? (
+      {splits ? (
         <Button
           variant="secondary"
           size="sm"

@@ -182,10 +182,19 @@
   background: var(--border);
 }
 
+/*
+ * THE tile grid — the billing screen's rooms and the Floor screen's rooms draw the same one, and
+ * this is its only definition. Fixed columns, not fluid: a tile is the same width on a narrow
+ * billing column and a wide floor, and `align-items: start` so one busy tile never stretches
+ * the free ones beside it.
+ */
 .mb-floor__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, var(--tile-width));
+  justify-content: start;
+  align-items: start;
+  gap: var(--space-2);
+  min-height: 0;
 }
 
 /* A tile. State in FORM as well as colour. */
@@ -193,13 +202,16 @@
 /* A REAL BOX. */
 
 /*
- * A fixed height, not a minimum: a busy tile carries an amount and a timer a free one does not,
- * and with `min-height` every tile was a different size.
+ * A fixed box, not a minimum: a busy tile carries an amount, a name and a timer a free one does
+ * not, and with `min-height` every tile was a different size. Whatever does not fit is cut, and
+ * every row below is one line with an ellipsis so the cut never lands mid-word.
  */
 .mb-tile {
   position: relative;
   display: flex;
-  min-height: var(--tile-height);
+  width: var(--tile-width);
+  height: var(--tile-height);
+  overflow: hidden;
   background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border);
@@ -257,14 +269,17 @@
   flex: 1;
   flex-direction: column;
   gap: var(--space-1);
-  /* Room on the right for the print button to sit without ever landing on the amount. */
-  padding: var(--space-2) var(--space-3);
+  /* The stripe takes the left; the right is tighter so two timers and the seats share a line. */
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   min-width: 0;
+  min-height: 0;
   background: transparent;
   color: inherit;
   border: none;
   border-radius: inherit;
   font: inherit; /* mb-layout-allow: the tile is the control; the kit has no tile */
+  /* Four rows in a fixed box: the rows sit tight. */
+  line-height: var(--line-tight);
   text-align: left;
   cursor: pointer; /* mb-layout-allow: the tile is the control; the kit has no tile */
 }
@@ -294,22 +309,30 @@
  * selected occupied tile setting `box-shadow` here would erase the stripe it is drawn over.
  */
 /*
- * Nothing on the face shrinks — the tile height is fixed, and flex was squashing the label to
- * nothing to make room.
+ * Nothing on the face shrinks or wraps — the tile is a fixed box, and flex was squashing the
+ * label to nothing to make room. Every row is one line; what does not fit ellipsises.
  */
 .mb-tile__face > * {
   flex: none;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The table number is the thing the tile exists to say. */
 .mb-tile__label {
   font-size: var(--text-xl);
   font-weight: var(--weight-bold);
-  line-height: var(--line-tight);
-  /* One line always. "Self service" wrapped to two and made that tile taller than the rest. */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+/* The corner holds the printer, and on a table that can split a + beside it; the number stops short. */
+.mb-tile--busy .mb-tile__label {
+  padding-right: calc(var(--tile-button) + var(--space-2));
+}
+
+.mb-tile--splits .mb-tile__label {
+  padding-right: calc(var(--tile-button) * 2 + var(--space-2));
 }
 
 /* A word, not a table number — it needs the smaller size to fit on one line. */
@@ -325,11 +348,11 @@
   right: var(--space-1);
 }
 
-/* Another party: a kit button placed bottom right, shown when the hand arrives. */
+/* Another party: a kit button placed top right beside the printer, shown when the hand arrives. */
 .mb-tile__split {
   position: absolute;
-  right: var(--space-1);
-  bottom: var(--space-1);
+  top: var(--space-1);
+  right: calc(var(--space-1) * 2 + var(--tile-button));
   opacity: 0;
   transition: opacity var(--motion-fast) var(--ease);
 }
@@ -399,24 +422,22 @@
   font-weight: var(--weight-medium);
 }
 
-/* Two timers have to fit, and neither may be cut in half. */
+/*
+ * The last row, pinned to the bottom of the box: the timers on the left, the seats on the
+ * right. One line — the timers give way before the seats do, and never wrap.
+ */
 .mb-tile__meta {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  min-width: 0;
-  overflow: hidden;
-  gap: 0 var(--space-2);
+  margin-top: auto;
+  /* Tight: two timers and the seats have to share one line of a fixed box. */
+  gap: var(--space-1);
   font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
-/* On a busy tile the + sits bottom-right, so the seats stop short of it. */
-.mb-tile--busy .mb-tile__meta {
-  padding-right: var(--tile-button);
-}
-
 .mb-tile__meta > * {
+  flex: none;
   white-space: nowrap;
 }
 
@@ -463,7 +484,8 @@
 .mb-tile-add {
   position: relative;
   display: flex;
-  min-height: var(--tile-height);
+  width: var(--tile-width);
+  height: var(--tile-height);
   border: var(--border-width) solid transparent;
   border-radius: var(--radius-md);
   align-items: center;
@@ -485,14 +507,12 @@
   border-color: var(--accent);
 }
 
-/* The second row: the money on the left, whose it is on the right. */
+/* The second row: the money on the left, the token on the right. One line. */
 .mb-tile__row {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0 var(--space-1);
-  min-width: 0;
+  gap: var(--space-1);
 }
 
 /* The token, beside the money: the number on the kitchen ticket and the bill. */
@@ -505,13 +525,8 @@
   color: var(--text-muted);
 }
 
+/* The third row: whose table it is. Its own line, so a long name ellipsises instead of wrapping. */
 .mb-tile__by {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
 }
@@ -529,6 +544,17 @@
   gap: var(--space-1);
   margin-left: auto;
   color: var(--text-muted);
+}
+
+/*
+ * The table timer is never cut — it is the fact the row exists for. The food timer is the one
+ * that gives way, and it ellipsises rather than wraps.
+ */
+.mb-tile__food {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mb-tile__timer {
