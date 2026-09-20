@@ -8,6 +8,8 @@ use std::io::Write;
 #[cfg(windows)]
 mod drives;
 #[cfg(windows)]
+mod firewall;
+#[cfg(windows)]
 pub mod serial;
 #[cfg(windows)]
 mod spooler;
@@ -188,6 +190,69 @@ pub fn open_serial_duplex(port: &str, baud: u32) -> Result<serial::SerialPort, W
 #[must_use]
 pub const fn available() -> bool {
     cfg!(windows)
+}
+
+// Windows Firewall.
+
+/// One inbound firewall rule against a program, as Windows holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirewallRule {
+    pub name: String,
+    pub enabled: bool,
+    /// True for an Allow rule, false for a Block rule.
+    pub allows: bool,
+    /// `NET_FW_PROFILE_TYPE2` bits: domain 1, private 2, public 4; every bit for "all".
+    pub profiles: u32,
+}
+
+/// What the firewall holds for one program, and where this PC is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirewallReport {
+    /// The profile bits of every network this PC is on right now.
+    pub current_profiles: u32,
+    pub rules: Vec<FirewallRule>,
+}
+
+/// How an elevated command ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Elevation {
+    Finished { exit_code: u32 },
+    /// The person pressed No on the UAC prompt, or it timed out on its own.
+    Refused,
+    /// It had not finished when the caller stopped waiting.
+    StillRunning,
+}
+
+/// Every inbound Windows Firewall rule against `program` (its full path), read in this
+/// process through the firewall's own COM object — no PowerShell, no child process.
+pub fn firewall_rules_for(program: &str) -> Result<FirewallReport, WinPrintError> {
+    #[cfg(windows)]
+    {
+        firewall::rules_for(program)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = program;
+        Err(WinPrintError::Unsupported("Windows Firewall"))
+    }
+}
+
+/// Run `file` with `parameters` as administrator: Windows asks once (UAC), the command runs
+/// hidden, and this waits up to `wait` for it to end.
+pub fn run_elevated(
+    file: &str,
+    parameters: &str,
+    wait: std::time::Duration,
+) -> Result<Elevation, WinPrintError> {
+    #[cfg(windows)]
+    {
+        firewall::run_elevated(file, parameters, wait)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (file, parameters, wait);
+        Err(WinPrintError::Unsupported("running a command as administrator"))
+    }
 }
 
 impl fmt::Display for PrinterInfo {

@@ -2,8 +2,10 @@
 //!
 //! The one reason a phone on the shop's WiFi cannot reach the counter is an inbound rule
 //! against this exe — Windows asks once, on the first start, and a dismissed prompt becomes a
-//! permanent BLOCK. The counter therefore reads its own rules, says so on the Phones page and
-//! in Health, and can repair them with one elevated command.
+//! permanent BLOCK; an accepted one is an Allow for that one network profile only. The
+//! counter therefore reads its own rules in process (`mb_winprint`), says so on the Phones
+//! page and in Health, and can repair them with one elevated `netsh` line — the same line the
+//! installer writes (`hooks.nsh`).
 
 use serde::Serialize;
 use ts_rs::TS;
@@ -13,13 +15,15 @@ use ts_rs::TS;
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "snake_case")]
 pub enum FirewallState {
-    /// An enabled inbound Allow rule, and no Block rule, for this exe.
+    /// An enabled inbound Allow rule covering every network this PC is on, and no Block.
     Allowed,
-    /// An enabled inbound Block rule for this exe — a dismissed prompt, usually.
+    /// An enabled inbound Block rule for this exe on a network it is on — a dismissed prompt,
+    /// usually.
     Blocked,
-    /// No rule either way: Windows will ask, or quietly block on a public network.
+    /// No rule for a network this PC is on: Windows will ask, or quietly block on a public
+    /// one.
     NoRule,
-    /// The question could not be asked (not Windows, or PowerShell refused).
+    /// The question could not be asked (not Windows, or the firewall service refused).
     Unknown,
 }
 
@@ -30,8 +34,8 @@ impl FirewallState {
     }
 }
 
-/// The last answer, so the Phones page and Health do not each wait on PowerShell. Read at
-/// LAN start and after a repair.
+/// The last answer, so the Phones page and Health do not each read the rules. Read at LAN
+/// start and after a repair.
 static CACHE: std::sync::Mutex<FirewallState> = std::sync::Mutex::new(FirewallState::Unknown);
 
 /// The last answer read.
@@ -48,7 +52,11 @@ pub fn refresh() -> FirewallState {
 }
 
 /// The name every rule this program writes carries, so a second run replaces, never stacks.
+/// `hooks.nsh` spells the same name.
 const RULE_NAME: &str = "Magic Bill counter";
+
+/// `NET_FW_PROFILE2_ALL` — a rule for every profile carries every bit.
+const EVERY_PROFILE: u32 = 0x7fff_ffff;
 
 /// This program's own path, the way the firewall spells it.
 fn own_exe() -> Option<String> {
@@ -57,135 +65,86 @@ fn own_exe() -> Option<String> {
         .map(|p| p.display().to_string())
 }
 
-/// Ask the firewall about this exe. Never blocks the caller for long: PowerShell is given
-/// `READ_DEADLINE` and then killed, and silence is `Unknown`.
+/// Ask the firewall about this exe. In process, well under a second, no child process.
 #[must_use]
 pub fn state() -> FirewallState {
     let Some(exe) = own_exe() else {
         return FirewallState::Unknown;
     };
-    if !cfg!(windows) {
-        return FirewallState::Unknown;
-    }
-    // One line per rule: "<Enabled> <Action> <Direction>".
-    let script = format!(
-        "$p = '{}'; Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | \
-         Where-Object {{ $_.Program -and ($_.Program -ieq $p) }} | Get-NetFirewallRule | \
-         Where-Object {{ $_.Direction -eq 'Inbound' }} | \
-         ForEach-Object {{ \"$($_.Enabled) $($_.Action)\" }}",
-        exe.replace('\'', "''")
-    );
-    match powershell(&script, Some(READ_DEADLINE)) {
-        Some(text) => judge(&text),
-        None => FirewallState::Unknown,
+    match mb_winprint::firewall_rules_for(&exe) {
+        Ok(report) => judge(&report),
+        Err(e) => {
+            crate::log_warn!("Windows Firewall could not be read: {e}");
+            FirewallState::Unknown
+        }
     }
 }
 
-/// The rules, read: any enabled Block wins; else an enabled Allow; else nothing.
-fn judge(lines: &str) -> FirewallState {
-    let mut allowed = false;
-    for line in lines.lines() {
-        let line = line.trim();
-        if !line.starts_with("True") {
+/// The rules, read against the networks this PC is on: any enabled Block on one of them
+/// wins; else Allowed when enabled Allow rules between them cover every one of them; else
+/// nothing. A rule for another profile alone (the Public-only Allow Windows writes when
+/// its own prompt is accepted, on a PC that has since joined a Private WiFi) is no rule.
+fn judge(report: &mb_winprint::FirewallReport) -> FirewallState {
+    let here = if report.current_profiles == 0 {
+        EVERY_PROFILE
+    } else {
+        report.current_profiles
+    };
+    let mut allowed_on = 0_u32;
+    for rule in report.rules.iter().filter(|r| r.enabled) {
+        if rule.profiles & here == 0 {
             continue;
         }
-        if line.ends_with("Block") {
+        if !rule.allows {
             return FirewallState::Blocked;
         }
-        if line.ends_with("Allow") {
-            allowed = true;
-        }
+        allowed_on |= rule.profiles;
     }
-    if allowed {
+    if allowed_on & here == here {
         FirewallState::Allowed
     } else {
         FirewallState::NoRule
     }
 }
 
-/// Delete every Block rule against this exe and write one Allow rule for every network
-/// profile. Needs administrator rights, so Windows shows one UAC prompt; the person presses
-/// Yes and the phones get in. Returns the state afterwards.
+/// The two `netsh` commands that put things right: every inbound rule against this exe goes
+/// (Windows' own Block and its one-profile Allow alike), and one Allow for every profile takes
+/// their place. `hooks.nsh` runs the same two at install, word for word.
+#[must_use]
+pub fn netsh_line(exe: &str) -> String {
+    format!(
+        "netsh advfirewall firewall delete rule name=all dir=in program=\"{exe}\" & \
+         netsh advfirewall firewall add rule name=\"{RULE_NAME}\" dir=in action=allow \
+         program=\"{exe}\" enable=yes profile=any"
+    )
+}
+
+/// How long the repair is given. It is waiting for a person at a UAC prompt, which Windows
+/// itself closes after two minutes.
+const REPAIR_DEADLINE: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Run `netsh_line` as administrator: Windows shows one UAC prompt, the person presses Yes
+/// and the phones get in. Returns the state afterwards, read afresh — so the answer is what
+/// the firewall now holds, whatever the prompt did.
 #[must_use]
 pub fn allow() -> FirewallState {
     let Some(exe) = own_exe() else {
         return FirewallState::Unknown;
     };
-    if !cfg!(windows) {
-        return FirewallState::Unknown;
-    }
-    let inner = format!(
-        "$p = '{exe}'; \
-         Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | \
-         Where-Object {{ $_.Program -and ($_.Program -ieq $p) }} | Get-NetFirewallRule | \
-         Where-Object {{ $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' }} | \
-         Remove-NetFirewallRule; \
-         Get-NetFirewallRule -DisplayName '{RULE_NAME}' -ErrorAction SilentlyContinue | \
-         Where-Object {{ ($_ | Get-NetFirewallApplicationFilter).Program -ieq $p }} | \
-         Remove-NetFirewallRule; \
-         New-NetFirewallRule -DisplayName '{RULE_NAME}' -Direction Inbound -Action Allow \
-         -Program $p -Profile Any -Enabled True | Out-Null",
-        exe = exe.replace('\'', "''"),
-    );
-    // Run it elevated and wait for it, so the answer below is the truth.
-    let outer = format!(
-        "Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList \
-         '-NoProfile','-ExecutionPolicy','Bypass','-Command','{}'",
-        inner.replace('\'', "''"),
-    );
-    // No deadline: this one is waiting for a person to press Yes on the UAC prompt.
-    let _ = powershell(&outer, None);
-    refresh()
-}
-
-/// How long a read of the rules may take before the counter stops waiting on it. A repair is
-/// not given one — it is waiting for a person to press Yes.
-const READ_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
-
-/// Run one PowerShell command with no window. `wait_for` bounds it; `None` waits as long as it
-/// takes.
-fn powershell(command: &str, wait_for: Option<std::time::Duration>) -> Option<String> {
-    use std::process::{Command, Stdio};
-    let mut cmd = Command::new("powershell");
-    cmd.args(["-NoProfile", "-NonInteractive", "-Command", command])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt as _;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let Some(limit) = wait_for else {
-        return finished(cmd.output().ok()?);
-    };
-    // Watched a step at a time, so a PowerShell that never answers cannot hold the counter.
-    // It is killed rather than left behind.
-    let mut child = cmd.spawn().ok()?;
-    let started = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return finished(child.wait_with_output().ok()?),
-            Ok(None) if started.elapsed() < limit => {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                crate::log_warn!("PowerShell took too long to read the firewall rules");
-                return None;
-            }
-            Err(_) => return None,
+    let line = format!("/C {}", netsh_line(&exe));
+    match mb_winprint::run_elevated("cmd.exe", &line, REPAIR_DEADLINE) {
+        Ok(mb_winprint::Elevation::Finished { exit_code }) => {
+            crate::log_info!("netsh wrote the firewall rule for this program (exit {exit_code})");
         }
+        Ok(mb_winprint::Elevation::Refused) => {
+            crate::log_warn!("the firewall repair was refused at the UAC prompt");
+        }
+        Ok(mb_winprint::Elevation::StillRunning) => {
+            crate::log_warn!("the firewall repair did not finish in time");
+        }
+        Err(e) => crate::log_warn!("the firewall repair could not be started: {e}"),
     }
-}
-
-/// What PowerShell printed, or nothing when it failed.
-fn finished(out: std::process::Output) -> Option<String> {
-    if !out.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+    refresh()
 }
 
 /// What the Phones page says about it, and whether it should offer the button.
@@ -199,8 +158,8 @@ pub fn words(state: FirewallState) -> (&'static str, bool) {
             true,
         ),
         FirewallState::NoRule => (
-            "Windows Firewall has no rule for this program yet. On a public WiFi it \
-             blocks quietly — press the button to allow it (Windows asks once).",
+            "Windows Firewall has no rule letting this program in on this network. On a \
+             public WiFi it blocks quietly — press the button to allow it (Windows asks once).",
             true,
         ),
         // The button is offered here too. The rules could not be READ, which says nothing
@@ -216,23 +175,80 @@ pub fn words(state: FirewallState) -> (&'static str, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mb_winprint::{FirewallReport, FirewallRule};
+
+    const PRIVATE: u32 = 2;
+    const PUBLIC: u32 = 4;
+
+    fn rule(enabled: bool, allows: bool, profiles: u32) -> FirewallRule {
+        FirewallRule {
+            name: String::new(),
+            enabled,
+            allows,
+            profiles,
+        }
+    }
+
+    fn on(current_profiles: u32, rules: Vec<FirewallRule>) -> FirewallReport {
+        FirewallReport {
+            current_profiles,
+            rules,
+        }
+    }
 
     #[test]
     fn a_block_wins_over_an_allow() {
-        assert_eq!(judge("True Allow\nTrue Block\n"), FirewallState::Blocked);
-        assert_eq!(judge("True Block\nTrue Allow\n"), FirewallState::Blocked);
+        let both = vec![rule(true, true, EVERY_PROFILE), rule(true, false, EVERY_PROFILE)];
+        assert_eq!(judge(&on(PUBLIC, both.clone())), FirewallState::Blocked);
+        let mut reversed = both;
+        reversed.reverse();
+        assert_eq!(judge(&on(PUBLIC, reversed)), FirewallState::Blocked);
     }
 
     #[test]
     fn a_disabled_block_does_not_count() {
-        assert_eq!(judge("False Block\nTrue Allow\n"), FirewallState::Allowed);
-        assert_eq!(judge("False Block\n"), FirewallState::NoRule);
+        let rules = vec![rule(false, false, EVERY_PROFILE), rule(true, true, EVERY_PROFILE)];
+        assert_eq!(judge(&on(PUBLIC, rules)), FirewallState::Allowed);
+        let only = vec![rule(false, false, EVERY_PROFILE)];
+        assert_eq!(judge(&on(PUBLIC, only)), FirewallState::NoRule);
     }
 
     #[test]
     fn no_rules_means_windows_will_ask() {
-        assert_eq!(judge(""), FirewallState::NoRule);
-        assert_eq!(judge("\n  \n"), FirewallState::NoRule);
+        assert_eq!(judge(&on(PUBLIC, Vec::new())), FirewallState::NoRule);
+        assert_eq!(judge(&on(0, Vec::new())), FirewallState::NoRule);
+    }
+
+    /// The rule Windows writes when its own prompt is accepted is for the network of that
+    /// moment only. The shop's WiFi marked Private later: no rule, and no prompt again.
+    #[test]
+    fn an_allow_for_another_network_is_no_rule_here() {
+        let public_only = vec![rule(true, true, PUBLIC)];
+        assert_eq!(judge(&on(PUBLIC, public_only.clone())), FirewallState::Allowed);
+        assert_eq!(judge(&on(PRIVATE, public_only.clone())), FirewallState::NoRule);
+        // On both at once (WiFi and a cable), one of them is not covered.
+        assert_eq!(judge(&on(PUBLIC | PRIVATE, public_only)), FirewallState::NoRule);
+        let each = vec![rule(true, true, PUBLIC), rule(true, true, PRIVATE)];
+        assert_eq!(judge(&on(PUBLIC | PRIVATE, each)), FirewallState::Allowed);
+    }
+
+    #[test]
+    fn a_block_for_another_network_does_not_block_here() {
+        let rules = vec![rule(true, false, PRIVATE), rule(true, true, PUBLIC)];
+        assert_eq!(judge(&on(PUBLIC, rules)), FirewallState::Allowed);
+    }
+
+    #[test]
+    fn the_repair_line_is_what_the_installer_writes() {
+        let line = netsh_line(r"C:\Users\A B\AppData\Local\Magic Bill\magic-bill.exe");
+        let hooks = include_str!("../hooks.nsh");
+        // The same two commands, with the installer's own spelling of the path.
+        for piece in line
+            .replace(r"C:\Users\A B\AppData\Local\Magic Bill\magic-bill.exe", "$INSTDIR\\magic-bill.exe")
+            .split(" & ")
+        {
+            assert!(hooks.contains(piece), "hooks.nsh does not run: {piece}");
+        }
     }
 
     #[test]

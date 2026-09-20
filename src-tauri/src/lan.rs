@@ -902,8 +902,8 @@ pub fn allow_firewall_on(app: &App) -> UiResult<NetworkView> {
     view_on(app)
 }
 
-// PowerShell — and a person at a UAC prompt — off the window thread: a plain command runs on
-// it, and the whole window, every other command with it, stood still until PowerShell answered.
+// The repair — and a person at a UAC prompt — off the window thread: a plain command runs on
+// it, and the whole window, every other command with it, stood still until Windows answered.
 #[tauri::command]
 pub async fn allow_firewall(app: tauri::State<'_, App>) -> UiResult<NetworkView> {
     crate::ipc::blocking(|| allow_firewall_on(&app)).await
@@ -1038,7 +1038,7 @@ pub fn start(handle: &tauri::AppHandle) {
         );
     }
 
-    // The firewall is read once, off the startup path — PowerShell takes a second or two.
+    // The firewall is read once, off the startup path — it is quick, but it is not free.
     std::thread::spawn(|| {
         let state = crate::firewall::refresh();
         if !state.lets_phones_in() {

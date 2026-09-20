@@ -312,3 +312,212 @@ pub unsafe fn from_wide(ptr: *const u16) -> String {
     let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
     String::from_utf16_lossy(slice)
 }
+
+// COM and the shell, for the firewall.
+
+pub type Hresult = i32;
+
+/// A COM `GUID`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Guid {
+    pub data1: u32,
+    pub data2: u16,
+    pub data3: u16,
+    pub data4: [u8; 8],
+}
+
+pub const IID_NULL: Guid = Guid {
+    data1: 0,
+    data2: 0,
+    data3: 0,
+    data4: [0; 8],
+};
+/// `{00020400-0000-0000-C000-000000000046}`.
+pub const IID_IDISPATCH: Guid = Guid {
+    data1: 0x0002_0400,
+    data2: 0,
+    data3: 0,
+    data4: [0xC0, 0, 0, 0, 0, 0, 0, 0x46],
+};
+/// `{00020404-0000-0000-C000-000000000046}`.
+pub const IID_IENUMVARIANT: Guid = Guid {
+    data1: 0x0002_0404,
+    data2: 0,
+    data3: 0,
+    data4: [0xC0, 0, 0, 0, 0, 0, 0, 0x46],
+};
+
+pub const S_OK: Hresult = 0;
+/// `CoInitializeEx` on a thread that already has a COM apartment of the other kind.
+pub const RPC_E_CHANGED_MODE: Hresult = i32::from_ne_bytes(0x8001_0106_u32.to_ne_bytes());
+pub const COINIT_APARTMENTTHREADED: Dword = 0x2;
+pub const CLSCTX_INPROC_SERVER: Dword = 0x1;
+pub const LOCALE_USER_DEFAULT: Dword = 0x400;
+pub const DISPATCH_METHOD: u16 = 0x1;
+pub const DISPATCH_PROPERTYGET: u16 = 0x2;
+/// The `_NewEnum` property every automation collection has.
+pub const DISPID_NEWENUM: i32 = -4;
+
+/// `VARENUM` — the kinds a `VARIANT` can hold, of which these are read.
+pub const VT_EMPTY: u16 = 0;
+pub const VT_I2: u16 = 2;
+pub const VT_I4: u16 = 3;
+pub const VT_BSTR: u16 = 8;
+pub const VT_DISPATCH: u16 = 9;
+pub const VT_BOOL: u16 = 11;
+pub const VT_UNKNOWN: u16 = 13;
+
+/// The union half of a `VARIANT`: two pointers wide (the `BRECORD` member is the largest).
+pub const VARIANT_DATA_LEN: usize = 2 * size_of::<usize>();
+
+/// `VARIANT`. Eight bytes of header, then the union, and the whole thing aligned to eight
+/// because the union holds a `double` and a `LONGLONG`.
+#[repr(C, align(8))]
+#[derive(Debug, Clone, Copy)]
+pub struct Variant {
+    pub vt: u16,
+    pub reserved: [u16; 3],
+    pub data: [u8; VARIANT_DATA_LEN],
+}
+
+impl Variant {
+    /// `VariantInit`: `VT_EMPTY`, nothing to free.
+    pub const fn empty() -> Self {
+        Variant {
+            vt: VT_EMPTY,
+            reserved: [0; 3],
+            data: [0; VARIANT_DATA_LEN],
+        }
+    }
+}
+
+/// `DISPPARAMS`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct DispParams {
+    pub args: *mut Variant,
+    pub named_ids: *mut i32,
+    pub n_args: u32,
+    pub n_named: u32,
+}
+
+/// A COM object: the first word of it is its vtable.
+pub type ComObject = *mut c_void;
+
+/// `IUnknown`'s three slots.
+#[repr(C)]
+pub struct IUnknownVtbl {
+    pub query_interface:
+        unsafe extern "system" fn(this: ComObject, iid: *const Guid, out: *mut ComObject) -> Hresult,
+    pub add_ref: unsafe extern "system" fn(this: ComObject) -> u32,
+    pub release: unsafe extern "system" fn(this: ComObject) -> u32,
+}
+
+/// `IDispatch` — the late-bound door every automation object has, which is how the firewall
+/// is read without carrying its forty-method interface layouts in here.
+#[repr(C)]
+pub struct IDispatchVtbl {
+    pub base: IUnknownVtbl,
+    pub get_type_info_count: *const c_void,
+    pub get_type_info: *const c_void,
+    pub get_ids_of_names: unsafe extern "system" fn(
+        this: ComObject,
+        iid: *const Guid,
+        names: *const *const u16,
+        count: u32,
+        lcid: Dword,
+        ids: *mut i32,
+    ) -> Hresult,
+    pub invoke: unsafe extern "system" fn(
+        this: ComObject,
+        dispid: i32,
+        iid: *const Guid,
+        lcid: Dword,
+        flags: u16,
+        params: *mut DispParams,
+        result: *mut Variant,
+        exception: *mut c_void,
+        arg_err: *mut u32,
+    ) -> Hresult,
+}
+
+/// `IEnumVARIANT`.
+#[repr(C)]
+pub struct IEnumVariantVtbl {
+    pub base: IUnknownVtbl,
+    pub next: unsafe extern "system" fn(
+        this: ComObject,
+        count: u32,
+        out: *mut Variant,
+        fetched: *mut u32,
+    ) -> Hresult,
+    pub skip: *const c_void,
+    pub reset: *const c_void,
+    pub clone: *const c_void,
+}
+
+/// `SHELLEXECUTEINFOW`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ShellExecuteInfoW {
+    pub size: Dword,
+    pub mask: Dword,
+    pub hwnd: Handle,
+    pub verb: *const u16,
+    pub file: *const u16,
+    pub parameters: *const u16,
+    pub directory: *const u16,
+    pub show: i32,
+    pub inst_app: Handle,
+    pub id_list: *mut c_void,
+    pub class: *const u16,
+    pub hkey_class: Handle,
+    pub hot_key: Dword,
+    pub icon: Handle,
+    pub process: Handle,
+}
+
+/// Hand back the process handle.
+pub const SEE_MASK_NOCLOSEPROCESS: Dword = 0x40;
+/// Do not return before the launch is done, so the handle is real.
+pub const SEE_MASK_NOASYNC: Dword = 0x100;
+/// No error box from the shell; the caller reads `GetLastError`.
+pub const SEE_MASK_FLAG_NO_UI: Dword = 0x400;
+pub const SW_HIDE: i32 = 0;
+/// `GetLastError` after a UAC prompt the person answered No to.
+pub const ERROR_CANCELLED: Dword = 1223;
+pub const WAIT_OBJECT_0: Dword = 0;
+pub const WAIT_TIMEOUT: Dword = 258;
+
+#[link(name = "ole32")]
+unsafe extern "system" {
+    pub fn CoInitializeEx(reserved: *mut c_void, coinit: Dword) -> Hresult;
+    pub fn CoUninitialize();
+    pub fn CLSIDFromProgID(progid: *const u16, clsid: *mut Guid) -> Hresult;
+    pub fn CoCreateInstance(
+        clsid: *const Guid,
+        outer: *mut c_void,
+        context: Dword,
+        iid: *const Guid,
+        out: *mut ComObject,
+    ) -> Hresult;
+}
+
+#[link(name = "oleaut32")]
+unsafe extern "system" {
+    /// Characters, not bytes, and no terminator.
+    pub fn SysStringLen(bstr: *const u16) -> u32;
+    pub fn VariantClear(variant: *mut Variant) -> Hresult;
+}
+
+#[link(name = "shell32")]
+unsafe extern "system" {
+    pub fn ShellExecuteExW(info: *mut ShellExecuteInfoW) -> Bool;
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    pub fn WaitForSingleObject(object: Handle, milliseconds: Dword) -> Dword;
+    pub fn GetExitCodeProcess(process: Handle, code: *mut Dword) -> Bool;
+}
