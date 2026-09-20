@@ -98,6 +98,7 @@ fn fits_a_table(paper: Paper, ctx: &ReportContext<'_>) -> bool {
                 widest(ctx, index)
             }
             .saturating_add(GUTTER)
+            .saturating_add(if gap_before(ctx, index) { GUTTER } else { 0 })
         })
         .sum();
     wanted <= paper.columns()
@@ -108,34 +109,50 @@ fn name_column(ctx: &ReportContext<'_>) -> usize {
     ctx.columns.iter().position(|c| !c.numeric).unwrap_or(0)
 }
 
+/// A figure sits at the right of its column and a word at the left, so a word straight after
+/// a figure would touch it — "2Cash". Those two get a blank column between them.
+fn gap_before(ctx: &ReportContext<'_>, index: usize) -> bool {
+    index > 0 && !ctx.columns[index].numeric && ctx.columns[index - 1].numeric
+}
+
 /// The paper is wide enough: one row per row, the way the screen has it.
 fn table(doc: &mut Document, ctx: &ReportContext<'_>) {
     let name_at = name_column(ctx);
-    let columns: Vec<Column> = ctx
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(index, spec)| {
-            if index == name_at {
-                Column::fill(Align::Left)
-            } else if spec.numeric {
-                Column::fixed(widest(ctx, index) + GUTTER, Align::Right)
-            } else {
-                Column::fixed(widest(ctx, index) + GUTTER, Align::Left)
-            }
-        })
-        .collect();
+    // The laid columns, and which of the report's each one carries — `None` is a gap.
+    let mut columns: Vec<Column> = Vec::new();
+    let mut carries: Vec<Option<usize>> = Vec::new();
+    for (index, spec) in ctx.columns.iter().enumerate() {
+        if gap_before(ctx, index) {
+            columns.push(Column::fixed(GUTTER, Align::Left));
+            carries.push(None);
+        }
+        columns.push(if index == name_at {
+            Column::fill(Align::Left)
+        } else if spec.numeric {
+            Column::fixed(widest(ctx, index) + GUTTER, Align::Right)
+        } else {
+            Column::fixed(widest(ctx, index) + GUTTER, Align::Left)
+        });
+        carries.push(Some(index));
+    }
+    let cells = |row: &[String]| -> Vec<String> {
+        carries
+            .iter()
+            .map(|from| from.and_then(|i| row.get(i).cloned()).unwrap_or_default())
+            .collect()
+    };
+    let headers: Vec<String> = ctx.columns.iter().map(|c| c.header.clone()).collect();
 
     doc.push(Block::Columns {
         columns: columns.clone(),
-        rows: vec![ctx.columns.iter().map(|c| c.header.clone()).collect()],
+        rows: vec![cells(&headers)],
         style: Style::new(1, true),
         measured_as: None,
     })
     .separator(Pattern::Solid)
     .push(Block::Columns {
         columns: columns.clone(),
-        rows: ctx.rows.to_vec(),
+        rows: ctx.rows.iter().map(|row| cells(row)).collect(),
         style: Style::NORMAL,
         measured_as: None,
     });
@@ -143,7 +160,7 @@ fn table(doc: &mut Document, ctx: &ReportContext<'_>) {
     if let Some(totals) = ctx.totals {
         doc.separator(Pattern::Solid).push(Block::Columns {
             columns,
-            rows: vec![totals.to_vec()],
+            rows: vec![cells(totals)],
             style: Style::new(1, true),
             measured_as: None,
         });

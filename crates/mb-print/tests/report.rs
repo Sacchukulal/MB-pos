@@ -191,3 +191,53 @@ fn an_empty_report_says_so() {
     };
     assert!(printed(PaperKind::Mm80, &ctx).contains("Nothing in this period"));
 }
+
+/// The bills list has words after figures — Items, then Paid by. A figure sits at the right
+/// of its column and a word at the left, and the first sheet printed "2Cash" and "ItemsPaid by".
+#[test]
+fn a_word_after_a_figure_does_not_touch_it() {
+    let store = a_store();
+    let columns: Vec<ReportColumn> = [
+        ("Bill", false),
+        ("Table", false),
+        ("Items", true),
+        ("Paid by", false),
+        ("State", false),
+        ("Total", true),
+    ]
+    .into_iter()
+    .map(|(header, numeric)| ReportColumn {
+        header: header.to_owned(),
+        numeric,
+    })
+    .collect();
+    let rows = vec![
+        ["0063", "Table 1", "2", "Cash", "Paid", "504.00"]
+            .map(str::to_owned)
+            .to_vec(),
+    ];
+    let totals = ["Total", "", "", "", "", "504.00"]
+        .map(str::to_owned)
+        .to_vec();
+    let ctx = ReportContext {
+        store: &store,
+        title: "Bills",
+        subtitle: "2026-09-20",
+        columns: &columns,
+        rows: &rows,
+        totals: Some(&totals),
+        notes: &[],
+        printed: None,
+    };
+    let paper = printed(PaperKind::A4, &ctx);
+
+    assert!(paper.contains("Items  Paid by"), "{paper}");
+    assert!(paper.contains("2  Cash"), "{paper}");
+    assert!(!paper.contains("2Cash"), "{paper}");
+    // Every line is still within the sheet.
+    let widest = paper.lines().map(|l| l.chars().count()).max().unwrap_or(0);
+    assert!(
+        widest <= PaperKind::A4.columns(),
+        "{widest} columns: {paper}"
+    );
+}
