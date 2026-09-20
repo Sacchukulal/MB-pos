@@ -16,7 +16,7 @@ use mb_core::Timestamp;
 use mb_db::repo::wire::{ROW_KEY, ROW_TABLE_KEY, Restored, WireRow};
 use mb_db::Repos;
 
-use common::{OUTLET, Scratch, shop};
+use common::{OUTLET, Scratch, TERMINAL, shop};
 
 /// Every pending outbox row of a shop, shaped for the cloud.
 fn everything_on_the_wire(db: &mb_db::Db) -> Vec<WireRow> {
@@ -35,6 +35,63 @@ fn everything_on_the_wire(db: &mb_db::Db) -> Vec<WireRow> {
         Ok(out)
     })
     .expect("read")
+}
+
+/// Everything the cloud hands back, written into an empty shop the way the restore writes it:
+/// the box first, then the typed tables, then the bills. Returns (written, skipped).
+fn bring_down(rows: &[WireRow], down: &mb_db::Db) -> (usize, usize) {
+    let mut written = 0;
+    let mut skipped = 0;
+    down.transaction(|tx| {
+        tx.execute_batch("PRAGMA defer_foreign_keys = ON")?;
+        let repos = Repos::new(tx);
+        let wire = repos.wire();
+        // The cloud hands the box back first, then the typed tables, then the bills, then the
+        // totals — the order the restore reads them in.
+        let typed = ["orders", "roles", "staff", "items", "categories", "customers", "expenses",
+                     "expense_categories", "cash_movements", "customer_ledger",
+                     "day_totals", "day_item_totals", "day_category_totals"];
+        for row in rows.iter().filter(|r| !typed.contains(&r.table.as_str())) {
+            if wire.write_boxed(&row.table, &row.data)? {
+                written += 1;
+            } else {
+                skipped += 1;
+            }
+        }
+        for row in rows.iter().filter(|r| typed.contains(&r.table.as_str()) && r.table != "orders") {
+            let cloud_name = match row.table.as_str() {
+                "items" => "menu_items",
+                "categories" => "menu_categories",
+                other => other,
+            };
+            match wire.restore_row(OUTLET, cloud_name, &row.id, row.updated_at, &row.data)? {
+                Restored::Written => written += 1,
+                Restored::Skipped => skipped += 1,
+            }
+        }
+        for row in rows.iter().filter(|r| r.table == "orders") {
+            match wire.restore_row(OUTLET, "bills", &row.id, row.updated_at, &row.data)? {
+                Restored::Written => written += 1,
+                Restored::Skipped => skipped += 1,
+            }
+        }
+        repos.outbox().clear_backlog(Timestamp::from_millis(1))?;
+        Ok(())
+    })
+    .expect("everything comes down");
+    (written, skipped)
+}
+
+/// The highest bill number and token the orders of a shop carry.
+fn highest(db: &mb_db::Db) -> (i64, i64) {
+    db.read(|c| {
+        Ok(c.query_row(
+            "SELECT MAX(bill_number_value), MAX(token_value) FROM orders WHERE terminal_id = ?1",
+            [TERMINAL],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?)
+    })
+    .expect("highest")
 }
 
 fn count(db: &mb_db::Db, table: &str) -> i64 {
@@ -122,45 +179,7 @@ fn what_went_up_comes_back_down_as_the_same_shop() {
     // A second, empty computer.
     let other = Scratch::new("wire_round_trip_down");
     let down = other.open();
-    let mut written = 0;
-    let mut skipped = 0;
-    down.transaction(|tx| {
-        tx.execute_batch("PRAGMA defer_foreign_keys = ON")?;
-        let repos = Repos::new(tx);
-        let wire = repos.wire();
-        // The cloud hands the box back first, then the typed tables, then the bills, then the
-        // totals — the order the restore reads them in.
-        let typed = ["orders", "roles", "staff", "items", "categories", "customers", "expenses",
-                     "expense_categories", "cash_movements", "customer_ledger",
-                     "day_totals", "day_item_totals", "day_category_totals"];
-        for row in rows.iter().filter(|r| !typed.contains(&r.table.as_str())) {
-            if wire.write_boxed(&row.table, &row.data)? {
-                written += 1;
-            } else {
-                skipped += 1;
-            }
-        }
-        for row in rows.iter().filter(|r| typed.contains(&r.table.as_str()) && r.table != "orders") {
-            let cloud_name = match row.table.as_str() {
-                "items" => "menu_items",
-                "categories" => "menu_categories",
-                other => other,
-            };
-            match wire.restore_row(OUTLET, cloud_name, &row.id, row.updated_at, &row.data)? {
-                Restored::Written => written += 1,
-                Restored::Skipped => skipped += 1,
-            }
-        }
-        for row in rows.iter().filter(|r| r.table == "orders") {
-            match wire.restore_row(OUTLET, "bills", &row.id, row.updated_at, &row.data)? {
-                Restored::Written => written += 1,
-                Restored::Skipped => skipped += 1,
-            }
-        }
-        repos.outbox().clear_backlog(Timestamp::from_millis(1))?;
-        Ok(())
-    })
-    .expect("everything comes down");
+    let (written, skipped) = bring_down(&rows, &down);
     assert!(written > 0);
     // Only the per-item and per-category totals have nowhere to go.
     let group_totals = rows.iter().filter(|r| r.table == "day_item_totals" || r.table == "day_category_totals").count();
@@ -295,4 +314,159 @@ fn no_wire_row_ever_carries_the_epoch_as_its_moment() {
             row.id
         );
     }
+}
+
+/// The bug of 2026-09-20: a shop came down from the cloud with 62 bills, and the first bill
+/// on the new computer claimed number 1 — the counters were the migration's, not the shop's.
+/// The orders are the proof of what was issued, and the counters catch up with them.
+#[test]
+fn the_counters_catch_up_with_the_bills_that_came_back() {
+    let scratch = Scratch::new("wire_catch_up");
+    let db = scratch.open();
+    shop::build(&db);
+    let (top_bill, top_token) = highest(&db);
+    assert!(top_bill > 1 && top_token > 1, "the built shop billed more than once");
+    // A cloud written before the counters travelled: the bills carry their numbers, and
+    // nothing else says what was issued.
+    let rows: Vec<WireRow> = everything_on_the_wire(&db)
+        .into_iter()
+        .filter(|r| r.table != mb_db::numbering::TABLE)
+        .collect();
+
+    let other = Scratch::new("wire_catch_up_down");
+    let down = other.open();
+    bring_down(&rows, &down);
+    // Before the catch-up, the new computer's counters still say nothing was issued.
+    let issued = down
+        .transaction(|tx| mb_db::numbering::last_issued(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill))
+        .expect("read");
+    assert_eq!(issued, None);
+
+    // What the restore does next.
+    let moved = down.transaction(mb_db::numbering::catch_up).expect("catch up");
+    assert_eq!(moved.len(), 2, "the bill and the token series were behind: {moved:?}");
+    let bill_move = moved.iter().find(|m| m.kind == mb_db::CounterKind::Bill).expect("bill");
+    assert_eq!((bill_move.from, bill_move.to), (None, top_bill));
+
+    // The next bill is the one after the last, and the next token continues its day.
+    let latest_day: i64 = down
+        .read(|c| Ok(c.query_row("SELECT MAX(business_day) FROM orders WHERE token_value IS NOT NULL", [], |r| r.get(0))?))
+        .expect("day");
+    let day = mb_core::BusinessDay::from_days_since_epoch(i32::try_from(latest_day).expect("small"));
+    let (bill, token) = down
+        .transaction(|tx| {
+            Ok((
+                mb_db::numbering::claim(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill, day)?,
+                mb_db::numbering::claim(tx, OUTLET, TERMINAL, mb_db::CounterKind::Token, day)?,
+            ))
+        })
+        .expect("claims");
+    assert_eq!(bill.value, u64::try_from(top_bill + 1).expect("positive"));
+    let top_today: i64 = down
+        .read(|c| Ok(c.query_row("SELECT MAX(token_value) FROM orders WHERE business_day = ?1", [latest_day], |r| r.get(0))?))
+        .expect("top token today");
+    assert_eq!(token.value, u64::try_from(top_today + 1).expect("positive"));
+    // A second catch-up finds nothing to do: it only ever moves a counter forward.
+    let again = down.transaction(mb_db::numbering::catch_up).expect("catch up");
+    assert!(again.is_empty(), "{again:?}");
+}
+
+/// Opening the file is enough: a shop whose counters fell behind (the restore of 2026-09-20,
+/// already on disk) is caught up before anybody claims a number.
+#[test]
+fn opening_a_file_catches_its_counters_up() {
+    let scratch = Scratch::new("wire_open_catch_up");
+    let db = scratch.open();
+    shop::build(&db);
+    let (top_bill, _) = highest(&db);
+    let rows: Vec<WireRow> = everything_on_the_wire(&db)
+        .into_iter()
+        .filter(|r| r.table != mb_db::numbering::TABLE)
+        .collect();
+
+    let other = Scratch::new("wire_open_catch_up_down");
+    let down = other.open();
+    bring_down(&rows, &down);
+    drop(down);
+
+    // The same file, opened again — the road every start-up takes.
+    let down = other.open();
+    let day = mb_core::BusinessDay::from_days_since_epoch(20_700);
+    let bill = down
+        .transaction(|tx| mb_db::numbering::claim(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill, day))
+        .expect("the claim");
+    assert_eq!(bill.value, u64::try_from(top_bill + 1).expect("positive"));
+}
+
+/// The shape of a series is part of the shop: `BILL//0062` is followed by `BILL//0063` on the
+/// new computer, whether the counter row travelled or the shape had to be read back from
+/// the newest printed number.
+#[test]
+fn the_shape_of_a_series_comes_back_with_the_shop() {
+    let scratch = Scratch::new("wire_shape");
+    let db = scratch.open();
+    let at = Timestamp::from_millis(5);
+    let day = mb_core::BusinessDay::from_days_since_epoch(20_600);
+    db.transaction(|tx| {
+        mb_db::numbering::set_format(
+            tx,
+            OUTLET,
+            TERMINAL,
+            mb_db::CounterKind::Bill,
+            &mb_db::numbering::Format { prefix: "BILL//".to_owned(), pad_width: 4, reset_daily: false, start: 1 },
+            at,
+        )
+    })
+    .expect("format");
+    shop::build(&db);
+    let (top_bill, _) = highest(&db);
+    let rows = everything_on_the_wire(&db);
+    assert!(
+        rows.iter().any(|r| r.table == mb_db::numbering::TABLE && r.id == "terminal_default:bill"),
+        "the counter row is on the wire"
+    );
+
+    // Today's cloud: the counter row comes down with the box.
+    let with = Scratch::new("wire_shape_with");
+    let down = with.open();
+    bring_down(&rows, &down);
+    let bill = down
+        .transaction(|tx| {
+            mb_db::numbering::catch_up(tx)?;
+            mb_db::numbering::claim(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill, day)
+        })
+        .expect("claim");
+    assert_eq!(bill.formatted, format!("BILL//{:04}", top_bill + 1));
+
+    // A cloud from before the counters travelled: the shape is read back from the bills.
+    let without = Scratch::new("wire_shape_without");
+    let down = without.open();
+    let older: Vec<WireRow> = rows.into_iter().filter(|r| r.table != mb_db::numbering::TABLE).collect();
+    bring_down(&older, &down);
+    let (adopted, bill) = down
+        .transaction(|tx| {
+            mb_db::numbering::catch_up(tx)?;
+            let adopted = mb_db::numbering::adopt_format_from_orders(tx)?;
+            Ok((adopted, mb_db::numbering::claim(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill, day)?))
+        })
+        .expect("claim");
+    assert_eq!(adopted.len(), 1, "only the bill series wore a prefix: {adopted:?}");
+    assert_eq!(adopted[0].prefix, "BILL//");
+    assert_eq!(adopted[0].pad_width, Some(4));
+    assert_eq!(bill.formatted, format!("BILL//{:04}", top_bill + 1));
+}
+
+#[test]
+fn a_printed_number_reads_back_as_its_prefix_and_padding() {
+    use mb_db::numbering::split_format;
+    assert_eq!(split_format("BILL//0062", 62), Some(("BILL//".to_owned(), Some(4))));
+    assert_eq!(split_format("0062", 62), Some((String::new(), Some(4))));
+    assert_eq!(split_format("62", 62), Some((String::new(), None)));
+    assert_eq!(split_format("BILL//62", 62), Some(("BILL//".to_owned(), None)));
+    // A prefix that ends in a digit is still found.
+    assert_eq!(split_format("A15", 5), Some(("A1".to_owned(), None)));
+    // The longest reading wins, and prints the same either way.
+    assert_eq!(split_format("A00062", 62), Some(("A".to_owned(), Some(5))));
+    assert_eq!(split_format("BILL//", 62), None);
+    assert_eq!(split_format("BILL//0063", 62), None);
 }

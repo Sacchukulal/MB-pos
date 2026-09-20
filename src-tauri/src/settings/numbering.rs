@@ -67,33 +67,35 @@ fn kind_of(text: &str) -> UiResult<CounterKind> {
     }
 }
 
-fn view_of(counter: &mb_db::numbering::Counter) -> CounterView {
-    let next = counter
-        .last_issued
-        .map_or(counter.start, |issued| issued.saturating_add(1));
-    let width = usize::try_from(counter.pad_width.max(0)).unwrap_or(0);
-    // Three series, three names. The kitchen ticket's was shown as a second "Token number",
-    // and two sections with one name and different figures read as a broken counter.
-    let (kind, label, help) = match counter.kind {
+/// Three series, three names. The kitchen ticket's was once shown as a second "Token number",
+/// and two sections with one name and different figures read as a broken counter.
+const fn named(kind: CounterKind) -> (&'static str, &'static str) {
+    match kind {
         CounterKind::Bill => (
-            "bill",
             "Bill number",
             "The number on the bill, and the number your GST return lists. It must never go \
              backwards.",
         ),
         CounterKind::Token => (
-            "token",
             "Token number",
             "The number the customer waits for. Most shops start it again every day.",
         ),
         CounterKind::Kot => (
-            "kot",
             "Kitchen ticket number",
             "The number on each kitchen ticket, so the kitchen can say which one it means.",
         ),
-    };
+    }
+}
+
+fn view_of(counter: &mb_db::numbering::Counter, today: mb_core::BusinessDay) -> CounterView {
+    // A series that starts again every day has issued nothing TODAY until its first claim,
+    // whatever yesterday's figure says — the same reading the claim makes.
+    let issued = counter.issued_as_of(today);
+    let next = issued.map_or(counter.start, |issued| issued.saturating_add(1));
+    let width = usize::try_from(counter.pad_width.max(0)).unwrap_or(0);
+    let (label, help) = named(counter.kind);
     CounterView {
-        kind: kind.to_owned(),
+        kind: counter.kind.as_sql().to_owned(),
         label: label.to_owned(),
         help: help.to_owned(),
         prefix: counter.prefix.clone(),
@@ -104,8 +106,8 @@ fn view_of(counter: &mb_db::numbering::Counter) -> CounterView {
         // shows and what prints cannot disagree.
         next: format!("{}{:0width$}", counter.prefix, next),
         next_value: u32::try_from(next).unwrap_or(1),
-        issued: counter.last_issued.and_then(|n| u32::try_from(n).ok()),
-        summary: match counter.last_issued {
+        issued: issued.and_then(|n| u32::try_from(n).ok()),
+        summary: match issued {
             None => format!(
                 "The next one will be {}{next:0width$} — nothing has been issued yet.",
                 counter.prefix
@@ -124,13 +126,14 @@ fn view_of(counter: &mb_db::numbering::Counter) -> CounterView {
 
 pub fn numbering_on(app: &App) -> UiResult<NumberingView> {
     guard::require(app, Permission::SettingsTax)?;
+    let today = crate::flows::today(crate::flows::now());
     app.with_shop(|shop| {
         let counters = shop
             .db
             .transaction(|tx| mb_db::numbering::counters(tx, OUTLET, app.terminal_id()))
             .map_err(|e| words::from_db(&e))?;
         Ok(NumberingView {
-            counters: counters.iter().map(view_of).collect(),
+            counters: counters.iter().map(|c| view_of(c, today)).collect(),
         })
     })
 }
@@ -182,28 +185,30 @@ pub fn save_counter_on(app: &App, edit: CounterEdit) -> UiResult<NumberingView> 
                 let before = mb_db::numbering::counters(tx, OUTLET, app.terminal_id())?
                     .into_iter()
                     .find(|c| c.kind == kind);
-                let issued = before.as_ref().and_then(|c| c.last_issued);
+                // What the shop can PROVE was issued in this run: the counter's own figure
+                // or the highest number on its orders, whichever is higher. A counter that
+                // forgot (a file that came down from the cloud) cannot be talked below the
+                // bills that are already printed.
+                let issued =
+                    mb_db::numbering::proven(tx, OUTLET, app.terminal_id(), kind, day)?;
 
                 // THE RULE, and it is the whole reason this screen is guarded.
                 if let Some(issued) = issued
                     && i64::from(edit.next_value) <= issued
                 {
                     return Ok(Some(format!(
-                        "{}{issued} has already been printed and given to a \
+                        "{} {issued} has already been printed and given to a \
                          customer. Setting the next one to {} would produce two \
                          bills with the same number, and your GST return is a \
                          list of bill numbers — it would be rejected. The next \
                          number can be {} or higher.",
-                        if kind == CounterKind::Bill {
-                            "Bill number "
-                        } else {
-                            "Token "
-                        },
+                        named(kind).0,
                         edit.next_value,
                         issued.saturating_add(1)
                     )));
                 }
-
+                // The bill series never starts again every day; `set_format` refuses it, and
+                // the screen does not offer it.
                 mb_db::numbering::set_format(
                     tx,
                     OUTLET,
@@ -215,6 +220,7 @@ pub fn save_counter_on(app: &App, edit: CounterEdit) -> UiResult<NumberingView> 
                         reset_daily: edit.reset_daily,
                         start: i64::from(edit.start),
                     },
+                    at,
                 )?;
                 mb_db::numbering::set_next(
                     tx,
@@ -222,6 +228,8 @@ pub fn save_counter_on(app: &App, edit: CounterEdit) -> UiResult<NumberingView> 
                     app.terminal_id(),
                     kind,
                     u64::from(edit.next_value),
+                    day,
+                    at,
                 )?;
 
                 mb_db::Repos::new(tx).audit().append(

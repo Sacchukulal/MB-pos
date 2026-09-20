@@ -292,9 +292,23 @@ fn the_settings_edit_reads_the_past_and_writes_the_future() {
             Some(1)
         );
 
-        numbering::set_next(tx, common::OUTLET, common::TERMINAL, CounterKind::Bill, 500)?;
+        let at = mb_core::Timestamp::from_millis(1_000);
+        numbering::set_next(tx, common::OUTLET, common::TERMINAL, CounterKind::Bill, 500, day, at)?;
         let next = numbering::claim(tx, common::OUTLET, common::TERMINAL, CounterKind::Bill, day)?;
         assert_eq!(next.value, 500);
+
+        // A daily series told its next number keeps it for THAT day: the claim must not
+        // start the day over and lose the edit.
+        numbering::set_next(tx, common::OUTLET, common::TERMINAL, CounterKind::Token, 40, day, at)?;
+        let token = numbering::claim(tx, common::OUTLET, common::TERMINAL, CounterKind::Token, day)?;
+        assert_eq!(token.value, 40);
+        // And the edit is part of the shop: both rows are queued for the cloud.
+        let queued: i64 = tx.query_row(
+            "SELECT count(*) FROM sync_outbox WHERE table_name = 'counters' AND synced_at IS NULL",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(queued, 2, "the bill and token counters are queued");
         Ok(())
     })
     .expect("settings round trip");

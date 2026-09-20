@@ -105,11 +105,14 @@ function Counter({
         />
       </div>
 
-      <Checkbox
-        label="Start again every day"
-        checked={draft.resetDaily}
-        onChange={(event) => set({ resetDaily: event.currentTarget.checked })}
-      />
+      {/* The bill number runs on and never starts again: a GST return is one list. */}
+      {counter.kind !== 'bill' && (
+        <Checkbox
+          label="Start again every day"
+          checked={draft.resetDaily}
+          onChange={(event) => set({ resetDaily: event.currentTarget.checked })}
+        />
+      )}
 
       <div className="mb-row mb-row--end">
         <Button variant="primary" size="sm" disabled={!dirty} onClick={() => onSave(draft)}>

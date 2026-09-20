@@ -816,6 +816,40 @@ pub fn restore_into(app: &App, db: &Db, login: &DeviceLogin) -> UiResult<Restore
         // The cloud already has everything that was just written.
         let cleared = repos.outbox().clear_backlog(at)?;
         log_info!("restore: {cleared} outbox row(s) cleared — the cloud already has them");
+
+        // The orders that came back are the proof of what was issued: every counter is
+        // caught up to them, so the next bill is the one after the last, not number 1
+        // again. A cloud written before the counters travelled holds no shape for a series;
+        // then the shape is read back from the newest printed number.
+        for moved in mb_db::numbering::catch_up(tx)? {
+            log_info!(
+                "restore: the {} counter of {} caught up with its orders: {} → {}",
+                moved.kind.as_sql(),
+                moved.terminal,
+                moved.from.map_or_else(|| "nothing issued".to_owned(), |n| n.to_string()),
+                moved.to
+            );
+        }
+        let counters_came_down = boxed
+            .iter()
+            .any(|r| r.get("table_name").and_then(Value::as_str) == Some(mb_db::numbering::TABLE));
+        if !counters_came_down {
+            for adopted in mb_db::numbering::adopt_format_from_orders(tx)? {
+                log_info!(
+                    "restore: the {} counter of {} took its shape from its newest number: prefix `{}`{}",
+                    adopted.kind.as_sql(),
+                    adopted.terminal,
+                    adopted.prefix,
+                    adopted
+                        .pad_width
+                        .map_or_else(String::new, |w| format!(", padded to {w}"))
+                );
+            }
+        }
+        // And the cloud learns the series as they now stand, so the next computer needs none
+        // of this.
+        mb_db::numbering::queue_all(tx, at)?;
+
         repos.audit().append(
             OUTLET,
             &AuditEntry::new(at, today(at), None, action::CLOUD_RESTORED, "shop")

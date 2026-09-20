@@ -121,24 +121,26 @@ impl<'a> TerminalRepo<'a> {
             ],
         )?;
 
-        self.seed_counters(outlet, &terminal.id, &prefix)?;
+        self.seed_counters(outlet, &terminal.id, &prefix, at)?;
         OutboxRepo::new(self.tx).enqueue(outlet, "terminals", &terminal.id, Op::Upsert, at)
     }
 
-    /// Give a till its own counter rows, or move its prefix onto the ones it has.
-    fn seed_counters(&self, outlet: &str, terminal: &str, prefix: &str) -> Result<(), DbError> {
-        // The defaults match migration 0001's seeded pair: a token resets daily and is not
-        // padded; a bill runs on and is padded to four.
-        for (kind, reset_daily, pad) in [("token", 1, 0), ("bill", 0, 4), ("kot", 1, 0)] {
-            self.tx.execute(
-                "INSERT INTO counters
-                     (outlet_id, terminal_id, kind, last_issued, start, reset_daily,
-                      prefix, pad_width, last_reset_day)
-                 VALUES (?1, ?2, ?3, NULL, 1, ?4, ?5, ?6, NULL)
-                 ON CONFLICT (outlet_id, terminal_id, kind) DO UPDATE SET
-                     prefix = excluded.prefix",
-                params![outlet, terminal, kind, reset_daily, prefix, pad],
-            )?;
+    /// Give a till its own counter rows, or move its prefix onto the ones it has. The rows
+    /// are part of the shop, so they are queued for the cloud with the till.
+    fn seed_counters(
+        &self,
+        outlet: &str,
+        terminal: &str,
+        prefix: &str,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
+        crate::numbering::ensure_rows(self.tx, outlet, terminal, prefix)?;
+        self.tx.execute(
+            "UPDATE counters SET prefix = ?3 WHERE outlet_id = ?1 AND terminal_id = ?2",
+            params![outlet, terminal, prefix],
+        )?;
+        for kind in crate::numbering::CounterKind::ALL {
+            crate::numbering::queue(self.tx, outlet, terminal, kind, at)?;
         }
         Ok(())
     }

@@ -134,8 +134,41 @@ impl<'a> WireRepo<'a> {
             "items" => self.with_row(self.one(row, "SELECT i.id, i.category_id, i.name, i.unit_price AS unit_price_paise, c.rate_bp AS tax_rate_bp, i.short_code, i.is_available, i.sort_order FROM items i JOIN tax_classes c ON c.id = i.tax_class_id WHERE i.id = ?1", None)?, "items", &row.row_id),
             "staff" => self.with_row(self.one(row, "SELECT id, role_id, name, phone, joined_on, status, designation, department, is_rider, employment_type, left_on, pin_hash FROM staff WHERE id = ?1", None)?, "staff", &row.row_id),
             "roles" => self.role(row),
+            crate::numbering::TABLE => self.counter(outlet, row),
             _ => self.boxed(row),
         }
+    }
+
+    /// A counter row, whole, named by its terminal and kind: the shape of a series is part of
+    /// the shop, and comes back with it.
+    fn counter(&self, outlet: &str, row: &OutboxRow) -> Result<Vec<WireRow>, DbError> {
+        let Some((terminal, kind)) = crate::numbering::parse_row_id(&row.row_id) else {
+            return Ok(Vec::new());
+        };
+        self.whole_row(
+            row,
+            "SELECT * FROM counters WHERE outlet_id = ?1 AND terminal_id = ?2 AND kind = ?3",
+            rusqlite::params![outlet, terminal, kind.as_sql()],
+        )
+    }
+
+    /// One stored row, column for column, as the outbox entry's wire row.
+    fn whole_row<P: rusqlite::Params>(
+        &self,
+        row: &OutboxRow,
+        sql: &str,
+        params: P,
+    ) -> Result<Vec<WireRow>, DbError> {
+        let Some(data) = self.select_one(sql, params)? else {
+            return Ok(Vec::new());
+        };
+        Ok(vec![WireRow {
+            table: row.table_name.clone(),
+            id: row.row_id.clone(),
+            updated_at: row.created_at,
+            deleted: false,
+            data: Value::Object(data),
+        }])
     }
 
     /// The expense's note is its description, with the note after it.
@@ -165,7 +198,7 @@ impl<'a> WireRepo<'a> {
         sql: &str,
         fix: Option<fn(&mut Map<String, Value>)>,
     ) -> Result<Vec<WireRow>, DbError> {
-        let Some(mut data) = self.select_one(sql, &row.row_id)? else {
+        let Some(mut data) = self.select_one(sql, [&row.row_id])? else {
             return Ok(Vec::new());
         };
         for flag in ["is_active", "is_available", "is_rider"] {
@@ -185,10 +218,15 @@ impl<'a> WireRepo<'a> {
         }])
     }
 
-    fn select_one(&self, sql: &str, key: &str) -> Result<Option<Map<String, Value>>, DbError> {
+    /// One row of any query, column for column, or `None`.
+    fn select_one<P: rusqlite::Params>(
+        &self,
+        sql: &str,
+        params: P,
+    ) -> Result<Option<Map<String, Value>>, DbError> {
         let mut stmt = self.tx.prepare(sql)?;
         let names: Vec<String> = stmt.column_names().iter().map(|s| (*s).to_owned()).collect();
-        let mut rows = stmt.query([key])?;
+        let mut rows = stmt.query(params)?;
         let Some(r) = rows.next()? else {
             return Ok(None);
         };
@@ -211,7 +249,7 @@ impl<'a> WireRepo<'a> {
         // One customer id is one customer, whichever outlet: the id is the key.
         let Some(mut data) = self.select_one(
             "SELECT id, name, phone, address, credit_limit AS credit_limit_paise, is_active FROM customers WHERE id = ?1",
-            id,
+            [id],
         )?
         else {
             return Ok(Vec::new());
@@ -268,16 +306,7 @@ impl<'a> WireRepo<'a> {
             row.table_name,
             key_column(&row.table_name)
         );
-        let Some(data) = self.select_one(&sql, &row.row_id)? else {
-            return Ok(Vec::new());
-        };
-        Ok(vec![WireRow {
-            table: row.table_name.clone(),
-            id: row.row_id.clone(),
-            updated_at: row.created_at,
-            deleted: false,
-            data: Value::Object(data),
-        }])
+        self.whole_row(row, &sql, [&row.row_id])
     }
 
     /// A settled or voided order, as a cloud bill. Anything else does not travel.
@@ -769,7 +798,7 @@ impl<'a> WireRepo<'a> {
             "SELECT * FROM \"{table}\" WHERE \"{}\" = ?1",
             key_column(table)
         );
-        let Some(mut row) = self.select_one(&sql, id)? else {
+        let Some(mut row) = self.select_one(&sql, [id])? else {
             return Ok(None);
         };
         for secret in NEVER_IN_A_ROW {

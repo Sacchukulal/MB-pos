@@ -104,6 +104,13 @@ impl Db {
 
         migrate::apply_all(&mut writer)?;
 
+        // The orders are the proof of what was issued: a counter that fell behind them — a
+        // file that came down from the cloud, most of all — is caught up before anyone claims
+        // a number. An honest file is left exactly as it was.
+        let catching_up = writer.transaction()?;
+        crate::numbering::catch_up(&catching_up)?;
+        catching_up.commit()?;
+
         // Every row the writer changes names its table here, so a watcher can be told after
         // the commit without any caller having to remember to say so.
         let touched: Arc<Mutex<BTreeSet<String>>> = Arc::default();
