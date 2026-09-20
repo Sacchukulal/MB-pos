@@ -69,7 +69,9 @@ if (!flag("--dry-run") && out("git status --porcelain")) die("the working tree i
 const lastTag = out("git tag --sort=-creatordate").split(/\r?\n/)[0] || "";
 if (lastTag) {
   const when = out(`git log -1 --format=%cs ${lastTag}`);
-  const today = new Date().toISOString().slice(0, 10);
+  // local date, the same calendar git stamps the tag with (%cs); UTC would say yesterday until 05:30 IST
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   if (when === today && !flag("--force")) die(`${lastTag} was already released today (${when}). One release per day. Add --force only if the owner says so.`);
 }
 
