@@ -303,6 +303,8 @@ pub struct CartView {
     pub tables_on_counter: bool,
     /// A beep when a phone lands an order — the shop's switch under Settings › Billing.
     pub arrival_beep: bool,
+    /// The cards beat on arrival — the switch beside it.
+    pub arrival_beat: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -550,6 +552,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         kitchen_ticket_off: config.billing.kitchen_ticket_off,
         tables_on_counter: config.billing.tables_on_counter,
         arrival_beep: config.billing.arrival_beep,
+        arrival_beat: config.billing.arrival_beat,
     })
 }
 

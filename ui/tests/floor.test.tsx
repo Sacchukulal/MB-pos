@@ -96,6 +96,7 @@ function floor(over: Partial<FloorView> = {}): FloorView {
     canArrange: true,
     tablesOnCounter: true,
     arrivalBeep: false,
+    arrivalBeat: true,
     ...over,
   };
 }

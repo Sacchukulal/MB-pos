@@ -1875,6 +1875,16 @@ pub const CATALOG: &[Entry] = &[
         billing.arrival_beep
     ),
     flag!(
+        "billing.arrival_beat",
+        Billing,
+        Row,
+        "Cards beat when an order comes in",
+        "The table's card and its row under Processing orders beat a few times when a phone puts \
+         an order on it, or adds to one already there.",
+        ["beat", "flash", "blink", "wave", "highlight", "phone order"],
+        billing.arrival_beat
+    ),
+    flag!(
         "billing.kitchen_ticket_off",
         Billing,
         Row,
@@ -2242,6 +2252,7 @@ const TOPICS: &[(&str, &str)] = &[
     ("billing.kitchen_ticket_off", "Before it prints"),
     ("billing.kitchen_screen", "Before it prints"),
     ("billing.arrival_beep", "At the counter"),
+    ("billing.arrival_beat", "At the counter"),
     ("billing.idle_lock_minutes", "At the counter"),
     ("billing.service_charge", "Charges you add"),
     ("billing.packing_charge", "Charges you add"),

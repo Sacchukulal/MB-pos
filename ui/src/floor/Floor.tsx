@@ -44,7 +44,10 @@ type Filter = 'all' | 'busy' | 'attention';
 export function Floor() {
   const [floor, setFloor] = useState<FloorView | null>(null);
   /** The orders that landed, or grew, while this screen was open: their tiles beat for a moment. */
-  const landed = useArrivals(floor?.tiles ?? null, floor?.arrivalBeep ?? false);
+  const landed = useArrivals(floor?.tiles ?? null, {
+    beat: floor?.arrivalBeat ?? true,
+    sound: floor?.arrivalBeep ?? false,
+  });
   const [section, setSection] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [editing, setEditing] = useState<TableRowView | null>(null);
@@ -77,17 +80,15 @@ export function Floor() {
   }, [arrived, report]);
 
   const may = useMay();
-  /** Whether the billing screen shows the tables: a shop setting, switched from here. */
-  const showOnCounter = useCallback(
-    (on: boolean) => {
-      call('save_settings', {
-        edits: [{ key: 'billing.tables_on_counter', value: on ? '1' : '0' }],
-      })
+  /**
+   * A shop switch flipped from this screen — the same rows Settings › Billing holds, put where
+   * the tables are. One saver for all of them; each switch only says what it flipped.
+   */
+  const flip = useCallback(
+    (key: string, on: boolean, said: string) => {
+      call('save_settings', { edits: [{ key, value: on ? '1' : '0' }] })
         .then(() => {
-          toast.show(
-            'ok',
-            on ? 'The tables show on the billing screen.' : 'The billing screen shows orders only.',
-          );
+          toast.show('ok', said);
           load();
         })
         .catch(report);
@@ -219,12 +220,51 @@ export function Floor() {
           <>
           {/* Whether Billing shows these tables at all — a parcel counter turns it off. */}
           {may('settings.store') ? (
-            <Switch
-              checked={floor.tablesOnCounter}
-              onWord="Tables on the billing screen"
-              offWord="Tables off the billing screen"
-              onChange={(event) => showOnCounter(event.currentTarget.checked)}
-            />
+            <>
+              <Switch
+                checked={floor.tablesOnCounter}
+                onWord="Tables on the billing screen"
+                offWord="Tables off the billing screen"
+                onChange={(event) =>
+                  flip(
+                    'billing.tables_on_counter',
+                    event.currentTarget.checked,
+                    event.currentTarget.checked
+                      ? 'The tables show on the billing screen.'
+                      : 'The billing screen shows orders only.',
+                  )
+                }
+              />
+              {/* How a phone's order announces itself: the card beats, the counter beeps. */}
+              <Switch
+                checked={floor.arrivalBeat}
+                onWord="Cards beat on a new order"
+                offWord="Cards stay still on a new order"
+                onChange={(event) =>
+                  flip(
+                    'billing.arrival_beat',
+                    event.currentTarget.checked,
+                    event.currentTarget.checked
+                      ? 'A card beats when an order lands on it.'
+                      : 'Cards stay still when an order lands.',
+                  )
+                }
+              />
+              <Switch
+                checked={floor.arrivalBeep}
+                onWord="Beep on a new order"
+                offWord="No beep on a new order"
+                onChange={(event) =>
+                  flip(
+                    'billing.arrival_beep',
+                    event.currentTarget.checked,
+                    event.currentTarget.checked
+                      ? 'The counter beeps when an order lands.'
+                      : 'The counter stays quiet when an order lands.',
+                  )
+                }
+              />
+            </>
           ) : null}
           <div className="mb-tabs" role="tablist" aria-label="Which tables">
             {(['all', 'busy', 'attention'] as const).map((which) => (

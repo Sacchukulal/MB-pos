@@ -112,6 +112,7 @@ function cart(over: Partial<CartView> = {}): CartView {
     kitchenTicketOff: false,
     tablesOnCounter: true,
     arrivalBeep: false,
+    arrivalBeat: true,
     ...over,
   };
 }
@@ -209,6 +210,7 @@ describe('split bill', () => {
     canArrange: false,
     tablesOnCounter: true,
     arrivalBeep: false,
+    arrivalBeat: true,
   };
 
   it('moves the typed quantities to a new bill on the same table by default', async () => {

@@ -25,12 +25,13 @@ function shape(tile: TableView): string {
 /**
  * The ids of the orders that arrived or changed since the last read — for as long as the
  * theme beats, then gone. `null` is a floor not read yet: the first list to come from Rust is
- * what the screen opened on, and nothing on it is new. `sound` is the shop's switch: each
- * arrival beeps once, alongside the beat.
+ * what the screen opened on, and nothing on it is new. The two switches are the shop's, under
+ * Settings › Billing and on the Floor screen: whether the cards beat, and whether each
+ * arrival beeps once alongside.
  */
 export function useArrivals(
   floor: readonly TableView[] | null,
-  sound = false,
+  { beat = true, sound = false }: { beat?: boolean; sound?: boolean } = {},
 ): ReadonlySet<string> {
   const shown = useRef<Map<string, string> | null>(null);
   const [arrived, setArrived] = useState<ReadonlySet<string>>(NONE);
@@ -47,8 +48,9 @@ export function useArrivals(
 
     const fresh = [...now].filter(([id, it]) => before.get(id) !== it).map(([id]) => id);
     if (fresh.length === 0) return;
-    setArrived((was) => new Set([...was, ...fresh]));
     if (sound) beep();
+    if (!beat) return;
+    setArrived((was) => new Set([...was, ...fresh]));
     const clock = setTimeout(() => {
       clocks.current.delete(clock);
       setArrived((was) => {
@@ -58,7 +60,7 @@ export function useArrivals(
       });
     }, beatsFor());
     clocks.current.add(clock);
-    // `sound` is read when the floor changes, never a reason to look again.
+    // The switches are read when the floor changes, never a reason to look again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floor]);
 

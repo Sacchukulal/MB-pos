@@ -201,6 +201,8 @@ pub struct Billing {
     pub tables_on_counter: bool,
     /// A short sound when an order lands from a phone, or one already on the floor grows.
     pub arrival_beep: bool,
+    /// The card beats a few times when an order lands or grows.
+    pub arrival_beat: bool,
     /// 0 means never. Read by `session::IDLE_LOCK`'s caller.
     pub idle_lock_minutes: u32,
     /// Basis points, so 5% is 500 — and 0 means the shop does not charge it, which is why there
@@ -226,6 +228,7 @@ impl Default for Billing {
             kitchen_screen: false,
             tables_on_counter: true,
             arrival_beep: true,
+            arrival_beat: true,
             idle_lock_minutes: 10,
             // Every charge off by default.
             service_charge_bp: 0,

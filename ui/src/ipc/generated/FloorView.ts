@@ -28,4 +28,8 @@ tablesOnCounter: boolean,
 /**
  * A beep when a phone lands an order — the shop's switch under Settings › Billing.
  */
-arrivalBeep: boolean, };
+arrivalBeep: boolean, 
+/**
+ * The cards beat on arrival — the switch beside it.
+ */
+arrivalBeat: boolean, };

@@ -80,6 +80,8 @@ pub struct FloorView {
     pub tables_on_counter: bool,
     /// A beep when a phone lands an order — the shop's switch under Settings › Billing.
     pub arrival_beep: bool,
+    /// The cards beat on arrival — the switch beside it.
+    pub arrival_beat: bool,
 }
 
 /// What a change to several tables at once did — and what it left alone, named, with the
@@ -242,6 +244,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                     can_arrange,
                     tables_on_counter: config.billing.tables_on_counter,
                     arrival_beep: config.billing.arrival_beep,
+                    arrival_beat: config.billing.arrival_beat,
                     warn_minutes: crate::ipc::count(warn),
                     late_minutes: crate::ipc::count(late),
                 })
