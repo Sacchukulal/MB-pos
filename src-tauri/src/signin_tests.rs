@@ -1388,6 +1388,35 @@ fn voiding_one_item_tells_the_kitchen_once_and_never_re_sends_it() {
     assert_eq!(nothing.code, "kitchen.nothing");
 }
 
+/// A shop with no kitchen ticket still parks its orders: the same command saves the bill,
+/// records the lines as told, and prints nothing — the way an order from a phone already did.
+#[test]
+fn with_the_ticket_off_the_order_is_saved_and_nothing_prints() {
+    let scratch = Scratch::new("no_kot");
+    let app = a_trading_shop(&scratch);
+    let mut config = app.shop_config();
+    config.billing.kitchen_ticket_off = true;
+    app.publish_shop_config(config);
+
+    order_teas(&app, 2);
+    let (saved, slips) = slips_taken(&app, || crate::flows::print_kitchen_ticket_on(&app));
+    assert_eq!(saved.expect("saved"), "", "no paper, so no job to name");
+    assert!(slips.is_empty(), "the ticket is off and still printed: {slips:?}");
+
+    let open = crate::ipc::open_orders_on(&app).expect("the floor");
+    let parked = open.iter().find(|t| t.order_id.is_some()).expect("the order was not parked");
+    assert!(parked.kitchen_told, "the lines were not recorded as told");
+
+    // Saving again with nothing new says so in the shop's own words.
+    let nothing = crate::flows::print_kitchen_ticket_on(&app).expect_err("saved twice");
+    assert_eq!(nothing.code, "kitchen.nothing");
+    assert!(nothing.message.contains("already saved"), "{}", nothing.message);
+
+    // The reprint is paper, and paper is what the switch turns off.
+    let refused = crate::flows::reprint_kitchen_ticket_on(&app).expect_err("reprinted");
+    assert_eq!(refused.code, "kitchen.off");
+}
+
 /// Shared with `perf_tests`, which needs the same scratch shop.
 pub(crate) fn scratch(label: &str) -> Scratch {
     Scratch::new(label)

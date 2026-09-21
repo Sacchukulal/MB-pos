@@ -43,7 +43,7 @@ pub fn today(at: Timestamp) -> BusinessDay {
 }
 
 /// Who is doing this: the signed-in person, or the stand-in on a shop with no PIN.
-fn staff_now(app: &App) -> StaffId {
+pub(crate) fn staff_now(app: &App) -> StaffId {
     app.sessions().current().map_or_else(
         || StaffId::new(crate::state::DEFAULT_STAFF),
         |s| s.actor.staff_id,
@@ -298,7 +298,8 @@ pub fn print_kitchen_ticket_for(app: &App, order_id: &str) -> UiResult<String> {
     Ok(queued)
 }
 
-/// A shop that said it has no kitchen ticket does not print one.
+/// A shop that said it has no kitchen ticket does not print one. Only the PAPER is refused:
+/// telling the kitchen is what parks an order, and a shop without a ticket still parks.
 fn kitchen_ticket_allowed(app: &App) -> UiResult<()> {
     if app.shop_config().billing.kitchen_ticket_off {
         return Err(UiError::new(
@@ -310,11 +311,15 @@ fn kitchen_ticket_allowed(app: &App) -> UiResult<()> {
     Ok(())
 }
 
-/// Print what the kitchen has not seen — the delta, never the order.
+/// Tell the kitchen what it has not seen — the delta, never the order. The order goes on
+/// disk, the delta is recorded as told, the event and the kitchen screen get it, and the
+/// paper is queued — unless the shop has switched the ticket off, in which case everything
+/// but the paper happens, the same as an order from a phone (`orders::apply`). That is what
+/// makes this ONE command "Print KOT" for a kitchen and "Save bill" for a counter without one.
 pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
     let _one_at_a_time = app.begin_action();
     crate::guard::require(app, mb_auth::Permission::BillCreate)?;
-    kitchen_ticket_allowed(app)?;
+    let paper = kitchen_ticket_allowed(app).is_ok();
     let at = now();
 
     // The order goes on disk BEFORE the paper.
@@ -330,26 +335,36 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
     if delta.is_empty() {
         return Err(UiError::new(
             "kitchen.nothing",
-            "The kitchen already has everything on this bill.",
+            if paper {
+                "The kitchen already has everything on this bill."
+            } else {
+                "This bill is already saved as it is."
+            },
         )
         .quietly());
     }
 
-    let reason = core
-        .table()
-        .and_then(|t| table_name(app, t))
-        .map_or_else(|| "kitchen ticket".to_owned(), |t| format!("table {t}"));
     let order = AnyOrder::Open(open);
-    let id = queue_kitchen_lines(
-        app,
-        mb_print::template::TicketKind::New,
-        core.order_type(),
-        core.table(),
-        Some(&order),
-        ticket_lines(&core.cart, &delta),
-        false,
-        reason,
-    )?;
+    let id = if paper {
+        let reason = core
+            .table()
+            .and_then(|t| table_name(app, t))
+            .map_or_else(|| "kitchen ticket".to_owned(), |t| format!("table {t}"));
+        queue_kitchen_lines(
+            app,
+            mb_print::template::TicketKind::New,
+            core.order_type(),
+            core.table(),
+            Some(&order),
+            ticket_lines(&core.cart, &delta),
+            false,
+            reason,
+        )?
+    } else {
+        // No paper, so no job to name — the answer `print_kitchen_ticket_for` gives when there
+        // is nothing to print.
+        String::new()
+    };
 
     // Only once the paper is durably queued does anything remember it was told — the cart,
     // the order, the event and the kitchen screen, in ONE commit.
