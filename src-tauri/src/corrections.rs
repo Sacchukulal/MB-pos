@@ -249,7 +249,7 @@ pub fn bills_on(app: &App, filter: BillFilter) -> UiResult<BillsView> {
                 }
                 // Newest first: the bill somebody wants is nearly always the one that just
                 // printed.
-                rows.sort_by(|a, b| b.0.cmp(&a.0));
+                rows.sort_by_key(|row| std::cmp::Reverse(row.0));
                 let rows: Vec<BillRowView> = rows.into_iter().map(|(_, row)| row).collect();
                 cashiers.sort_by(|a, b| a.name.cmp(&b.name));
 
