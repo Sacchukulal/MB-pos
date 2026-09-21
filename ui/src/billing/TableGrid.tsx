@@ -27,6 +27,7 @@ export function TableGrid({
   onOpen,
   onPrintBill,
   onSplit,
+  arrived,
 }: {
   tables: readonly TableView[];
   filter: string;
@@ -35,6 +36,8 @@ export function TableGrid({
   onPrintBill: (table: TableView) => void;
   /** A second party beside a busy table — the + on its tile. */
   onSplit?: (table: TableView) => void;
+  /** The orders that landed while the screen was open — see `useArrivals`. */
+  arrived?: ReadonlySet<string>;
 }) {
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -89,11 +92,13 @@ export function TableGrid({
           <div className="mb-floor__grid">
             {group.map((table) => (
               <Tile
-                key={table.id}
+                // A party the cart has opened and not yet saved carries its table's id and a letter.
+                key={`${table.id}${table.seat ?? ''}`}
                 table={table}
                 onOpen={() => onOpen(table)}
                 onPrintBill={() => onPrintBill(table)}
                 onSplit={onSplit ? () => onSplit(table) : undefined}
+                arrived={table.orderId !== null && arrived?.has(table.orderId) === true}
               />
             ))}
           </div>
@@ -127,6 +132,7 @@ export function Tile({
   onTick,
   onEdit,
   onDelete,
+  arrived,
 }: {
   table: TableView;
   /** What pressing the tile does. */
@@ -146,6 +152,8 @@ export function Tile({
   onEdit?: () => void;
   /** The bin, on hover. */
   onDelete?: () => void;
+  /** The order landed while the screen was open: the card beats for a moment. */
+  arrived?: boolean;
 }) {
   const late = table.state === 'late';
   const waiting = table.state === 'waiting';
@@ -167,6 +175,7 @@ export function Tile({
     busy && table.byId ? `mb-tile--person-${personSlot(table.byId)}` : '',
     table.selected ? 'mb-chosen' : '',
     picked ? 'mb-ticked' : '',
+    arrived ? 'mb-arrived' : '',
   ]
     .filter(Boolean)
     .join(' ');

@@ -44,6 +44,7 @@ import { Processing, ProcessingHead, processingOrders } from './Processing';
 import { MergeBill } from './MergeBill';
 import { SplitBill } from './SplitBill';
 import { TableGrid } from './TableGrid';
+import { useArrivals } from './arrivals';
 import { Totals } from './Totals';
 import { Before } from '../preview/Before';
 import { keep, remember } from '../remember';
@@ -51,6 +52,8 @@ import { keep, remember } from '../remember';
 import './billing.css';
 
 const ORDER_TYPES = ['Dine in', 'Parcel', 'Self service', 'Delivery'] as const;
+
+const NO_TABLES: readonly TableView[] = [];
 
 /** Whether the processing panel is open — a look preference, kept on this computer. */
 const PROCESSING_KEY = 'mb.billing.processing';
@@ -62,7 +65,13 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   /** What this person may do — a button they may not press is not drawn. */
   const may = useMay();
   const [cart, setCart] = useState<CartView | null>(null);
-  const [tables, setTables] = useState<readonly TableView[]>([]);
+  /** A shop with no kitchen ticket: the ticket command parks the order and prints nothing. */
+  const kitchenOff = cart?.kitchenTicketOff ?? false;
+  /** The floor as Rust last gave it — `null` until the first read, so a first read is not an arrival. */
+  const [floor, setFloor] = useState<readonly TableView[] | null>(null);
+  const tables = floor ?? NO_TABLES;
+  /** The orders that landed while this screen was open: their cards beat for a moment. */
+  const arrived = useArrivals(floor);
   const [menu, setMenu] = useState<readonly MenuItemView[]>([]);
   // The grid is unfiltered: the search box is for the menu, and a table is reached by typing
   // its number and pressing Enter.
@@ -161,10 +170,10 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const refreshFloor = useCallback(async () => {
     if (!inApp()) return;
     try {
-      setTables(await call('open_orders'));
+      setFloor(await call('open_orders'));
     } catch {
       // A floor that will not load is visible as an empty floor.
-      setTables([]);
+      setFloor([]);
     }
   }, []);
 
@@ -215,8 +224,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   // The same list the grid draws, narrowed to what the kitchen has. A settled order leaves it
   // the moment the floor is re-read.
   const processing = useMemo(
-    () => processingOrders(tables, cart?.kitchenTicketOff ?? false),
-    [tables, cart?.kitchenTicketOff],
+    () => processingOrders(tables, kitchenOff),
+    [tables, kitchenOff],
   );
 
   const addItem = useCallback(
@@ -375,9 +384,11 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
     [report],
   );
 
+
   /**
    * The delta only — never the whole order. The ticket parks the order, which then waits under
-   * Processing orders; the counter is clear for the next customer at once.
+   * Processing orders; the counter is clear for the next customer at once. With the ticket
+   * switched off in Settings this is "Save bill": Rust does everything but the paper.
    */
   const printKitchen = useCallback(async () => {
     try {
@@ -387,19 +398,22 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       // than on the next tick fifteen seconds later.
       await refreshFloor();
       searchBox.current?.focus();
-      toast.show('ok', 'KOT sent.');
+      toast.show('ok', kitchenOff ? 'Bill saved.' : 'KOT sent.');
     } catch (cause) {
       // A dine-in cart with no table: ask for the number, in its own box.
       if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable('kitchen');
       else report(cause);
     }
-  }, [refreshFloor, report, toast]);
+  }, [kitchenOff, refreshFloor, report, toast]);
 
-  /** The + on a busy table: a second party beside it, with the next free letter. */
-  const splitTable = useCallback(
-    async (table: TableView) => {
+  /**
+   * A second party on a table: the + on a busy tile takes the next free letter; a tap on the
+   * party's own unsaved tile comes back to the letter it already has.
+   */
+  const joinTable = useCallback(
+    async (tableId: string, seat: string | null) => {
       try {
-        setCart(await call('join_table', { tableId: table.id, seat: null }));
+        setCart(await call('join_table', { tableId, seat }));
         await refreshFloor();
         searchBox.current?.focus();
       } catch (cause) {
@@ -558,6 +572,9 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
         case 'open-order':
           await openOrderById(command.orderId);
           return;
+        case 'join-table':
+          await joinTable(command.tableId, command.seat);
+          return;
         case 'set-order-type':
           await setOrderType(command.value);
           return;
@@ -577,7 +594,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           return;
       }
     },
-    [addItem, completeBill, newOrder, openOrderById, openTableById, printKitchen, setOrderType],
+    [addItem, completeBill, joinTable, newOrder, openOrderById, openTableById, printKitchen, setOrderType],
   );
 
   // Perform everything waiting, in the order it was asked for, then say so.
@@ -841,7 +858,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
               filter={filter}
               onOpen={openTable}
               onPrintBill={printTheBill}
-              onSplit={(table) => void splitTable(table)}
+              onSplit={(table) => void joinTable(table.id, null)}
+              arrived={arrived}
             />
           )}
 
@@ -862,6 +880,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             <Scroller inset className="mb-processing__body">
               <Processing
                 orders={processing}
+                arrived={arrived}
                 highlighted={keys.mode.kind === 'processing' ? keys.mode.index : -1}
                 onOpen={openTable}
               />
@@ -1107,16 +1126,15 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
         {/* Two buttons, and a fold. */}
         <div className="mb-actions">
-          {cart?.kitchenTicketOff ? null : (
+          {/* One command either way; only the paper, and so the word, differs. */}
           <Button
             size="lg"
             disabled={!cart || cart.isEmpty || acting}
             onClick={() => act(printKitchen)}
-            icon={<Icon name="printer" />}
+            icon={<Icon name={kitchenOff ? 'file' : 'printer'} />}
           >
-            Print KOT
+            {kitchenOff ? 'Save bill' : 'Print KOT'}
           </Button>
-          )}
           {/* Always live: an empty bill is refused with a sentence, never with a grey button. */}
           <Button
             variant="primary"
@@ -1152,7 +1170,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             Preview bill
           </Button>
           {/* Only once a ticket has gone: before that, "Print KOT" is the button. */}
-          {cart?.orderId && !cart.kitchenTicketOff ? (
+          {cart?.orderId && !kitchenOff ? (
             <Button size="sm" onClick={() => act(reprintKitchen)}>
               Reprint ticket
             </Button>

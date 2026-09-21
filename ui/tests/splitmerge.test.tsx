@@ -39,6 +39,7 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
     by: null,
     byId: null,
     orderId: null,
+    seat: null,
     token: null,
     billNumber: null,
     selected: false,

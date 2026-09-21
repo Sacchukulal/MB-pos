@@ -51,12 +51,15 @@ export function Processing({
   orders,
   highlighted = -1,
   onOpen,
+  arrived,
 }: {
   orders: readonly TableView[];
   /** The row the arrow keys are on, or none. */
   highlighted?: number;
   /** Put it in the cart — the same press as the tile. */
   onOpen: (order: TableView) => void;
+  /** The orders that landed while the screen was open — see `useArrivals`. */
+  arrived?: ReadonlySet<string>;
 }) {
   const list = useRef<HTMLUListElement>(null);
   // The arrows never leave the highlighted row out of sight.
@@ -86,6 +89,7 @@ export function Processing({
               'mb-processing__order',
               order.selected && 'mb-chosen',
               index === highlighted && 'mb-processing__order--highlighted',
+              order.orderId !== null && arrived?.has(order.orderId) === true && 'mb-arrived',
             )}
             aria-pressed={order.selected}
             aria-current={index === highlighted ? 'true' : undefined}

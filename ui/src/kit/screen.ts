@@ -17,3 +17,16 @@ export function useDevicePixelRatio(): number {
   }, [ratio]);
   return ratio;
 }
+
+/**
+ * How long something new is drawn attention to, in milliseconds — asked of the theme, never
+ * decided here. One beat times the number of beats: the bell's ring, and a card that just
+ * arrived. A counter with motion turned off has the beat set to zero there, so this comes
+ * back zero and nothing beats at all.
+ */
+export function beatsFor(): number {
+  const theme = getComputedStyle(document.documentElement);
+  const beat = Number.parseFloat(theme.getPropertyValue('--motion-beat'));
+  const beats = Number.parseFloat(theme.getPropertyValue('--beats'));
+  return Number.isFinite(beat) && Number.isFinite(beats) ? beat * beats : 0;
+}

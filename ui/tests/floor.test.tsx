@@ -47,6 +47,7 @@ function tile(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Table
     by: null,
     byId: null,
     orderId: null,
+    seat: null,
     token: null,
 
     billNumber: null,

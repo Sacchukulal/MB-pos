@@ -68,6 +68,8 @@ export type Command =
   | { do: 'add-item'; itemId: string; qty: string }
   | { do: 'open-table'; tableId: string }
   | { do: 'open-order'; orderId: string }
+  /** Back onto the party the cart opened with + and has not yet saved. */
+  | { do: 'join-table'; tableId: string; seat: string }
   | { do: 'print-kitchen' }
   | { do: 'complete-bill' }
   | { do: 'new-order' }
@@ -407,11 +409,15 @@ function openTile(state: State, table: TableView): [State, Command[]] {
   return [cleared(state), [openCommand(table)]];
 }
 
-/** A tile with a table opens the table; a parcel, a self-service order or a second party IS its order. */
+/**
+ * A tile with a table opens the table; a parcel, a self-service order or a second party IS its
+ * order; a lettered tile with no order is the party the cart just opened, and re-joins it.
+ */
 function openCommand(table: TableView): Command {
   if (table.orderId !== null && table.id === table.orderId) {
     return { do: 'open-order', orderId: table.orderId };
   }
+  if (table.seat !== null) return { do: 'join-table', tableId: table.id, seat: table.seat };
   return { do: 'open-table', tableId: table.id };
 }
 

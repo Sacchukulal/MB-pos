@@ -285,6 +285,27 @@
   background: var(--pick-tint);
 }
 
+/*
+ * ARRIVED: something new landed on this card while the screen was already open — a phone's
+ * order on a table's tile, a row joining the processing list. The ring beats a few times, the
+ * bell's own beat, and stops; a counter with motion turned off has the beat at zero and sees
+ * nothing. An outline, never a shadow: a tile's shadow carries its state's stripe.
+ */
+.mb-arrived.mb-arrived {
+  animation: mb-arrive var(--motion-beat) var(--ease) var(--beats);
+}
+
+@keyframes mb-arrive {
+  from {
+    outline: var(--pick-ring) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
+  }
+  to {
+    outline: var(--pick-ring) solid transparent;
+    outline-offset: calc(var(--focus-ring-width) * 3);
+  }
+}
+
 /* The keyboard on a chosen card: the ring stands OUTSIDE the line, so the two are both seen. */
 .mb-chosen.mb-chosen:focus-visible,
 .mb-chosen.mb-chosen:has(:focus-visible) {

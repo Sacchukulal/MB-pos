@@ -47,6 +47,7 @@ function table(label: string, busy = false): TableView {
     by: null,
     byId: null,
     orderId: busy ? `ord_${label}` : null,
+    seat: null,
     selected: false,
   };
 }
@@ -242,6 +243,12 @@ describe('a table name loads its order; anything else falls through', () => {
     const party = { ...table('6B', true), id: 'ord_6B', orderId: 'ord_6B' };
     const [, commands] = run(initial(), floor(table('6', true), party), type('6b'), press('Enter'));
     expect(commands).toEqual([{ do: 'open-order', orderId: 'ord_6B' }]);
+  });
+
+  it('the party just opened with + has no order yet, and a tap re-joins its seat', () => {
+    const unsaved = { ...table('6B'), id: 'tbl_6', seat: 'B', selected: true };
+    const [, commands] = run(initial(), floor(table('6', true), unsaved), type('6b'), press('Enter'));
+    expect(commands).toEqual([{ do: 'join-table', tableId: 'tbl_6', seat: 'B' }]);
   });
 
   it('a table number beats a menu item that happens to match it', () => {

@@ -1,10 +1,11 @@
-import { render, screen, cleanup, within, act, fireEvent } from '@testing-library/react';
+import { render, renderHook, screen, cleanup, within, act, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModes, paymentAnswer } from '../src/billing/Billing';
 import { Suggestions } from '../src/billing/Keys';
 import { Processing, ProcessingHead, processingOrders } from '../src/billing/Processing';
 import { TableGrid } from '../src/billing/TableGrid';
+import { useArrivals } from '../src/billing/arrivals';
 import { Totals } from '../src/billing/Totals';
 import type { BillView } from '../src/ipc/generated/BillView';
 import type { CartView } from '../src/ipc/generated/CartView';
@@ -33,12 +34,53 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
     by: null,
     byId: null,
     orderId: null,
+    seat: null,
     token: null,
     billNumber: null,
     selected: false,
     ...over,
   };
 }
+/**
+ * A new order is the difference between the list the screen was showing and the one it shows
+ * now — Rust only says the floor changed. The first read is what the screen opened on.
+ */
+describe('arrivals', () => {
+  it('beats for an order that landed while the screen was open, never for the first read', () => {
+    vi.useFakeTimers();
+    document.documentElement.style.setProperty('--motion-beat', '1000ms');
+    document.documentElement.style.setProperty('--beats', '3');
+    const busy = (label: string) => table({ id: `tbl_${label}`, label, state: 'occupied', orderId: `ord_${label}` });
+
+    const { result, rerender } = renderHook(({ floor }) => useArrivals(floor), {
+      initialProps: { floor: null as readonly TableView[] | null },
+    });
+    expect(result.current.size).toBe(0);
+
+    // The floor the screen opened on: nothing on it is new.
+    rerender({ floor: [busy('1'), busy('2')] });
+    expect(result.current.size).toBe(0);
+
+    // A phone puts an order on table 3.
+    rerender({ floor: [busy('1'), busy('2'), busy('3')] });
+    expect([...result.current]).toEqual(['ord_3']);
+
+    // A re-read of the same floor fifteen seconds on changes nothing, and does not reset the clock.
+    act(() => vi.advanceTimersByTime(2000));
+    rerender({ floor: [busy('1'), busy('2'), busy('3')] });
+    expect([...result.current]).toEqual(['ord_3']);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(result.current.size).toBe(0);
+
+    // The grid and the list draw the same fact.
+    render(
+      <TableGrid tables={[busy('3')]} filter="" onOpen={() => {}} onPrintBill={() => {}} arrived={new Set(['ord_3'])} />,
+    );
+    expect(document.querySelector('.mb-tile.mb-arrived')).toBeTruthy();
+    vi.useRealTimers();
+  });
+});
+
 
 describe('the table grid (scope 1.4)', () => {
   it('tells all four states apart WITHOUT colour', () => {
