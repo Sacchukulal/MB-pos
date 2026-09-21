@@ -124,7 +124,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   it('tells all FIVE states apart without colour', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     for (const state of ['free', 'occupied', 'waiting', 'late']) {
       expect(
@@ -137,7 +137,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   it('draws the section grid when no table has been placed', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     // The fallback is not a degraded mode: every table is still a tile.
     expect(container.querySelector('.mb-plan')).toBeNull();
@@ -152,7 +152,7 @@ describe('the floor (scope 14.1–14.3)', () => {
       }),
     );
     const { container } = show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     const plan = container.querySelector('.mb-plan');
     expect(plan).toBeTruthy();
@@ -165,7 +165,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   it('filters to the tables that need somebody', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     fireEvent.click(screen.getByText('Needs attention'));
     // Waiting and late, and neither the free table nor the one five minutes in.
@@ -180,7 +180,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   it('sends the order and the table the screen actually showed', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     // Table 2 is busy; tick it and move its order to table 1, which the view says is free.
     fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 2' }));
@@ -198,7 +198,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   it('offers no order actions for a free table', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
     // It ticks, like any other table — free tables are the ones you delete.
@@ -216,7 +216,7 @@ describe('arranging the room (2026-08-22)', () => {
   it('folds the panel to a button, and unfolds it when pressed', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     expect(screen.queryByRole('complementary', { name: 'Rooms and tables' })).toBeNull();
 
@@ -236,7 +236,7 @@ describe('arranging the room (2026-08-22)', () => {
     // is that same question asked once.
     call.mockResolvedValue(floor({ canArrange: false }));
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     expect(screen.queryByRole('complementary', { name: 'Rooms and tables' })).toBeNull();
     // And a press does what it always did on a screen you cannot arrange.
@@ -247,7 +247,7 @@ describe('arranging the room (2026-08-22)', () => {
   it('ticks one at a time, and all of them at once', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
     expect(await screen.findByText('1 ticked')).toBeTruthy();
@@ -268,7 +268,7 @@ describe('arranging the room (2026-08-22)', () => {
   it('deletes everything ticked in ONE command', async () => {
     answers();
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 2' }));
@@ -300,7 +300,7 @@ describe('arranging the room (2026-08-22)', () => {
       change({ said: '1 table put back.' }),
     );
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     unfold();
     const off = screen.getByRole('heading', { name: 'Off the floor' });
@@ -319,7 +319,7 @@ describe('arranging the room (2026-08-22)', () => {
   it('says nothing about being off the floor when nothing is', async () => {
     answers();
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
     unfold();
     expect(screen.queryByRole('heading', { name: 'Off the floor' })).toBeNull();
   });
@@ -338,7 +338,7 @@ describe('arranging the room (2026-08-22)', () => {
       }),
     );
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
     unfold();
 
     // The first room cannot go up and the last cannot go down.
@@ -346,7 +346,7 @@ describe('arranging the room (2026-08-22)', () => {
     expect(screen.getByRole('button', { name: 'Move AC room down' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Move AC room up' }));
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
     const saved = call.mock.calls
       .filter((c) => c[0] === 'save_floor_section')
       .map((c) => [(c[1] as { name: string }).name, (c[1] as { sortOrder: number }).sortOrder]);
@@ -368,7 +368,7 @@ describe('arranging the room (2026-08-22)', () => {
       }),
     );
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 2' }));
@@ -391,7 +391,7 @@ describe('arranging the room (2026-08-22)', () => {
       }),
     );
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Tick table 1' }));
     const bar = await screen.findByRole('group', {
@@ -407,7 +407,7 @@ describe('arranging the room (2026-08-22)', () => {
   it('adds a run of tables from the panel', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     unfold();
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '5' } });
@@ -422,7 +422,7 @@ describe('arranging the room (2026-08-22)', () => {
   it('keeps the timer explanation in a tip rather than on the screen', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     unfold();
     expect(screen.getByText('Timers')).toBeTruthy();
@@ -443,7 +443,7 @@ describe('empty is not a lecture (P30.5)', () => {
   it('hides the room picker until there is more than one room', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
     expect(screen.queryByRole('group', { name: 'Which room' })).toBeNull();
 
     cleanup();
@@ -456,7 +456,7 @@ describe('empty is not a lecture (P30.5)', () => {
       }),
     );
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
     expect(screen.getByRole('group', { name: 'Which room' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'AC room' })).toBeTruthy();
   });
@@ -484,7 +484,7 @@ describe('empty is not a lecture (P30.5)', () => {
       }),
     );
     const { container } = show();
-    await screen.findAllByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     // A heading each, in the order the shop put its rooms in.
     expect(
@@ -525,7 +525,7 @@ describe('empty is not a lecture (P30.5)', () => {
   it('offers the same print-the-bill mark the billing screen has', async () => {
     call.mockResolvedValue(floor());
     show();
-    await screen.findByText('4 seats');
+    await screen.findAllByTitle('4 seats');
 
     // Table 2 is busy, so it can be printed.
     const print = screen.getByRole('button', { name: 'Print the bill for table 2' });

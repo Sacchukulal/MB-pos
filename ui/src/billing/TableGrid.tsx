@@ -108,7 +108,7 @@ export function TableGrid({
  * phone's Orders screen all draw the same card:
  *
  *   number ……………………… + print
- *   amount ……………………… token              (a free table: "4 seats")
+ *   amount ……………………… token              (a free table: the seats symbol)
  *   who opened it
  *   timer · food · chips … seats
  *
@@ -192,8 +192,13 @@ export function Tile({
             ) : null}
           </span>
         ) : (
-          <span className="mb-tile__seatsline">
-            {table.seats > 0 ? `${table.seats} seats` : ''}
+          <span className="mb-tile__seatsline" title={`${table.seats} seats`}>
+            {table.seats > 0 ? (
+              <>
+                <Icon name="users" size="sm" />
+                {table.seats}
+              </>
+            ) : null}
           </span>
         )}
 
@@ -206,7 +211,7 @@ export function Tile({
 
         {/*
           The last row: the timers and the chips, and the seats at the far end. Only a busy
-          table has it — a free one already said "4 seats" above, and a fact said twice on one
+          table has it — a free one already shows its seats above, and a fact said twice on one
           card reads as two facts.
         */}
         {busy ? (
@@ -291,7 +296,7 @@ export function Tile({
           onClick={onPrintBill}
           title={`Print the bill for table ${table.label}`}
           aria-label={`Print the bill for table ${table.label}`}
-          icon={<Icon name="printer" size="sm" />}
+          icon={<Icon name="printer" size="lg" />}
         />
       ) : null}
 

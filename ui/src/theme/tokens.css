@@ -301,11 +301,13 @@
   /*
    * THE tile size. One box, free or busy, on the billing grid, the floor and the plan: a tile
    * never grows for its content and a row never grows for a tile. What does not fit ellipsises.
+   * The box follows the text-size setting the same as the rows inside it: at Large the four
+   * rows outgrew a box fixed in rem, and the bottom row (timer, seats) was cut off.
    */
-  --tile-width: 9.5rem;
-  --tile-height: 7rem;
+  --tile-width: calc(9.5rem * var(--type-scale));
+  --tile-height: calc(7rem * var(--type-scale));
   /* Print, edit, delete — the small buttons that sit on a tile. */
-  --tile-button: 1.625rem;
+  --tile-button: 2.125rem;
   /* The state stripe down a tile's left edge. */
   --tile-stripe: 3px;
   --suggestions-height: 22rem;

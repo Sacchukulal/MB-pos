@@ -341,7 +341,13 @@
 }
 
 
-/* The corner: a kit button placed top right. */
+/* The corner: a kit button placed top right, at the tile's own button size (over the kit's sm). */
+.mb-tile .mb-tile__print,
+.mb-tile .mb-tile__split {
+  width: var(--tile-button);
+  height: var(--tile-button);
+}
+
 .mb-tile__print {
   position: absolute;
   top: var(--space-1);
@@ -531,8 +537,11 @@
   font-weight: var(--weight-medium);
 }
 
-/* "4 seats" on a free table, where the money would be. */
+/* The seats on a free table, where the money would be: the same symbol as the busy row. */
 .mb-tile__seatsline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
@@ -1046,7 +1055,10 @@ input.mb-cartline__qty {
 .mb-totals__row--grand {
   /* And it never gives way. */
   flex: 0 0 auto;
-  padding-top: var(--space-1);
+  /* A rule between the breakdown and the total: the sum is drawn under a line, as on paper. */
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--border-strong);
   font-size: var(--text-lg);
   font-weight: var(--weight-bold);
   line-height: var(--line-tight);
