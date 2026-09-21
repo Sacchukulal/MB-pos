@@ -977,6 +977,50 @@ fn only_the_party_in_the_cart_is_marked_never_its_table_as_well() {
     assert_eq!(marked, ["2"]);
 }
 
+/// The room reads "2, 2B, 2C, 3": the table's own tile, then its parties in letter order —
+/// never a letter before its number.
+#[test]
+fn a_table_comes_before_its_own_parties() {
+    let scratch = Scratch::new("party_order");
+    let app = a_shop_with_a_room(&scratch);
+    seat(&app, "ord_a", "tbl_2", &[("itm_dosa", 12_000, 1)], None);
+    a_second_party(&app, "tbl_2");
+    // The next free letter is C.
+    a_second_party(&app, "tbl_2");
+
+    let labels: Vec<String> = crate::ipc::open_orders_on(&app)
+        .expect("the floor")
+        .iter()
+        .map(|t| t.label.clone())
+        .collect();
+    let two = labels.iter().position(|l| l == "2").expect("table 2");
+    assert_eq!(&labels[two..two + 4], ["2", "2B", "2C", "3"]);
+}
+
+/// Pressing + puts the cart on 2B before anything is typed or sent. The grid shows that party
+/// at once, drawn from where the cart is, and drops it again when the cart moves on.
+#[test]
+fn the_party_just_opened_has_a_tile_before_it_is_saved() {
+    let scratch = Scratch::new("party_unsaved");
+    let app = a_shop_with_a_room(&scratch);
+    seat(&app, "ord_a", "tbl_2", &[("itm_dosa", 12_000, 1)], None);
+
+    crate::ipc::join_table_on(&app, "tbl_2".to_owned(), None).expect("2B in the cart");
+    let tiles = crate::ipc::open_orders_on(&app).expect("the floor");
+    let party = tiles.iter().find(|t| t.label == "2B").expect("a tile for 2B");
+    assert_eq!(party.state, crate::billing::TableState::Free);
+    assert!(party.selected, "the cart is on it");
+    assert!(party.order_id.is_none(), "nothing has been saved");
+    assert_eq!(party.seat.as_deref(), Some("B"));
+    assert_eq!(party.id, "tbl_2", "pressing it re-joins the table");
+    assert_eq!(marked_labels(&tiles), ["2B"], "the table's own tile stays unmarked");
+
+    // The cart leaves: so does the tile.
+    crate::ipc::cart_clear_on(&app, true).expect("new order");
+    let tiles = crate::ipc::open_orders_on(&app).expect("the floor");
+    assert!(tiles.iter().all(|t| t.label != "2B"), "2B outlived the cart");
+}
+
 /// When the first party has paid, the second keeps its letter and the table is free again.
 #[test]
 fn a_second_party_keeps_its_letter_after_the_first_has_paid() {

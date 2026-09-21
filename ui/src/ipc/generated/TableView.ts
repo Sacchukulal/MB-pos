@@ -48,6 +48,12 @@ settleAsked: boolean,
  */
 by: string | null, byId: string | null, orderId: string | null, 
 /**
+ * The letter, when this tile is a second party on its table ("B" of "4B"). With no
+ * `order_id` beside it, it is the party the cart has just opened and not yet saved —
+ * pressing it re-joins the same seat.
+ */
+seat: string | null, 
+/**
  * The token this order took, formatted as it prints — the number on the tile.
  */
 token: string | null, 

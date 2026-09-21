@@ -419,6 +419,10 @@ pub struct TableView {
     pub by: Option<String>,
     pub by_id: Option<String>,
     pub order_id: Option<String>,
+    /// The letter, when this tile is a second party on its table ("B" of "4B"). With no
+    /// `order_id` beside it, it is the party the cart has just opened and not yet saved —
+    /// pressing it re-joins the same seat.
+    pub seat: Option<String>,
     /// The token this order took, formatted as it prints — the number on the tile.
     pub token: Option<String>,
     /// The bill number, once the bill is paid.
@@ -704,12 +708,39 @@ pub fn floor_view(
             .collect();
         here.sort_by_key(|o| o.core().seat().map(|s| s.as_str().to_owned()));
         let order = here.iter().find(|o| o.core().seat().is_none()).copied();
+        let cart_here = loaded_table == Some(table.id.as_str());
 
         // Decided here, where both halves are in scope, and nowhere else. A cart on 2B is on
         // table 2, but it is not on table 2's own tile.
-        let selected = (loaded_table == Some(table.id.as_str()) && loaded_seat.is_none())
+        let selected = (cart_here && loaded_seat.is_none())
             || order.is_some_and(|o| loaded_order == Some(o.core().id.as_str()));
 
+        // The table's own tile first — "4" before "4B", the way the room reads.
+        out.push(match order {
+            Some(order) => tile_for(
+                order,
+                Seat {
+                    label: table.label.clone(),
+                    section: section.clone(),
+                    seats: table.seats,
+                    selected,
+                    now,
+                    warn_after,
+                    late_after,
+                    config,
+                },
+            ),
+            None => free_tile(
+                table.id.as_str(),
+                table.label.clone(),
+                &section,
+                table.seats,
+                selected,
+                None,
+            ),
+        });
+
+        // Then its parties, in letter order.
         for party in here.iter().filter(|o| o.core().seat().is_some()) {
             let seat = party.core().seat().map_or("", |s| s.as_str());
             out.push(tile_for(
@@ -728,42 +759,25 @@ pub fn floor_view(
             ));
         }
 
-        out.push(match order {
-            Some(order) => tile_for(
-                order,
-                Seat {
-                    label: table.label.clone(),
-                    section,
-                    seats: table.seats,
-                    selected,
-                    now,
-                    warn_after,
-                    late_after,
-                    config,
-                },
-            ),
-            None => TableView {
-                id: table.id.as_str().to_owned(),
-                label: table.label.clone(),
-                section: section.name,
-                section_order: section.order,
-                seats: crate::ipc::count(table.seats),
-                // A free table is free even while it is being looked at.
-                state: TableState::Free,
-                selected,
-                total: None,
-                minutes: None,
-                kitchen_told: false,
-                kitchen_minutes: None,
-                bill_asked: false,
-                settle_asked: false,
-                by: None,
-                by_id: None,
-                order_id: None,
-                token: None,
-                bill_number: None,
-            },
-        });
+        // The party the cart has just opened here and not yet saved: "+" was pressed and no
+        // ticket has gone. There is no order to draw it from, so it is drawn from where the cart
+        // is — the same way a pressed free table is drawn from the table alone — and it leaves
+        // the grid the moment the cart does.
+        if cart_here
+            && let Some(letter) = loaded_seat
+            && !here
+                .iter()
+                .any(|o| o.core().seat().is_some_and(|s| s.as_str() == letter))
+        {
+            out.push(free_tile(
+                table.id.as_str(),
+                format!("{}{letter}", table.label),
+                &section,
+                0,
+                true,
+                Some(letter.to_owned()),
+            ));
+        }
     }
 
     // The "No table" group — parcel and self-service orders, at the end.
@@ -790,6 +804,39 @@ pub fn floor_view(
     }
 
     out
+}
+
+/// A tile with no order on it: a free table, or the party the cart has opened and not yet
+/// saved. Free even while it is being looked at — `selected` is the ring, not a state.
+fn free_tile(
+    table_id: &str,
+    label: String,
+    section: &InRoom,
+    seats: i64,
+    selected: bool,
+    seat: Option<String>,
+) -> TableView {
+    TableView {
+        id: table_id.to_owned(),
+        label,
+        section: section.name.clone(),
+        section_order: section.order,
+        seats: crate::ipc::count(seats),
+        state: TableState::Free,
+        selected,
+        total: None,
+        minutes: None,
+        kitchen_told: false,
+        kitchen_minutes: None,
+        bill_asked: false,
+        settle_asked: false,
+        by: None,
+        by_id: None,
+        order_id: None,
+        seat,
+        token: None,
+        bill_number: None,
+    }
 }
 
 /// Where a tile sits and how long a table may sit there — the four things that describe the
@@ -847,6 +894,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         by: None,
         by_id: Some(core.created_by.as_str().to_owned()),
         order_id: Some(id.clone()),
+        seat: core.seat().map(|s| s.as_str().to_owned()),
         token: order.token().map(|claimed| claimed.formatted.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
         // A table's tile is the table; a second party's tile, and a tile with no table, is the
