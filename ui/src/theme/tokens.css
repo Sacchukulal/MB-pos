@@ -301,13 +301,13 @@
   /*
    * THE tile size. One box, free or busy, on the billing grid, the floor and the plan: a tile
    * never grows for its content and a row never grows for a tile. What does not fit ellipsises.
-   * The box follows the text-size setting the same as the rows inside it: at Large the four
-   * rows outgrew a box fixed in rem, and the bottom row (timer, seats) was cut off.
+   * The box does NOT follow the text-size setting (owner, 2026-09-21: four cards to a row);
+   * the rows inside sit tight instead, so all four fit at Extra large.
    */
-  --tile-width: calc(9.5rem * var(--type-scale));
-  --tile-height: calc(7rem * var(--type-scale));
+  --tile-width: 9.5rem;
+  --tile-height: 7rem;
   /* Print, edit, delete — the small buttons that sit on a tile. */
-  --tile-button: 2.125rem;
+  --tile-button: 2rem;
   /* The state stripe down a tile's left edge. */
   --tile-stripe: 3px;
   --suggestions-height: 22rem;
@@ -370,9 +370,15 @@
   --fact-column: calc(14rem * var(--type-scale));
   --account-label: 8rem;
   --account-side: 22rem;
+  /* The column beside the phones list: the counter's facts and the app's QR. */
+  --phones-side: 22rem;
+  /* The label column of those facts. */
+  --phones-label: 5.5rem;
 
   /* One QR module in the Add phone dialog: big enough to scan from across the counter. */
   --qr-dot: 6px;
+  /* One module of the downloads QR on the Phones page: scanned from a hand's length away. */
+  --qr-dot-sm: 4px;
   /* The two values in this file that a theme must NOT change. */
   --print-ink: #000000;
   --print-paper: #ffffff;
