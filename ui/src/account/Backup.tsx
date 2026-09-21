@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  Badge,
   Button,
   ConfirmDialog,
   Icon,
@@ -15,7 +14,6 @@ import {
   Spinner,
   Table,
   useToast,
-  type BadgeTone,
 } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { BackupRowView } from '../ipc/generated/BackupRowView';
@@ -23,7 +21,8 @@ import type { BackupView } from '../ipc/generated/BackupView';
 import type { CopyView } from '../ipc/generated/CopyView';
 import { FolderPath, Line, Lines } from './Lines';
 
-const TONES: Record<string, BadgeTone> = {
+/** Rust's tone words are the notice's own. */
+const TONES: Record<string, 'ok' | 'warn' | 'danger'> = {
   ok: 'ok',
   warn: 'warn',
   danger: 'danger',
@@ -108,7 +107,7 @@ export function Backup() {
 
   if (!view) {
     return (
-      <Panel title="Backup">
+      <Panel title="Backup" className="mb-account__backup">
         <Spinner label="Looking for backups" />
       </Panel>
     );
@@ -118,266 +117,290 @@ export function Backup() {
     run(() => call('set_backup_schedule', { schedule, dailyAt: at }));
 
   const shown = all ? view.backups : view.backups.slice(0, FEW);
+  const tone = TONES[view.tone] ?? 'info';
 
   return (
-    <Panel
-      title="Backup"
-      actions={
-        <>
-          <Button
-            variant="secondary"
-            disabled={working}
-            onClick={() =>
-              pick(
-                '',
-                (picked) => call('save_backup_to', { folder: picked }),
-                'Saved. A fresh backup is in that folder.',
-              )
-            }
-          >
-            <Icon name="folder" size="sm" />
-            Save a copy…
-          </Button>
-          <Button
-            variant="primary"
-            disabled={working}
-            onClick={() => run(() => call('back_up_now'), (v) => `Backed up. ${v.last}.`)}
-          >
-            Back up now
-          </Button>
-        </>
-      }
-    >
-      {view.restoreWaiting ? (
-        <Notice
-          tone="warn"
-          action={
+    <>
+      <Panel
+        title="Backup"
+        className="mb-account__backup"
+        actions={
+          <>
             <Button
               variant="secondary"
-              disabled={working}
-              onClick={() => run(() => call('cancel_restore'), 'The restore is cancelled.')}
-            >
-              Cancel restore
-            </Button>
-          }
-        >
-          A restore is waiting. Close Magic Bill and open it again to finish it.
-        </Notice>
-      ) : null}
-
-      <div className="mb-account__status" role="status">
-        <Badge tone={TONES[view.tone] ?? 'neutral'}>{STATE_WORDS[view.tone] ?? view.tone}</Badge>
-        <span>{view.backups.length === 0 ? view.last : `Last backup ${view.last}`}</span>
-        <span className="mb-muted">{view.scheduleSays}</span>
-      </div>
-
-      <Lines>
-        <Line label="Shop folder">
-          <FolderPath path={view.shopFolder} />
-          <Button
-            size="sm"
-            disabled={working}
-            onClick={() =>
-              pick(view.shopFolder, (picked) =>
-                call('use_shop_folder', { folder: picked }).then(() => {
-                  // Another shop is open now: every screen starts again from it.
-                  window.location.reload();
-                  return null;
-                }),
-              )
-            }
-          >
-            Change
-          </Button>
-        </Line>
-
-        <Line label="Backups go to">
-          <FolderPath path={view.folder} />
-          <Button
-            size="sm"
-            disabled={working}
-            onClick={() =>
-              pick(
-                view.folder,
-                (picked) => call('set_backup_folder', { folder: picked }),
-                'Backups go there from now on.',
-              )
-            }
-          >
-            Change
-          </Button>
-          {!view.folderIsDefault ? (
-            <Button
               size="sm"
-              variant="quiet"
               disabled={working}
-              onClick={() => run(() => call('set_backup_folder', { folder: null }))}
+              onClick={() =>
+                pick(
+                  '',
+                  (picked) => call('save_backup_to', { folder: picked }),
+                  'Saved. A fresh backup is in that folder.',
+                )
+              }
             >
-              Back to the shop folder
+              <Icon name="folder" size="sm" />
+              Save a copy…
             </Button>
-          ) : null}
-        </Line>
-
-        <Line label="Schedule">
-          <Select
-            aria-label="Schedule"
-            options={SCHEDULES}
-            value={view.schedule}
-            disabled={working}
-            onChange={(event) => saveSchedule(event.target.value, view.dailyAt)}
-          />
-          {view.schedule === 'daily' ? (
-            <Input
-              type="time"
-              aria-label="Every day at"
-              value={dailyAt ?? view.dailyAt}
+            <Button
+              variant="primary"
+              size="sm"
               disabled={working}
-              onChange={(event) => setDailyAt(event.currentTarget.value)}
-              onBlur={() => {
-                if (dailyAt !== null && dailyAt !== '' && dailyAt !== view.dailyAt) {
-                  saveSchedule(view.schedule, dailyAt);
-                }
-                setDailyAt(null);
-              }}
-            />
-          ) : null}
-        </Line>
+              onClick={() => run(() => call('back_up_now'), (v) => `Backed up. ${v.last}.`)}
+            >
+              Back up now
+            </Button>
+          </>
+        }
+      >
+        {view.restoreWaiting ? (
+          <Notice
+            tone="warn"
+            action={
+              <Button
+                variant="secondary"
+                disabled={working}
+                onClick={() => run(() => call('cancel_restore'), 'The restore is cancelled.')}
+              >
+                Cancel restore
+              </Button>
+            }
+          >
+            A restore is waiting. Close Magic Bill and open it again to finish it.
+          </Notice>
+        ) : null}
 
-        <Line label="Copies to">
-          <ul className="mb-account__copies" aria-label="Folders that get a copy">
-            {view.copies.length === 0 ? (
-              <li className="mb-muted">None yet</li>
-            ) : (
-              view.copies.map((copy) => (
-                <li key={copy.path} className="mb-account__copy">
-                  <span className="mb-account__copykind">
-                    <Icon name="folder" size="sm" />
-                    {copyName(copy)}
-                  </span>
-                  <FolderPath path={copy.path} />
-                  <span
-                    className={copy.reachable ? 'mb-account__copywhen' : 'mb-account__bad'}
+        <Notice tone={tone}>
+          <span className="mb-account__state">
+            <strong>{STATE_WORDS[view.tone] ?? view.tone}</strong>
+            <span>{view.backups.length === 0 ? view.last : `Last backup ${view.last}`}</span>
+            <span className="mb-muted">{view.scheduleSays}</span>
+          </span>
+        </Notice>
+
+        <Lines>
+          <Line
+            label="Shop folder"
+            action={
+              <Button
+                size="sm"
+                disabled={working}
+                onClick={() =>
+                  pick(view.shopFolder, (picked) =>
+                    call('use_shop_folder', { folder: picked }).then(() => {
+                      // Another shop is open now: every screen starts again from it.
+                      window.location.reload();
+                      return null;
+                    }),
+                  )
+                }
+              >
+                Change
+              </Button>
+            }
+          >
+            <FolderPath path={view.shopFolder} />
+          </Line>
+
+          <Line
+            label="Backups go to"
+            action={
+              <>
+                {!view.folderIsDefault ? (
+                  <Button
+                    size="sm"
+                    variant="quiet"
+                    disabled={working}
+                    onClick={() => run(() => call('set_backup_folder', { folder: null }))}
                   >
-                    {copyWhen(copy)}
-                  </span>
+                    Back to the shop folder
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  disabled={working}
+                  onClick={() =>
+                    pick(
+                      view.folder,
+                      (picked) => call('set_backup_folder', { folder: picked }),
+                      'Backups go there from now on.',
+                    )
+                  }
+                >
+                  Change
+                </Button>
+              </>
+            }
+          >
+            <FolderPath path={view.folder} />
+          </Line>
+
+          <Line label="Schedule">
+            <Select
+              aria-label="Schedule"
+              options={SCHEDULES}
+              value={view.schedule}
+              disabled={working}
+              onChange={(event) => saveSchedule(event.target.value, view.dailyAt)}
+            />
+            {view.schedule === 'daily' ? (
+              <Input
+                type="time"
+                aria-label="Every day at"
+                value={dailyAt ?? view.dailyAt}
+                disabled={working}
+                onChange={(event) => setDailyAt(event.currentTarget.value)}
+                onBlur={() => {
+                  if (dailyAt !== null && dailyAt !== '' && dailyAt !== view.dailyAt) {
+                    saveSchedule(view.schedule, dailyAt);
+                  }
+                  setDailyAt(null);
+                }}
+              />
+            ) : null}
+          </Line>
+
+          <Line label="Copies to">
+            <ul className="mb-account__copies" aria-label="Folders that get a copy">
+              {view.copies.length === 0 ? (
+                <li className="mb-muted">None yet</li>
+              ) : (
+                view.copies.map((copy) => (
+                  <li key={copy.path} className="mb-account__copy">
+                    <span className="mb-account__copykind">
+                      <Icon name="folder" size="sm" />
+                      {copyName(copy)}
+                    </span>
+                    <FolderPath path={copy.path} />
+                    <span
+                      className={copy.reachable ? 'mb-account__copywhen' : 'mb-account__bad'}
+                    >
+                      {copyWhen(copy)}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="quiet"
+                      disabled={working}
+                      onClick={() =>
+                        run(() => call('remove_backup_copy', { folder: copy.path }))
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))
+              )}
+              <li>
+                <Row gap="inline">
+                  {view.suggested.map((place) => (
+                    <Button
+                      key={place.path}
+                      size="sm"
+                      disabled={working}
+                      title={place.path}
+                      onClick={() =>
+                        run(
+                          () => call('add_backup_copy', { folder: place.path }),
+                          `Every backup is copied to ${copyName(place)} from now on.`,
+                        )
+                      }
+                    >
+                      <Icon name="plus" size="sm" />
+                      {copyName(place)}
+                    </Button>
+                  ))}
                   <Button
                     size="sm"
                     variant="quiet"
                     disabled={working}
                     onClick={() =>
-                      run(() => call('remove_backup_copy', { folder: copy.path }))
-                    }
-                  >
-                    Remove
-                  </Button>
-                </li>
-              ))
-            )}
-            <li>
-              <Row gap="inline">
-                {view.suggested.map((place) => (
-                  <Button
-                    key={place.path}
-                    size="sm"
-                    disabled={working}
-                    title={place.path}
-                    onClick={() =>
-                      run(
-                        () => call('add_backup_copy', { folder: place.path }),
-                        `Every backup is copied to ${copyName(place)} from now on.`,
+                      pick(
+                        '',
+                        (picked) => call('add_backup_copy', { folder: picked }),
+                        'Every backup is copied there from now on.',
                       )
                     }
                   >
                     <Icon name="plus" size="sm" />
-                    {copyName(place)}
+                    Another folder…
                   </Button>
-                ))}
-                <Button
-                  size="sm"
-                  variant="quiet"
-                  disabled={working}
-                  onClick={() =>
-                    pick(
-                      '',
-                      (picked) => call('add_backup_copy', { folder: picked }),
-                      'Every backup is copied there from now on.',
-                    )
+                </Row>
+              </li>
+            </ul>
+          </Line>
+        </Lines>
+      </Panel>
+
+      <Panel
+        title="Backups taken"
+        className="mb-account__history"
+        flush
+        actions={
+          view.backups.length > FEW ? (
+            <Button size="sm" variant="quiet" onClick={() => setAll((was) => !was)}>
+              {all ? 'Show fewer' : `Show all ${view.backups.length}`}
+            </Button>
+          ) : undefined
+        }
+      >
+        <Table
+          rows={shown}
+          rowKey={(row) => row.path}
+          empty="No backups yet."
+          columns={[
+            { key: 'taken', header: 'Taken', nowrap: true, render: (row) => row.takenAt },
+            { key: 'size', header: 'Size', numeric: true, render: (row) => row.size },
+            {
+              key: 'checked',
+              header: 'Checked',
+              render: (row) => (
+                <span
+                  className={
+                    row.checkedOk
+                      ? 'mb-account__good'
+                      : row.checked === 'Failed'
+                        ? 'mb-account__bad'
+                        : 'mb-account__unchecked'
                   }
                 >
-                  <Icon name="plus" size="sm" />
-                  Another folder…
-                </Button>
-              </Row>
-            </li>
-          </ul>
-        </Line>
-      </Lines>
-
-      <Table
-        rows={shown}
-        rowKey={(row) => row.path}
-        empty="No backups yet."
-        columns={[
-          { key: 'taken', header: 'Taken', nowrap: true, render: (row) => row.takenAt },
-          { key: 'size', header: 'Size', numeric: true, render: (row) => row.size },
-          {
-            key: 'checked',
-            header: 'Checked',
-            render: (row) => (
-              <span
-                className={
-                  row.checkedOk
-                    ? 'mb-account__good'
-                    : row.checked === 'Failed'
-                      ? 'mb-account__bad'
-                      : 'mb-account__unchecked'
-                }
-              >
-                {row.checked}
-              </span>
-            ),
-          },
-          {
-            key: 'what',
-            header: '',
-            render: (row) => (
-              <Row end wrap={false}>
-                {!row.checkedOk ? (
+                  {row.checked}
+                </span>
+              ),
+            },
+            {
+              key: 'what',
+              header: '',
+              render: (row) => (
+                <Row end wrap={false}>
+                  {!row.checkedOk ? (
+                    <Button
+                      size="sm"
+                      disabled={working}
+                      onClick={() =>
+                        run(() =>
+                          call('verify_backup', { path: row.path }).then((found) => {
+                            toast.show(found.ok ? 'ok' : 'danger', found.message, found.detail);
+                            return call('backup_status');
+                          }),
+                        )
+                      }
+                    >
+                      Check
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
-                    disabled={working}
-                    onClick={() =>
-                      run(() =>
-                        call('verify_backup', { path: row.path }).then((found) => {
-                          toast.show(found.ok ? 'ok' : 'danger', found.message, found.detail);
-                          return call('backup_status');
-                        }),
-                      )
-                    }
+                    variant="quiet"
+                    disabled={working || !row.checkedOk}
+                    onClick={() => setRestoring(row)}
                   >
-                    Check
+                    Restore
                   </Button>
-                ) : null}
-                <Button
-                  size="sm"
-                  variant="quiet"
-                  disabled={working || !row.checkedOk}
-                  onClick={() => setRestoring(row)}
-                >
-                  Restore
-                </Button>
-              </Row>
-            ),
-          },
-        ]}
-      />
-      {view.backups.length > FEW ? (
-        <Row end>
-          <Button size="sm" variant="quiet" onClick={() => setAll((was) => !was)}>
-            {all ? 'Show fewer' : `Show all ${view.backups.length}`}
-          </Button>
-        </Row>
-      ) : null}
+                </Row>
+              ),
+            },
+          ]}
+        />
+      </Panel>
 
       <ConfirmDialog
         open={restoring !== null}
@@ -401,6 +424,6 @@ export function Backup() {
           );
         }}
       />
-    </Panel>
+    </>
   );
 }

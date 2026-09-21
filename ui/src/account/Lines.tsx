@@ -2,23 +2,35 @@
 
 import type { ReactNode } from 'react';
 
-/** A run of label-beside-value lines, every label the same width. */
+/** A run of label-beside-value lines, every label the same width, every action in one column. */
 export function Lines({ children }: { children: ReactNode }) {
   return <dl className="mb-account__lines">{children}</dl>;
 }
 
-/** One line: the label, then whatever sits beside it. */
-export function Line({ label, children }: { label: string; children: ReactNode }) {
+/** One line: the label, whatever sits beside it, and the button that acts on it. */
+export function Line({
+  label,
+  children,
+  action,
+}: {
+  label: string;
+  children: ReactNode;
+  /** The Change (or Copy) at the end of the line: right-aligned, so every line's lines up. */
+  action?: ReactNode;
+}) {
   return (
-    <div>
+    <div className="mb-account__line">
       <dt>{label}</dt>
-      <dd>{children}</dd>
+      <dd>
+        <span className="mb-account__value">{children}</span>
+        {action ? <span className="mb-account__act">{action}</span> : null}
+      </dd>
     </div>
   );
 }
 
 /** How many characters of a path fit before its middle is folded away. */
-const PATH_ROOM = 56;
+const PATH_ROOM = 48;
 
 /** The drive and the last two folders of a long path; the whole path on hover. */
 export function shorten(path: string): string {

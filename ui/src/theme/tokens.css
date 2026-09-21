@@ -226,6 +226,20 @@
    * the whole card.
    */
   --motion-breathe: 1800ms;
+  /*
+   * The third exception, off the billing path: the Account page's tiles. They arrive one
+   * after another, a live tile's glow drifts behind its figure, and its dot sends out a ring
+   * now and then — the page saying "this is on" without a word.
+   */
+  --motion-tile: 320ms;
+  --motion-stagger: 70ms;
+  --motion-drift: 14000ms;
+  --motion-ping: 2600ms;
+  /* The glow behind a live tile, in the tile's own tone, never the only signal. */
+  --glow-ok: radial-gradient(circle, color-mix(in srgb, var(--ok) 28%, transparent), transparent 62%);
+  --glow-warn: radial-gradient(circle, color-mix(in srgb, var(--warn) 28%, transparent), transparent 62%);
+  --glow-danger: radial-gradient(circle, color-mix(in srgb, var(--danger) 28%, transparent), transparent 62%);
+  --glow-neutral: radial-gradient(circle, color-mix(in srgb, var(--brand) 22%, transparent), transparent 62%);
 
   /*
    * THE CONTROL CONTRACT. Three heights, by job.
@@ -368,8 +382,12 @@
 
   /* A fact's column on a page of facts, and the label column of a folder row. */
   --fact-column: calc(14rem * var(--type-scale));
-  --account-label: 8rem;
+  --account-label: 9.5rem;
   --account-side: 22rem;
+  /* Licence beside Backup at 1366 and wider; one under the other below it. */
+  --account-column: 34rem;
+  /* The action column at the end of an account line: one Change button. */
+  --account-action: 5.5rem;
   /* The column beside the phones list: the counter's facts and the app's QR. */
   --phones-side: 22rem;
   /* The label column of those facts. */
@@ -712,6 +730,10 @@ textarea {
     --motion-exit: 0ms;
     --motion-beat: 0ms;
     --motion-breathe: 0ms;
+    --motion-tile: 0ms;
+    --motion-stagger: 0ms;
+    --motion-drift: 0ms;
+    --motion-ping: 0ms;
     --beats: 0;
     --rise: 0;
     --press: 1;

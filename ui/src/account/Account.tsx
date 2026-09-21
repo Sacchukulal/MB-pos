@@ -1,14 +1,11 @@
-/** The owner's page: the licence across the top, then the backups beside the version. */
+/** The owner's page: four live tiles across the top, the licence beside the backups, the backups taken under both. */
 
 import { useCallback, useEffect, useState } from 'react';
 
 import {
   Badge,
   Button,
-  Caption,
   ConfirmDialog,
-  Fact,
-  Facts,
   Icon,
   Input,
   Modal,
@@ -16,8 +13,10 @@ import {
   Page,
   PageHeader,
   Panel,
-  Row,
   Spinner,
+  StatCard,
+  Stats,
+  plural,
   useToast,
   type BadgeTone,
 } from '../kit';
@@ -25,6 +24,7 @@ import { call, isUiError } from '../ipc/call';
 import type { LicenceView } from '../ipc/generated/LicenceView';
 import { Backup } from './Backup';
 import { ChangeLicence } from './ChangeLicence';
+import { Line, Lines } from './Lines';
 
 import './account.css';
 
@@ -121,126 +121,139 @@ export function Account() {
         title="Account"
         subtitle={subtitle}
         actions={
-          view.hasLicence ? (
-            <>
-              <Button variant="secondary" disabled={busy || checking} onClick={checkNow}>
-                {checking ? <Spinner label="Checking" /> : <Icon name="refresh" size="sm" />}
-                Check now
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => call('open_magicbill', { page: 'renew' }).catch(report)}
-              >
-                Manage plan
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="primary"
-              onClick={() => call('open_magicbill', { page: 'renew' }).catch(report)}
-            >
-              Buy a plan
-            </Button>
-          )
+          <Button
+            variant="primary"
+            onClick={() => call('open_magicbill', { page: 'renew' }).catch(report)}
+          >
+            {view.hasLicence ? 'Manage plan' : 'Buy a plan'}
+          </Button>
         }
       />
 
-      <Panel
-        title="Licence"
-        actions={
-          <>
-            {view.hasLicence ? <Caption>Checked {view.checked}</Caption> : null}
-            <Badge tone={tone}>{view.chip}</Badge>
-          </>
-        }
-      >
-        {view.headline !== '' && (
-          <Notice
-            tone={tone === 'neutral' ? 'info' : tone}
-            action={
-              view.boundElsewhere ? (
-                <Button
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    run(() => call('bring_licence_here'), 'The licence is on this computer again.')
-                  }
-                >
-                  Use it on this computer
-                </Button>
-              ) : !view.hasLicence ? (
-                <Button variant="primary" onClick={() => setDialog('change')}>
-                  Sign in
-                </Button>
-              ) : view.standing !== 'fine' ? (
-                <Button variant="quiet" onClick={() => setDialog('code')}>
-                  Code from support
-                </Button>
-              ) : undefined
+      {view.headline !== '' && (
+        <Notice
+          tone={tone === 'neutral' ? 'info' : tone}
+          action={
+            view.boundElsewhere ? (
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() =>
+                  run(() => call('bring_licence_here'), 'The licence is on this computer again.')
+                }
+              >
+                Use it on this computer
+              </Button>
+            ) : !view.hasLicence ? (
+              <Button variant="primary" onClick={() => setDialog('change')}>
+                Sign in
+              </Button>
+            ) : view.standing !== 'fine' ? (
+              <Button variant="quiet" onClick={() => setDialog('code')}>
+                Code from support
+              </Button>
+            ) : undefined
+          }
+        >
+          {view.headline}
+        </Notice>
+      )}
+      {view.stillHeld !== '' && <Notice tone="warn">{view.stillHeld}</Notice>}
+      {view.clockNote !== '' && <Notice tone="warn">{view.clockNote}</Notice>}
+
+      {view.hasLicence && (
+        <Stats>
+          <StatCard
+            className={`mb-account__tile mb-account__tile--live mb-account__tile--${tone}`}
+            label="Plan"
+            value={view.planName}
+            note={
+              <span className="mb-account__tilenote">
+                <Badge tone={tone}>{view.chip}</Badge>
+                <span>Checked {view.checked}</span>
+              </span>
+            }
+          />
+          <StatCard
+            className="mb-account__tile"
+            label={view.dateLabel || 'Valid'}
+            value={view.date || '—'}
+          />
+          <StatCard
+            className={`mb-account__tile mb-account__tile--live mb-account__tile--${cloudTone}`}
+            label="Cloud copy"
+            value={CLOUD_WORDS[view.cloudTone] ?? 'Cloud copy'}
+            note={view.cloudCopy}
+          />
+          <StatCard
+            className="mb-account__tile"
+            label="Devices"
+            value={`${plural(view.phonesAllowed, 'phone')} · ${plural(view.tillsAllowed, 'till')}`}
+            note="On this plan"
+          />
+        </Stats>
+      )}
+
+      <div className="mb-account__board">
+        {view.hasLicence && (
+          <Panel
+            title="Licence"
+            className="mb-account__licence"
+            actions={
+              <Button variant="secondary" size="sm" disabled={busy || checking} onClick={checkNow}>
+                {checking ? <Spinner label="Checking" /> : <Icon name="refresh" size="sm" />}
+                Check now
+              </Button>
             }
           >
-            {view.headline}
-          </Notice>
-        )}
-        {view.stillHeld !== '' && <Notice tone="warn">{view.stillHeld}</Notice>}
-        {view.clockNote !== '' && <Notice tone="warn">{view.clockNote}</Notice>}
-
-        {view.hasLicence && (
-          <>
-            <Facts>
-              <Fact label="Owner">{view.ownerName || '—'}</Fact>
-              <Fact label="Mobile">{view.ownerPhone || '—'}</Fact>
-              <Fact label="Plan">{view.planName}</Fact>
-              <Fact label={view.dateLabel || 'Valid'}>{view.date || '—'}</Fact>
+            <Lines>
+              <Line label="Owner">{view.ownerName || '—'}</Line>
+              <Line label="Mobile">{view.ownerPhone || '—'}</Line>
               {view.key !== '' ? (
-                <Fact label="Licence key" code>
-                  <span className="mb-account__key">
-                    {view.key}
+                <Line
+                  label="Licence key"
+                  action={
                     <Button
                       size="sm"
                       variant="quiet"
-                      iconOnly
                       title={copied ? 'Copied' : 'Copy the key'}
                       aria-label="Copy the key"
                       onClick={copyKey}
                     >
                       <Icon name={copied ? 'check' : 'copy'} size="sm" />
+                      {copied ? 'Copied' : 'Copy'}
                     </Button>
-                  </span>
-                </Fact>
+                  }
+                >
+                  <span className="mb-code mb-account__key">{view.key}</span>
+                </Line>
               ) : null}
-              <Fact label="Shop code for phones" code>
-                {view.restaurantCode || '—'}
-              </Fact>
-              <Fact label="Phones">{view.phonesAllowed}</Fact>
-              <Fact label="Tills">{view.tillsAllowed}</Fact>
-              {/* The two facts that are a row of words rather than one value. */}
+              <Line label="Shop code">
+                <span className="mb-code mb-account__key">{view.restaurantCode || '—'}</span>
+                <span className="mb-muted">Phones join with this</span>
+              </Line>
               {view.included.length > 0 ? (
-                <Fact label="Includes" className="mb-account__wide">
+                <Line label="Includes">
                   {view.included.map((feature) => (
                     <Badge key={feature}>{feature}</Badge>
                   ))}
-                </Fact>
+                </Line>
               ) : null}
-              <Fact label="Cloud copy" className="mb-account__wide">
-                <Badge tone={cloudTone}>{CLOUD_WORDS[view.cloudTone] ?? 'Cloud copy'}</Badge>
-                <span>{view.cloudCopy}</span>
-              </Fact>
-            </Facts>
+            </Lines>
 
-            <Row end>
+            <div className="mb-account__foot">
               <Button variant="quiet" disabled={busy} onClick={() => setDialog('sign-out')}>
                 Sign out of this computer
               </Button>
               <Button variant="secondary" disabled={busy} onClick={() => setDialog('change')}>
                 Change licence
               </Button>
-            </Row>
-          </>
+            </div>
+          </Panel>
         )}
-      </Panel>
 
-      <Backup />
+        <Backup />
+      </div>
 
       <ChangeLicence
         open={dialog === 'change'}

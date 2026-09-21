@@ -69,14 +69,17 @@ export function StatCard({
   label,
   value,
   note,
+  className,
 }: {
   label: string;
   value: ReactNode;
   /** The sentence under the figure — "What the till expects, before counting.". */
   note?: ReactNode;
+  /** A screen's own class on the card, to place it or give it a tone. */
+  className?: string;
 }) {
   return (
-    <Card>
+    <Card className={className}>
       <div className="mb-stat">
         <span className="mb-stat__label">{label}</span>
         <span className="mb-stat__value">{value}</span>

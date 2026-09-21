@@ -1,63 +1,249 @@
-/* The Account page: the licence across the top, then the backup. Updates live under Settings. */
+/*
+ * The Account page: four live tiles across the top, the licence beside the backups, the
+ * backups taken under both. Updates live under Settings.
+ *
+ * Motion here is off the billing path, so the page is allowed to ARRIVE: the tiles rise one
+ * after another, then the two cards, then the list. A live tile's glow drifts behind its
+ * figure and its dot sends out a ring now and then. Nothing moves under the hand: every
+ * control stays where it was drawn.
+ */
 
-/* A panel's body is a column of groups. */
+/* A panel's body is a column of groups, and it fills the panel so a foot can sit at the bottom. */
 .mb-account .mb-panel__body {
   display: flex;
   flex-direction: column;
+  flex: 1;
   gap: var(--gap-group);
 }
 
-/* A fact that is a row of words — the plan's parts, the cloud copy's state — takes two columns. */
-.mb-account__wide {
-  grid-column: span 2;
+/* THE TILES. */
+
+.mb-account__tile {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  animation: mb-rise var(--motion-tile) var(--ease-out) both;
+  transition:
+    transform var(--motion-fast) var(--ease),
+    box-shadow var(--motion-fast) var(--ease);
 }
 
-.mb-account__wide dd {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--gap-inline);
-  font-size: var(--type-body);
-  font-weight: var(--weight-normal);
+.mb-account__tile:nth-child(2) {
+  animation-delay: var(--motion-stagger);
+}
+.mb-account__tile:nth-child(3) {
+  animation-delay: calc(2 * var(--motion-stagger));
+}
+.mb-account__tile:nth-child(4) {
+  animation-delay: calc(3 * var(--motion-stagger));
 }
 
-/* The key and its copy button on one line. */
-.mb-account__key {
+.mb-account__tile:hover {
+  transform: translateY(calc(var(--space-1) * -0.5));
+  box-shadow: var(--level-lifted);
+}
+
+/* The figure sits above the glow: both positioned, so they paint in tree order, glow first. */
+.mb-account__tile > .mb-stat {
+  position: relative;
+}
+
+/* The glow: a soft disc in the tile's tone, drifting behind the figure for as long as it is on. */
+.mb-account__tile--live::before {
+  content: '';
+  position: absolute;
+  top: -35%;
+  right: -15%;
+  width: 70%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-pill);
+  background: var(--glow-neutral);
+  pointer-events: none;
+  animation: mb-account-drift var(--motion-drift) var(--ease) infinite alternate;
+}
+
+.mb-account__tile--ok::before {
+  background: var(--glow-ok);
+}
+.mb-account__tile--warn::before {
+  background: var(--glow-warn);
+}
+.mb-account__tile--danger::before {
+  background: var(--glow-danger);
+}
+
+@keyframes mb-account-drift {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-30%, 25%) scale(1.3);
+  }
+  to {
+    transform: translate(-10%, 45%) scale(0.85);
+  }
+}
+
+/* The dot in the corner, and the ring it sends out: colour AND a word — the badge says it too. */
+.mb-account__tile--live::after {
+  content: '';
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border-radius: var(--radius-pill);
+  color: var(--brand);
+  background: currentColor;
+  pointer-events: none;
+  animation: mb-account-ping var(--motion-ping) var(--ease-out) infinite;
+}
+
+.mb-account__tile--ok::after {
+  color: var(--ok);
+}
+.mb-account__tile--warn::after {
+  color: var(--warn);
+}
+.mb-account__tile--danger::after {
+  color: var(--danger);
+}
+
+@keyframes mb-account-ping {
+  from {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  60%,
+  to {
+    box-shadow: 0 0 0 var(--space-3) transparent;
+  }
+}
+
+/* The badge and the "checked" time, side by side under the figure. */
+.mb-account__tilenote {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--gap-inline);
+}
+
+/* THE BOARD: licence beside backup, the backups taken across both. */
+
+.mb-account__board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--account-column), 100%), 1fr));
+  gap: var(--gap-group);
+  align-items: stretch;
+}
+
+/* The two cards keep their order whatever arrives first, and never push the board wider. */
+.mb-account__licence {
+  order: 1;
   min-width: 0;
 }
 
-/* Label beside value, every label the same width, every value starting on the same line. */
-.mb-account__lines {
-  display: grid;
-  grid-template-columns: var(--account-label) minmax(0, 1fr);
-  gap: var(--gap-field) var(--gap-group);
+.mb-account__backup {
+  order: 2;
+  min-width: 0;
+}
+
+.mb-account__history {
+  order: 3;
+  grid-column: 1 / -1;
+}
+
+/* The cards follow the tiles in, then the list follows the cards. */
+.mb-account__board > .mb-panel {
+  animation: mb-rise var(--motion-tile) var(--ease-out) both;
+  animation-delay: calc(4 * var(--motion-stagger));
+}
+
+.mb-account__board > .mb-account__history {
+  animation-delay: calc(6 * var(--motion-stagger));
+}
+
+/* The way out of the licence, at the foot of its card, parted by a hairline. */
+.mb-account__foot {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-field);
+  margin-top: auto;
+  padding-top: var(--gap-group);
+  border-top: var(--border-width) solid var(--border);
+}
+
+/* The backup's state: the word, the sentence, the schedule — one line inside its notice. */
+.mb-account__state {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--gap-inline) var(--gap-field);
+}
+
+.mb-account__state .mb-muted {
+  font-size: var(--type-cell);
+}
+
+/* THE LINES: label beside value, every label the same width, every action on the right edge. */
+
+.mb-account__lines {
+  display: flex;
+  flex-direction: column;
   margin: 0;
 }
 
-.mb-account__lines > div {
-  display: contents;
+.mb-account__line {
+  display: grid;
+  grid-template-columns: var(--account-label) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--gap-group);
+  min-height: var(--control-md);
+  padding: var(--space-1) 0;
+  border-bottom: var(--border-width) solid var(--border);
 }
 
-.mb-account__lines dt {
-  font-size: var(--type-caption);
+.mb-account__line:last-child {
+  border-bottom: none;
+}
+
+.mb-account__line dt {
+  font-size: var(--type-label);
   font-weight: var(--type-label-weight);
   color: var(--text-muted);
-  align-self: center;
 }
 
-.mb-account__lines dd {
+.mb-account__line dd {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--gap-field);
+  margin: 0;
+  min-width: 0;
+}
+
+.mb-account__value {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--gap-inline) var(--gap-field);
-  margin: 0;
   min-width: 0;
   font-size: var(--type-body);
   color: var(--text);
+}
+
+.mb-account__act {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--gap-inline);
+  flex-shrink: 0;
+}
+
+/* A key or a shop code: read out to support, so spaced out and a touch larger than a cell. */
+.mb-account__key {
+  font-size: var(--type-body);
+  letter-spacing: var(--tracking-code);
 }
 
 /* A folder path: one line, the end of it kept, the whole of it on hover. */
@@ -69,19 +255,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
-}
-
-/* The last backup and the schedule, on one line. */
-.mb-account__status {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--gap-inline) var(--gap-field);
-  font-size: var(--type-body);
-}
-
-.mb-account__status .mb-muted {
-  font-size: var(--type-cell);
 }
 
 /* The folders that get a copy: kind, path, when, and the way off the list. */
@@ -179,4 +352,14 @@
   display: flex;
   justify-content: space-between;
   font-weight: var(--weight-medium);
+}
+
+/* A counter with motion turned off sees the page as it ends up, and nothing drifts. */
+@media (prefers-reduced-motion: reduce) {
+  .mb-account__tile,
+  .mb-account__board > .mb-panel,
+  .mb-account__tile--live::before,
+  .mb-account__tile--live::after {
+    animation: none;
+  }
 }
