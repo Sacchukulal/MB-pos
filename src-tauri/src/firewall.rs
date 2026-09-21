@@ -147,6 +147,17 @@ pub fn allow() -> FirewallState {
     refresh()
 }
 
+/// The same state in a few words, for the fact beside the counter's address.
+#[must_use]
+pub fn word(state: FirewallState) -> &'static str {
+    match state {
+        FirewallState::Allowed => "Lets phones in",
+        FirewallState::Blocked => "Blocking",
+        FirewallState::NoRule => "No rule yet",
+        FirewallState::Unknown => "Could not be read",
+    }
+}
+
 /// What the Phones page says about it, and whether it should offer the button.
 #[must_use]
 pub fn words(state: FirewallState) -> (&'static str, bool) {

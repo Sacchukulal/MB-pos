@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
+  Badge,
   Button,
   ConfirmDialog,
   EmptyState,
@@ -13,8 +14,10 @@ import {
   PageHeader,
   Panel,
   Select,
+  Stack,
   Table,
   useToast,
+  type BadgeTone,
   type Column,
 } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
@@ -23,7 +26,7 @@ import type { NetworkView } from '../ipc/generated/NetworkView';
 
 import './phones.css';
 
-/** Rust's tone words are the notice's own. */
+/** Rust's tone words are the notice's and the chip's own. */
 const TONES: Record<string, 'ok' | 'warn' | 'danger'> = {
   ok: 'ok',
   warn: 'warn',
@@ -94,7 +97,8 @@ export function Phones() {
 
   if (!view) return null;
 
-  const tone = TONES[view.tone] ?? 'info';
+  const tone = TONES[view.tone] ?? 'warn';
+  const chipTone: BadgeTone = tone;
   const phones = view.devices;
   const full = phones.length >= view.phonesAllowed;
   const subtitle = [
@@ -111,8 +115,20 @@ export function Phones() {
   const owner = picked !== null && picked.id === asking?.requestId ? picked.owner : '';
 
   const columns: readonly Column<DeviceRowView>[] = [
-    { key: 'name', header: 'Phone', render: (d) => <strong>{d.name}</strong> },
-    { key: 'staff', header: 'Whose', render: (d) => d.staff },
+    {
+      key: 'name',
+      header: 'Phone',
+      render: (d) => (
+        <span className="mb-phones__phone">
+          <Icon name="phone" size="sm" className="mb-phones__phoneicon" />
+          <span className="mb-phones__phonewords">
+            <strong>{d.name}</strong>
+            <span className="mb-phones__platform">{d.platform}</span>
+          </span>
+        </span>
+      ),
+    },
+    { key: 'staff', header: 'Whose', nowrap: true, render: (d) => d.staff },
     { key: 'seen', header: 'Last seen', nowrap: true, render: (d) => d.lastSeen },
     { key: 'ip', header: 'Address', optional: true, nowrap: true, render: (d) => d.lastIp },
     {
@@ -126,6 +142,17 @@ export function Phones() {
       ),
     },
   ];
+
+  const fixFirewall = view.mayFixFirewall ? (
+    <Button
+      variant="primary"
+      size="sm"
+      disabled={busy}
+      onClick={() => run(() => call('allow_firewall'), 'Windows Firewall now lets phones in.')}
+    >
+      Allow through Windows Firewall
+    </Button>
+  ) : null;
 
   return (
     <Page className="mb-phones-page">
@@ -145,37 +172,69 @@ export function Phones() {
         }
       />
 
-      {/* The state of the road, in one sentence written in Rust. */}
-      <Notice
-        tone={tone}
-        standing
-        action={
-          view.mayFixFirewall ? (
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={busy}
-              onClick={() =>
-                run(() => call('allow_firewall'), 'Windows Firewall now lets phones in.')
-              }
-            >
-              Allow through Windows Firewall
-            </Button>
-          ) : null
-        }
-      >
-        {view.headline}
-      </Notice>
+      {/* When something is in the way, Rust's sentence says what, at the top where it is read
+          first. When the road is clear the facts beside the list say so, and no sentence is
+          needed. */}
+      {tone !== 'ok' ? (
+        <Notice tone={tone} standing action={fixFirewall}>
+          {view.headline}
+        </Notice>
+      ) : null}
       {view.certificateNote ? <Notice tone="warn">{view.certificateNote}</Notice> : null}
 
-      <Panel title="On this counter" flush>
-        <Table
-          columns={columns}
-          rows={phones}
-          rowKey={(d) => d.id}
-          empty={<EmptyState small title="No phones yet" says="Press Add phone and scan the code." />}
-        />
-      </Panel>
+      <div className="mb-phones__body">
+        <Panel title="On this counter" flush className="mb-phones__list">
+          <Table
+            columns={columns}
+            rows={phones}
+            rowKey={(d) => d.id}
+            empty={
+              <EmptyState
+                small
+                title="No phones yet"
+                says="Install the app on the phone, then press Add phone and scan the code."
+              />
+            }
+          />
+        </Panel>
+
+        <Stack gap="group">
+          <Panel title="This counter" actions={<Badge tone={chipTone}>{view.chip}</Badge>}>
+            <dl className="mb-phones__facts">
+              <div>
+                <dt>Address</dt>
+                <dd className="mb-numeric">{view.address || '—'}</dd>
+              </div>
+              <div>
+                <dt>Port</dt>
+                <dd className="mb-numeric">{view.address ? view.port : '—'}</dd>
+              </div>
+              <div>
+                <dt>Firewall</dt>
+                <dd>{view.firewallWord}</dd>
+              </div>
+            </dl>
+          </Panel>
+
+          <Panel title="Magic Bill for Android">
+            <div className="mb-phones__get">
+              <QrRows
+                rows={view.downloadQr}
+                small
+                label="Scan this with the phone's camera to open the downloads page"
+              />
+              <span className="mb-phones__label">Scan with the phone's camera</span>
+              <Button
+                variant="secondary"
+                onClick={() => call('open_magicbill', { page: 'downloads' }).catch(report)}
+              >
+                <Icon name="download" size="sm" />
+                magicbill.in/downloads
+              </Button>
+            </div>
+          </Panel>
+        </Stack>
+      </div>
 
       <Modal
         open={adding}
@@ -264,22 +323,43 @@ export function Phones() {
 function ScanCode({ qr, code }: { qr: readonly string[]; code: string }) {
   return (
     <div className="mb-phones__scan">
-      <div className="mb-phones__qr" role="img" aria-label="Scan this with the Magic Bill app">
-        {qr.map((row, y) => (
-          // The code is positional: two identical rows are two different places.
-          <div className="mb-phones__qrrow" key={`${y}-${row}`}>
-            {[...row].map((cell, x) => (
-              <span
-                key={`${y}-${x}`}
-                className={cell === '#' ? 'mb-phones__dot mb-phones__dot--on' : 'mb-phones__dot'}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
+      <QrRows rows={qr} label="Scan this with the Magic Bill app" />
       <span className="mb-phones__label">Or type the code in the app</span>
       <strong className="mb-phones__code">{code}</strong>
       <span className="mb-phones__label">Waiting for a phone to scan</span>
+    </div>
+  );
+}
+
+/** A QR drawn from Rust's rows of `#`/`.` — the one way a code is drawn on this screen. */
+function QrRows({
+  rows,
+  label,
+  small = false,
+}: {
+  rows: readonly string[];
+  label: string;
+  /** The module for a code read from a hand's length, not across the counter. */
+  small?: boolean;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div
+      className={small ? 'mb-phones__qr mb-phones__qr--small' : 'mb-phones__qr'}
+      role="img"
+      aria-label={label}
+    >
+      {rows.map((row, y) => (
+        // The code is positional: two identical rows are two different places.
+        <div className="mb-phones__qrrow" key={`${y}-${row}`}>
+          {[...row].map((cell, x) => (
+            <span
+              key={`${y}-${x}`}
+              className={cell === '#' ? 'mb-phones__dot mb-phones__dot--on' : 'mb-phones__dot'}
+            />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

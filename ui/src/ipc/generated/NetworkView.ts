@@ -15,6 +15,15 @@ headline: string,
  */
 tone: string, 
 /**
+ * The same state in a word or two, for the chip beside the counter's facts: "Ready".
+ */
+chip: string, 
+/**
+ * Where the counter is, as facts rather than a sentence: the address (empty when it is
+ * not on a network) and the port.
+ */
+address: string, port: number, 
+/**
  * Written when the counter's certificate is new, because every phone must then be added
  * again — and fifteen waiters discovering that one at a time during a rush is the
  * alternative to saying so here.
@@ -25,6 +34,11 @@ certificateNote: string, devices: Array<DeviceRowView>, waiting: Array<WaitingVi
  */
 qr: Array<string>, code: string, 
 /**
+ * The website's downloads page as a QR, in the same rows, so a waiter gets the app by
+ * pointing the phone's camera at the screen.
+ */
+downloadQr: Array<string>, 
+/**
  * How many phones the plan allows, from the cloud: this licence, else its plan, else the
  * global default. The screen shows "3 of 10" and stops offering the code at the limit.
  */
@@ -33,6 +47,10 @@ phonesAllowed: number,
  * What Windows Firewall says about this program — the usual reason a phone cannot reach it.
  */
 firewall: FirewallState, firewallSays: string, 
+/**
+ * The same, in a few words, for the fact beside the address.
+ */
+firewallWord: string, 
 /**
  * Whether the "allow it" button is offered.
  */

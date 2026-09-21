@@ -135,8 +135,8 @@ export interface Commands {
     args: { key: string; folder: string; moveHere: boolean };
     returns: OwnerOpenedView;
   };
-  /** A page of magicbill.in, by name, in the browser: Sign up here, Renew on Account. Answers with the address. */
-  open_magicbill: { args: { page: 'signup' | 'renew' }; returns: string };
+  /** A page of magicbill.in, by name, in the browser: Sign up here, Renew on Account, Downloads on Phones. Answers with the address. */
+  open_magicbill: { args: { page: 'signup' | 'renew' | 'downloads' }; returns: string };
   use_shop_folder: { args: { folder: string }; returns: string };
   reveal_logs: { args: void; returns: string };
   print_test_page: { args: { printerId: string }; returns: string };

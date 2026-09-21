@@ -172,6 +172,8 @@ const MAGICBILL_PAGES: &[(&str, &str)] = &[
     ("signup", "https://magicbill.in/signup"),
     // Where a plan is actually bought.
     ("renew", "https://magicbill.in/renew"),
+    // The Android app for the waiters' phones; the Phones page points here.
+    ("downloads", "https://magicbill.in/downloads"),
 ];
 
 /// The address of one of the pages, or nothing for a name that is not on the list.
@@ -242,6 +244,7 @@ mod tests {
     fn the_website_is_opened_by_page_name_and_only_the_listed_pages() {
         assert_eq!(magicbill_url("signup"), Some("https://magicbill.in/signup"));
         assert_eq!(magicbill_url("renew"), Some("https://magicbill.in/renew"));
+        assert_eq!(magicbill_url("downloads"), Some("https://magicbill.in/downloads"));
         assert_eq!(magicbill_url("https://evil.example"), None);
         assert_eq!(magicbill_url(""), None);
         let refused = open_magicbill_on("admin").expect_err("not a page the counter opens");

@@ -538,6 +538,12 @@ pub struct NetworkView {
     pub headline: String,
     /// `ok`, `warn` or `danger`.
     pub tone: String,
+    /// The same state in a word or two, for the chip beside the counter's facts: "Ready".
+    pub chip: String,
+    /// Where the counter is, as facts rather than a sentence: the address (empty when it is
+    /// not on a network) and the port.
+    pub address: String,
+    pub port: u16,
     /// Written when the counter's certificate is new, because every phone must then be added
     /// again — and fifteen waiters discovering that one at a time during a rush is the
     /// alternative to saying so here.
@@ -547,12 +553,17 @@ pub struct NetworkView {
     /// The QR, as rows of `#`/`.` — drawn by the screen as a CSS grid.
     pub qr: Vec<String>,
     pub code: String,
+    /// The website's downloads page as a QR, in the same rows, so a waiter gets the app by
+    /// pointing the phone's camera at the screen.
+    pub download_qr: Vec<String>,
     /// How many phones the plan allows, from the cloud: this licence, else its plan, else the
     /// global default. The screen shows "3 of 10" and stops offering the code at the limit.
     pub phones_allowed: u32,
     /// What Windows Firewall says about this program — the usual reason a phone cannot reach it.
     pub firewall: crate::firewall::FirewallState,
     pub firewall_says: String,
+    /// The same, in a few words, for the fact beside the address.
+    pub firewall_word: String,
     /// Whether the "allow it" button is offered.
     pub may_fix_firewall: bool,
     /// Who a phone can be given to when Allow is pressed: the active staff.
@@ -609,33 +620,29 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
     let (qr, code) = match (&network, &showing) {
         (Some(n), Some((token, code))) => {
             let uri = mb_lan::qr::pairing_uri(&n.address, n.port, &n.fingerprint, token);
-            let rows = mb_lan::qr::matrix(&uri)
-                .map(|m| {
-                    m.iter()
-                        .map(|row| row.iter().map(|d| if *d { '#' } else { '.' }).collect())
-                        .collect::<Vec<String>>()
-                })
-                .unwrap_or_default();
-            (rows, code.clone())
+            (qr_rows(&uri), code.clone())
         }
         _ => (Vec::new(), String::new()),
     };
+    let download_qr = crate::share::magicbill_url("downloads").map_or_else(Vec::new, qr_rows);
 
     let firewall = crate::firewall::cached();
     let (firewall_says, may_fix_firewall) = crate::firewall::words(firewall);
     let firewall_says = firewall_says.to_owned();
-    let (headline, tone) = match &network {
+    let (headline, tone, chip) = match &network {
         None => (
             "Phones cannot reach this counter — the network is switched off. \
              Turn it on to take orders from a phone."
                 .to_owned(),
-            "warn".to_owned(),
+            "warn",
+            "Switched off",
         ),
         Some(n) if n.address.is_empty() => (
             "This counter is not on a network. Connect it to the shop's WiFi \
              or plug in the network cable, and phones will find it."
                 .to_owned(),
-            "danger".to_owned(),
+            "danger",
+            "No network",
         ),
         // "Listening" is not "reachable", and this sentence must not pretend otherwise.
         Some(n) if !firewall.lets_phones_in() => (
@@ -647,8 +654,8 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
                 "danger"
             } else {
                 "warn"
-            }
-            .to_owned(),
+            },
+            "Check the firewall",
         ),
         Some(n) => (
             format!(
@@ -656,13 +663,17 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
                  lets them in.",
                 n.address, n.port
             ),
-            "ok".to_owned(),
+            "ok",
+            "Ready for phones",
         ),
     };
 
     Ok(NetworkView {
         headline,
-        tone,
+        tone: tone.to_owned(),
+        chip: chip.to_owned(),
+        address: network.as_ref().map(|n| n.address.clone()).unwrap_or_default(),
+        port: network.as_ref().map_or(0, |n| n.port),
         certificate_note: if network.as_ref().is_some_and(|n| n.is_new_certificate) {
             "This counter has a new security certificate, so every phone has \
              to be added again."
@@ -705,15 +716,28 @@ pub fn view_on(app: &App) -> UiResult<NetworkView> {
             .unwrap_or_default(),
         qr,
         code,
+        download_qr,
         phones_allowed,
         people: active_people(app),
         firewall,
         firewall_says,
+        firewall_word: crate::firewall::word(firewall).to_owned(),
         may_fix_firewall,
         connected: network.as_ref().map_or(0, |n| {
             u32::try_from(n.shared.connected()).unwrap_or(u32::MAX)
         }),
     })
+}
+
+/// A QR as rows of `#`/`.`, the shape the screen draws; nothing when it cannot be drawn.
+fn qr_rows(payload: &str) -> Vec<String> {
+    mb_lan::qr::matrix(payload)
+        .map(|m| {
+            m.iter()
+                .map(|row| row.iter().map(|d| if *d { '#' } else { '.' }).collect())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Everybody a phone can belong to: the active staff.

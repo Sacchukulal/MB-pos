@@ -378,7 +378,7 @@
   /* One QR module in the Add phone dialog: big enough to scan from across the counter. */
   --qr-dot: 6px;
   /* One module of the downloads QR on the Phones page: scanned from a hand's length away. */
-  --qr-dot-sm: 4px;
+  --qr-dot-sm: 5px;
   /* The two values in this file that a theme must NOT change. */
   --print-ink: #000000;
   --print-paper: #ffffff;

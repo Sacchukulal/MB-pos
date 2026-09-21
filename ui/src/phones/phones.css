@@ -1,10 +1,97 @@
-/* The Phones page: the road's state, the phones on the counter, and the Add phone dialog. */
+/* The Phones page: the list beside the counter's facts and the app's QR, and the Add phone dialog. */
 
 .mb-phones__label {
   margin: 0;
   font-size: var(--type-caption);
   font-weight: var(--type-label-weight);
   color: var(--text-muted);
+}
+
+/* The list takes the room; the facts and the QR stand beside it in one fixed column. */
+.mb-phones__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--phones-side);
+  gap: var(--gap-group);
+  align-items: start;
+  min-width: 0;
+}
+
+/*
+ * The phone column takes the slack, so the other three sit together instead of being spread
+ * across the whole width with a screen of air between them.
+ */
+.mb-phones__list .mb-table th:first-child {
+  width: 40%;
+}
+
+/* A phone in the list: the icon, the name, and what it runs under it. */
+.mb-phones__phone {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-field);
+  min-width: 0;
+}
+
+.mb-phones__phoneicon {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.mb-phones__phonewords {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mb-phones__platform {
+  font-size: var(--type-caption);
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+/* Label beside value, every label the same width, every value starting on the same line. */
+.mb-phones__facts {
+  display: grid;
+  grid-template-columns: var(--phones-label) minmax(0, 1fr);
+  gap: var(--gap-field) var(--gap-group);
+  align-items: center;
+  margin: 0;
+}
+
+.mb-phones__facts > div {
+  display: contents;
+}
+
+.mb-phones__facts dt {
+  font-size: var(--type-caption);
+  font-weight: var(--type-label-weight);
+  color: var(--text-muted);
+}
+
+.mb-phones__facts dd {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--type-body);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* A figure in the facts reads left like the words beside it. */
+.mb-phones__facts dd.mb-numeric {
+  text-align: left;
+}
+
+/* The way to the app: the QR, the one line under it, and the button for the counter's browser. */
+.mb-phones__get {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mb-phones__get .mb-button {
+  width: 100%;
 }
 
 /* The QR, the code under it, and what the dialog is waiting for: one column, centred. */
@@ -17,6 +104,7 @@
 }
 
 .mb-phones__qr {
+  --dot: var(--qr-dot);
   display: flex;
   flex-direction: column;
   /* The quiet zone: a QR with no margin round it is one half the phones will not read. */
@@ -26,15 +114,21 @@
   border-radius: var(--radius-sm);
 }
 
+/* The downloads QR is read from a hand's length, so it can be smaller and stay inside its column. */
+.mb-phones__qr--small {
+  --dot: var(--qr-dot-sm);
+  margin-bottom: 0;
+}
+
 .mb-phones__qrrow {
   display: flex;
   flex-direction: row;
-  height: var(--qr-dot);
+  height: var(--dot);
 }
 
 .mb-phones__dot {
-  width: var(--qr-dot);
-  height: var(--qr-dot);
+  width: var(--dot);
+  height: var(--dot);
   background: transparent;
 }
 
