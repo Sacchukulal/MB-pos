@@ -1,7 +1,10 @@
-import { Button, Caption, Icon, SectionHeader, type IconName } from '../kit';
-import type { NoticeView } from '../ipc/generated/NoticeView';
+import { Button, Icon, SectionHeader, type IconName } from '../kit';
 
-/** One thing the shop should know about. */
+/**
+ * One thing the shop should know about — the counter's own (a set-up step, the licence, a
+ * closed day) or a notice from Magic Bill. One shape, one list, one rule for the bell: the
+ * number is what has not been looked at; the list is everything current.
+ */
 export interface Alert {
   /** Stable, so a re-render does not make the same alert twice. */
   id: string;
@@ -11,12 +14,26 @@ export interface Alert {
   title: string;
   /** The whole sentence, written in Rust. */
   says: string;
+  /** Looked at already: it stays in the list, and stops counting on the bell. */
+  seen: boolean;
   /** The screen that fixes it, if there is one. */
   goTo?: string;
   goLabel?: string;
+  /** "8 Aug, 4:32 pm" — a notice turned up at a time; a condition simply holds. */
+  when?: string;
+  /** Who it is from, when it is not the counter itself: "Magic Bill". */
+  from?: string;
 }
 
-/** How loud the bell is: the worst tone of anything waiting. */
+/**
+ * What Rust remembers an alert by once it has been looked at. The sentence is part of it, so
+ * an alert that changes what it says — a licence with fewer days left — is new again.
+ */
+export function alertKey(alert: Pick<Alert, 'id' | 'says'>): string {
+  return `${alert.id}:${alert.says}`;
+}
+
+/** How loud the bell is: the worst tone of anything current, read or not. */
 export function loudest(alerts: readonly Alert[]): Alert['tone'] | null {
   if (alerts.some((a) => a.tone === 'danger')) return 'danger';
   if (alerts.some((a) => a.tone === 'warn')) return 'warn';
@@ -26,18 +43,14 @@ export function loudest(alerts: readonly Alert[]): Alert['tone'] | null {
 
 export function AlertsPanel({
   alerts,
-  notices = [],
   onGo,
   onClose,
 }: {
+  /** Unseen first, so what rang the bell is at the top. */
   alerts: readonly Alert[];
-  /** From Magic Bill, newest first. Shown under the counter's own alerts. */
-  notices?: readonly NoticeView[];
   onGo: (screen: string) => void;
   onClose: () => void;
 }) {
-  const nothing = alerts.length === 0 && notices.length === 0;
-
   return (
     <>
       {/* Pressing anywhere else closes it. */}
@@ -66,20 +79,21 @@ export function AlertsPanel({
           />
         </div>
 
-        {nothing ? (
+        {alerts.length === 0 ? (
           <p className="mb-alerts__quiet">
             Nothing needs you. Anything the counter wants to tell you turns up here.
           </p>
-        ) : null}
-
-        {alerts.length > 0 ? (
+        ) : (
           <ul className="mb-alerts__list">
             {alerts.map((alert) => (
               <li key={alert.id} className={`mb-alerts__one mb-alerts__one--${alert.tone}`}>
                 <Icon name={alert.icon} size="sm" className="mb-alerts__icon" />
                 <div className="mb-alerts__body">
+                  {/* Where it came from, over the heading: the panel is the counter's own voice unless it says otherwise. */}
+                  {alert.from ? <span className="mb-alerts__from">From {alert.from}</span> : null}
                   <span className="mb-alerts__what">{alert.title}</span>
-                  <span className="mb-alerts__says">{alert.says}</span>
+                  {alert.says ? <span className="mb-alerts__says">{alert.says}</span> : null}
+                  {alert.when ? <span className="mb-alerts__when">{alert.when}</span> : null}
                   {/* Under the words, not beside them: a panel this narrow has one column. */}
                   {alert.goTo ? (
                     <Button
@@ -98,31 +112,7 @@ export function AlertsPanel({
               </li>
             ))}
           </ul>
-        ) : null}
-
-        {/* Notices from Magic Bill. Read once the panel opens; the number on the bell counts the unread. */}
-        {notices.length > 0 ? (
-          <>
-            <div className="mb-alerts__group">
-              <Caption>From Magic Bill</Caption>
-            </div>
-            <ul className="mb-alerts__list" aria-label="Notices from Magic Bill">
-              {notices.map((notice) => (
-                <li
-                  key={notice.id}
-                  className={`mb-alerts__one mb-alerts__one--${notice.isSeen ? 'info' : 'accent'}`}
-                >
-                  <Icon name="info" size="sm" className="mb-alerts__icon" />
-                  <div className="mb-alerts__body">
-                    <span className="mb-alerts__what">{notice.title}</span>
-                    {notice.body ? <span className="mb-alerts__says">{notice.body}</span> : null}
-                    <span className="mb-alerts__when">{notice.when}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
+        )}
       </section>
     </>
   );

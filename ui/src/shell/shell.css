@@ -75,7 +75,7 @@
   gap: var(--topbar-item-gap);
   /*
    * The screens take what is left after the tools, and clip before the window buttons ever
-   * leave the screen. The tools are sized so that never happens at 1366.
+   * leave the screen. Before they clip, the bar folds its give-words (`.mb-topbar--tight`).
    */
   flex: 1 1 auto;
   min-width: 0;
@@ -385,21 +385,16 @@
   border-left: var(--tile-stripe) solid var(--danger);
 }
 
-/* Below the reference machine, the wordmark goes so the navigation keeps its words. */
-@media (max-width: 1200px) { /* mb-tokens-allow: media queries cannot use var() */
-  .mb-topbar__name {
-    display: none;
-  }
-}
-
-@media (max-width: 1120px) { /* mb-tokens-allow: media queries cannot use var() */
-  .mb-queue__word {
-    display: none;
-  }
-
-  .mb-who__name {
-    display: none;
-  }
+/*
+ * The bar's give. When the screens would not fit beside the tools — the bar measures this
+ * itself, see `navOverflows` — the three words that are only words go: the wordmark, the
+ * queue's "NOT PRINTED" (its icon and the aria-label carry the whole sentence) and the name
+ * beside the face. Folded to nothing rather than removed, so their width can still be read
+ * and the bar knows when there is room to bring them back.
+ */
+.mb-topbar--tight .mb-topbar__give {
+  max-width: 0;
+  overflow: hidden;
 }
 
 /* The phones: how many are live, beside the bell. */
@@ -626,7 +621,6 @@
  * anything without one is pushed out by that much — one sum, written once.
  */
 .mb-alerts__head .mb-section,
-.mb-alerts__group,
 .mb-alerts__quiet {
   padding-left: calc(var(--space-4) + var(--tile-stripe));
 }
@@ -646,16 +640,13 @@
   padding-right: var(--space-2);
   padding-top: var(--space-2);
 }
-
-/* The label over a group of rows — the kit's caption, placed. */
-.mb-alerts__group {
-  padding-right: var(--space-3);
-  padding-block: var(--space-3) var(--space-2);
-}
-
-/* Only when something stands above it: under the head, its border would be the second line. */
-.mb-alerts__list + .mb-alerts__group {
-  border-top: var(--border-width) solid var(--border);
+/* Who a row is from, when it is not the counter: the smallest line, over the heading. */
+.mb-alerts__from {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 .mb-alerts__quiet {

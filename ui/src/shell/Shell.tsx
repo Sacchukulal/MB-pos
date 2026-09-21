@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { Button, EmptyState, Hint, Icon, Logo, Modal, plural, useToast, type IconName } from '../kit';
+import { beatsFor, Button, EmptyState, Hint, Icon, Logo, Modal, plural, useToast, type IconName } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
@@ -15,7 +15,7 @@ import { useTick } from '../clock';
 import { Account } from '../account/Account';
 import { UpdateOffer } from '../account/Update';
 import { FirstRun } from '../setup/FirstRun';
-import { AlertsPanel, loudest, type Alert } from './Alerts';
+import { AlertsPanel, alertKey, loudest, type Alert } from './Alerts';
 import { DayGate } from './DayGate';
 import { More } from './More';
 import { MayProvider } from './permissions';
@@ -275,7 +275,7 @@ export function Shell() {
   const [setup, setSetup] = useState<SetupView | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
   /** Notices from Magic Bill, and how many are unread — the bell's other half. */
-  const [notices, setNotices] = useState<NoticesView>({ unseen: 0, notices: [] });
+  const [notices, setNotices] = useState<NoticesView>({ unseen: 0, notices: [], alertsSeen: [] });
   /** The version waiting to be installed, if the last shelf read found one. */
   const [update, setUpdate] = useState<string | null>(null);
   const { theme, toggle } = useTheme();
@@ -412,13 +412,16 @@ export function Shell() {
     return () => stop?.();
   }, [reloadLock, reloadNotices]);
 
-  /** Opening the bell: fetch what is new, then mark everything read. */
+  /** The keys of the counter's own alerts on show right now — what opening the bell marks read. */
+  const ownKeys = useRef<string[]>([]);
+
+  /** Opening the bell: fetch what is new, then mark everything on show read. */
   const openAlerts = useCallback(() => {
     setAlertsOpen(true);
     if (!inApp()) return;
     call('pull_from_cloud')
       .catch(() => undefined)
-      .then(() => call('notices_seen'))
+      .then(() => call('notices_seen', { alertsSeen: ownKeys.current }))
       .then((fresh) => {
         if (fresh && Array.isArray(fresh.notices)) setNotices(fresh);
       })
@@ -527,12 +530,12 @@ export function Shell() {
   // Locked = there is nobody signed in.
   const locked = inApp() && lock !== null && lock.signedInAs === null;
 
-  /** Everything the shop should know, in one list. */
-  const alerts: Alert[] = [];
+  /** The counter's own alerts — conditions that hold until they are fixed. */
+  const own: Omit<Alert, 'seen'>[] = [];
   // The shelf is read after each licence check; the bell says so, and Account installs it.
   const waiting = update ?? status?.update ?? null;
   if (waiting) {
-    alerts.push({
+    own.push({
       id: 'update',
       tone: 'accent',
       icon: 'download',
@@ -543,7 +546,7 @@ export function Shell() {
     });
   }
   if (status?.licence) {
-    alerts.push({
+    own.push({
       id: 'licence',
       tone:
         status.licenceTone === 'danger'
@@ -559,7 +562,7 @@ export function Shell() {
     });
   }
   if (lock?.nobodyHasAPin) {
-    alerts.push({
+    own.push({
       id: 'no-pin',
       tone: 'warn',
       icon: 'lock',
@@ -572,7 +575,7 @@ export function Shell() {
   // The counter has stopped taking money and the billing screen cannot say so itself: without
   // this the first anybody knows is a refused bill with a customer standing there.
   if (dayState && dayState.todayState !== 'open') {
-    alerts.push({
+    own.push({
       id: 'day-closed',
       tone: 'warn',
       icon: 'calendar',
@@ -583,7 +586,7 @@ export function Shell() {
     });
   }
   if (tillsSay) {
-    alerts.push({
+    own.push({
       id: 'tills',
       tone: 'accent',
       icon: 'refresh',
@@ -593,7 +596,7 @@ export function Shell() {
   }
   for (const step of setup?.steps ?? []) {
     if (step.done) continue;
-    alerts.push({
+    own.push({
       id: `setup-${step.id}`,
       tone: 'info',
       icon: 'info',
@@ -602,7 +605,31 @@ export function Shell() {
       goTo: step.goTo,
     });
   }
-  alerts.sort((a, b) => WORST[b.tone] - WORST[a.tone]);
+  ownKeys.current = own.map(alertKey);
+
+  /**
+   * One list: the counter's own alerts and the notices from Magic Bill, each knowing whether
+   * it has been looked at. What rang the bell comes first, then the worst; a read alert stays
+   * — a dismissed warning is a problem that was never fixed — it just stops counting.
+   */
+  const seenKeys = new Set(notices.alertsSeen);
+  const alerts: Alert[] = [
+    ...own.map((alert) => ({ ...alert, seen: seenKeys.has(alertKey(alert)) })),
+    ...notices.notices.map(
+      (notice): Alert => ({
+        id: `notice-${notice.id}`,
+        tone: notice.isSeen ? 'info' : 'accent',
+        icon: 'info',
+        title: notice.title,
+        says: notice.body,
+        when: notice.when,
+        from: 'Magic Bill',
+        seen: notice.isSeen,
+      }),
+    ),
+  ];
+  alerts.sort((a, b) => Number(a.seen) - Number(b.seen) || WORST[b.tone] - WORST[a.tone]);
+  const unread = alerts.filter((alert) => !alert.seen).length;
 
   if (inApp() && lock === null) {
     // Before the first answer.
@@ -653,8 +680,8 @@ export function Shell() {
         onLock={() => {
           call('lock_now').then(setLock).catch(() => undefined);
         }}
-        alertCount={alerts.length + notices.unseen}
-        alertTone={loudest(alerts) ?? (notices.unseen > 0 ? 'accent' : null)}
+        alertCount={unread}
+        alertTone={loudest(alerts)}
         onOpenAlerts={openAlerts}
         phones={phones}
         onOpenPhones={() => setScreen('phones')}
@@ -687,7 +714,6 @@ export function Shell() {
       {alertsOpen ? (
         <AlertsPanel
           alerts={alerts}
-          notices={notices.notices}
           onGo={setScreen}
           onClose={() => setAlertsOpen(false)}
         />
@@ -813,15 +839,19 @@ function BareBar() {
 }
 
 /**
- * How long the bell rings, in milliseconds — asked of the theme, never decided here. A
- * counter with motion turned off has the beat set to zero there, so this comes back zero and
- * the bell never rings at all.
+ * Would the screens fit with every give-word shown? Asked the same way whether the words are
+ * folded right now or not, so the answer cannot flip back and forth: a folded word keeps its
+ * natural width in `scrollWidth`, and that is added back before the nav's own overflow is read.
  */
-function ringsFor(): number {
-  const theme = getComputedStyle(document.documentElement);
-  const beat = Number.parseFloat(theme.getPropertyValue('--motion-beat'));
-  const beats = Number.parseFloat(theme.getPropertyValue('--beats'));
-  return Number.isFinite(beat) && Number.isFinite(beats) ? beat * beats : 0;
+export function navOverflows(nav: HTMLElement, folded: boolean): boolean {
+  const bar = nav.parentElement;
+  let words = 0;
+  if (folded && bar) {
+    for (const word of bar.querySelectorAll<HTMLElement>('.mb-topbar__give')) {
+      words += word.scrollWidth;
+    }
+  }
+  return nav.scrollWidth - nav.clientWidth + words > 0;
 }
 
 function TopBar({
@@ -863,7 +893,7 @@ function TopBar({
   who: string | null;
   role: string | null;
   onLock: () => void;
-  /** How many alerts are waiting. */
+  /** How many alerts have not been looked at. */
   alertCount: number;
   /** The worst of them, so the badge is not one colour for everything. */
   alertTone: Alert['tone'] | null;
@@ -884,25 +914,49 @@ function TopBar({
     counted.current = alertCount;
     if (alertCount <= was) return;
     setRinging(true);
-    const stop = setTimeout(() => setRinging(false), ringsFor());
+    const stop = setTimeout(() => setRinging(false), beatsFor());
     return () => clearTimeout(stop);
   }, [alertCount]);
 
   const { inBar, inMore, elsewhere } = splitScreens(screens, current);
 
+  /**
+   * The bar measures itself. The screens never clip: when the tools have grown past what the
+   * window leaves them — a stuck print, a phone, a long name — the bar's give-words go, and
+   * come back when there is room again. Measured, not guessed from the window's width: the
+   * tools come and go on their own, and no breakpoint can know which of them is there.
+   */
+  const nav = useRef<HTMLElement>(null);
+  const [tight, setTight] = useState(false);
+  const chipsShown = jobs.length > 0 || phones.connected > 0 || phones.waiting > 0;
+  useEffect(() => {
+    const el = nav.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const measure = () => setTight((was) => navOverflows(el, was));
+    // The nav's box changes whenever the tools do, so the bar re-measures on its own; the
+    // deps below cover a change to what is IN the bar that leaves the box the same size.
+    const watch = new ResizeObserver(measure);
+    watch.observe(el);
+    measure();
+    return () => watch.disconnect();
+  }, [inBar.length, chipsShown, who]);
+
   const go = (id: string) => onGo(id);
 
   return (
-    <header className="mb-topbar" data-tauri-drag-region>
+    <header
+      className={['mb-topbar', tight ? 'mb-topbar--tight' : ''].filter(Boolean).join(' ')}
+      data-tauri-drag-region
+    >
       <div className="mb-topbar__brand" data-tauri-drag-region title={shopPath ?? undefined}>
         <span className="mb-topbar__mark" aria-hidden="true">
           <Logo size="sm" />
         </span>
-        <span className="mb-topbar__name">Magic Bill</span>
+        <span className="mb-topbar__name mb-topbar__give">Magic Bill</span>
       </div>
       <span className="mb-topbar__divider" aria-hidden="true" />
 
-      <nav className="mb-nav" aria-label="Screens">
+      <nav className="mb-nav" aria-label="Screens" ref={nav}>
         {inBar.map((item) => (
           <button
             key={item.id}
@@ -948,11 +1002,11 @@ function TopBar({
         >
           <Icon name={needsAttention ? 'warning' : 'printer'} size="sm" />
           {/*
-            The word goes below 1120px so the navigation keeps its own — the `aria-label` above
+            The word goes when the bar is tight, so the navigation keeps its own — the `aria-label` above
             carries the whole sentence either way, and a printer icon beside a count is not a
             thing anybody has to learn.
           */}
-          <span className="mb-queue__word">
+          <span className="mb-topbar__give">
             {needsAttention
               ? 'NOT PRINTED'
               : jobs.length > 0
@@ -1037,7 +1091,7 @@ function TopBar({
               <span className="mb-face" aria-hidden="true">
                 {who.trim().charAt(0).toUpperCase()}
               </span>
-              <span className="mb-who__name">{who}</span>
+              <span className="mb-who__name mb-topbar__give">{who}</span>
               <Icon name="lock" size="sm" className="mb-who__lock" />
             </button>
           </>

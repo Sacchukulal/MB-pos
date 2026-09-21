@@ -102,13 +102,24 @@ pub struct NoticeView {
     pub is_seen: bool,
 }
 
+/// Everything the bell knows: the notices from Magic Bill, and which of the counter's own
+/// alerts have been looked at. The number on the bell is what has NOT been — a licence that
+/// runs out next week is read once, not counted all week.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct NoticesView {
     pub unseen: u32,
     pub notices: Vec<NoticeView>,
+    /// The keys of the counter's own alerts that were on show the last time the bell was
+    /// opened. The shell builds each key from the alert's id and its sentence, so an alert
+    /// that changes what it says is new again.
+    pub alerts_seen: Vec<String>,
 }
+
+/// Where the bell keeps which alerts have been read — a row in the shop's own settings, like
+/// who signed in last.
+const ALERTS_SEEN_KEY: &str = "bell.alerts_seen";
 
 /// What the bell holds, newest first.
 pub fn notices_on(app: &App) -> UiResult<NoticesView> {
@@ -130,25 +141,39 @@ pub fn notices_on(app: &App) -> UiResult<NoticesView> {
                         is_seen: n.is_seen,
                     })
                     .collect();
+                let alerts_seen: Option<String> =
+                    repos.settings().get(crate::state::OUTLET, ALERTS_SEEN_KEY)?;
                 Ok(NoticesView {
                     unseen: repos.notices().unseen(crate::state::OUTLET, at)?,
                     notices,
+                    // A row that will not parse is a row nobody wrote: nothing is seen.
+                    alerts_seen: alerts_seen
+                        .and_then(|text| serde_json::from_str(&text).ok())
+                        .unwrap_or_default(),
                 })
             })
             .map_err(|e| crate::words::from_db(&e))
     })
 }
 
-/// The bell was opened: everything current is seen.
-pub fn notices_seen_on(app: &App) -> UiResult<NoticesView> {
+/// The bell was opened: every notice is seen, and so is every alert on show — `alerts_seen`
+/// replaces the old set, so an alert that went away and comes back rings again.
+pub fn notices_seen_on(app: &App, alerts_seen: Vec<String>) -> UiResult<NoticesView> {
     crate::guard::require_signed_in(app)?;
     let at = crate::flows::now();
+    let by = crate::flows::staff_now(app);
+    let seen = serde_json::to_string(&alerts_seen).map_err(|e| {
+        UiError::new("bell.record", "What was read could not be recorded.")
+            .with_detail(e.to_string())
+    })?;
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
-                mb_db::Repos::new(tx)
-                    .notices()
-                    .mark_all_seen(crate::state::OUTLET, at)
+                let repos = mb_db::Repos::new(tx);
+                repos.notices().mark_all_seen(crate::state::OUTLET, at)?;
+                repos
+                    .settings()
+                    .set(crate::state::OUTLET, ALERTS_SEEN_KEY, &seen, at, Some(by.as_str()))
             })
             .map_err(|e| crate::words::from_db(&e))
     })?;
@@ -165,8 +190,11 @@ pub fn notices(app: tauri::State<'_, App>) -> UiResult<NoticesView> {
 }
 
 #[tauri::command]
-pub fn notices_seen(app: tauri::State<'_, App>) -> UiResult<NoticesView> {
-    notices_seen_on(&app)
+pub fn notices_seen(
+    app: tauri::State<'_, App>,
+    alerts_seen: Vec<String>,
+) -> UiResult<NoticesView> {
+    notices_seen_on(&app, alerts_seen)
 }
 
 /// Ask the cloud for the people list and the notices now — the Staff screen and the bell.

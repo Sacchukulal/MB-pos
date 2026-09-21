@@ -721,7 +721,7 @@ export interface Commands {
   install_update: { args: void; returns: string };
   // The cloud copy, and what comes back down it.
   notices: { args: void; returns: NoticesView };
-  notices_seen: { args: void; returns: NoticesView };
+  notices_seen: { args: { alertsSeen: string[] }; returns: NoticesView };
   pull_from_cloud: { args: void; returns: NoticesView };
   diagnostics_plan: { args: void; returns: BundlePlanView };
   write_diagnostics: { args: void; returns: string };

@@ -9,6 +9,7 @@ const { ToastProvider } = await import('../src/kit');
 import type { Alert } from '../src/shell/Alerts';
 
 const LICENCE: Alert = {
+  seen: false,
   id: 'licence',
   tone: 'danger',
   icon: 'badge',
@@ -19,6 +20,7 @@ const LICENCE: Alert = {
 };
 
 const MENU: Alert = {
+  seen: false,
   id: 'setup-menu',
   tone: 'info',
   icon: 'info',
@@ -78,4 +80,31 @@ it('is as loud as the worst thing waiting', () => {
   expect(loudest([MENU])).toBe('info');
   expect(loudest([MENU, { ...MENU, id: 'b', tone: 'warn' }])).toBe('warn');
   expect(loudest([MENU, LICENCE])).toBe('danger');
+});
+
+/** What was read stays in the list — it just does not count. */
+it('shows a read alert like any other, and names where a notice came from', () => {
+  show([
+    { ...MENU, seen: true },
+    {
+      id: 'notice-1',
+      tone: 'accent',
+      icon: 'info',
+      title: 'Update available',
+      says: 'Version 1.8 is out.',
+      when: '21 Sep, 1:08 pm',
+      from: 'Magic Bill',
+      seen: false,
+    },
+  ]);
+  expect(screen.getByText('Put your menu in')).toBeTruthy();
+  expect(screen.getByText('From Magic Bill')).toBeTruthy();
+  expect(screen.getByText('21 Sep, 1:08 pm')).toBeTruthy();
+});
+
+/** The key Rust remembers an alert by changes with its sentence, so a changed alert is new. */
+it('remembers an alert by what it says, not only by what it is', async () => {
+  const { alertKey } = await import('../src/shell/Alerts');
+  expect(alertKey(LICENCE)).not.toBe(alertKey({ ...LICENCE, says: 'Your plan ended today.' }));
+  expect(alertKey(LICENCE)).toBe(alertKey({ id: LICENCE.id, says: LICENCE.says }));
 });
