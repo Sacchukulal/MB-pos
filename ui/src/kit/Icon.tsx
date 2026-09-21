@@ -34,6 +34,7 @@ export type IconName =
   | 'plus'
   | 'minus'
   | 'check'
+  | 'check-circle'
   | 'x'
   | 'chevron-down'
   | 'chevron-up'
@@ -223,6 +224,12 @@ const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5.5v13M5.5 12h13" />,
   minus: <path d="M5.5 12h13" />,
   check: <path d="M5 12.5 9.5 17 19 7.5" />,
+  'check-circle': (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8 12.5 10.75 15.25 16 9.75" />
+    </>
+  ),
   x: <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />,
   'chevron-down': <path d="M6 9.5 12 15.5 18 9.5" />,
   'chevron-up': <path d="M6 14.5 12 8.5 18 14.5" />,

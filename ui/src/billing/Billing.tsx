@@ -387,7 +387,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       // than on the next tick fifteen seconds later.
       await refreshFloor();
       searchBox.current?.focus();
-      toast.show('ok', 'Kitchen ticket sent.');
+      toast.show('ok', 'KOT sent.');
     } catch (cause) {
       // A dine-in cart with no table: ask for the number, in its own box.
       if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable('kitchen');
@@ -1112,8 +1112,9 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             size="lg"
             disabled={!cart || cart.isEmpty || acting}
             onClick={() => act(printKitchen)}
+            icon={<Icon name="printer" />}
           >
-            Kitchen ticket
+            Print KOT
           </Button>
           )}
           {/* Always live: an empty bill is refused with a sentence, never with a grey button. */}
@@ -1122,6 +1123,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             size="lg"
             disabled={!cart || acting}
             onClick={() => act(completeBill)}
+            icon={<Icon name="check-circle" />}
           >
             Complete bill
           </Button>
@@ -1149,7 +1151,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           <Button size="sm" disabled={!cart || cart.isEmpty} onClick={() => setPreview(true)}>
             Preview bill
           </Button>
-          {/* Only once a ticket has gone: before that, "Kitchen ticket" is the button. */}
+          {/* Only once a ticket has gone: before that, "Print KOT" is the button. */}
           {cart?.orderId && !cart.kitchenTicketOff ? (
             <Button size="sm" onClick={() => act(reprintKitchen)}>
               Reprint ticket

@@ -116,7 +116,7 @@ export function Gallery() {
                 <SectionHeader title="Buttons" note="Four kinds, three sizes. A screen uses one primary." />
                 <Row>
                   <Button variant="primary" size="lg">Complete bill</Button>
-                  <Button size="lg">Kitchen ticket</Button>
+                  <Button size="lg">Print KOT</Button>
                   <Button variant="primary">Save</Button>
                   <Button>Cancel</Button>
                   <Button variant="quiet">Skip</Button>
