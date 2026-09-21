@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 import { Badge, cx, EmptyState, Icon } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 import { formatMinutes } from './TableGrid';
+import { hasArrived } from './arrivals';
 
 /** The orders being cooked or served — sent to the kitchen and not yet billed, oldest first. */
 export function processingOrders(
@@ -89,7 +90,7 @@ export function Processing({
               'mb-processing__order',
               order.selected && 'mb-chosen',
               index === highlighted && 'mb-processing__order--highlighted',
-              order.orderId !== null && arrived?.has(order.orderId) === true && 'mb-arrived',
+              hasArrived(arrived, order) && 'mb-arrived',
             )}
             aria-pressed={order.selected}
             aria-current={index === highlighted ? 'true' : undefined}

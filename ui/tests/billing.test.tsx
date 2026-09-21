@@ -72,6 +72,18 @@ describe('arrivals', () => {
     act(() => vi.advanceTimersByTime(1000));
     expect(result.current.size).toBe(0);
 
+    // A phone adds food to table 1: the bill is not the bill it was, so its card beats too —
+    // a timer moving on is not that.
+    rerender({
+      floor: [{ ...busy('1'), total: { paise: 99_900n, text: '999.00' } }, busy('2'), busy('3')],
+    });
+    expect([...result.current]).toEqual(['ord_1']);
+    act(() => vi.advanceTimersByTime(3000));
+    rerender({
+      floor: [{ ...busy('1'), total: { paise: 99_900n, text: '999.00' }, minutes: 9 }, busy('2'), busy('3')],
+    });
+    expect(result.current.size).toBe(0);
+
     // The grid and the list draw the same fact.
     render(
       <TableGrid tables={[busy('3')]} filter="" onOpen={() => {}} onPrintBill={() => {}} arrived={new Set(['ord_3'])} />,

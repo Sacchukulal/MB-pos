@@ -65,4 +65,8 @@ kitchenTicketOff: boolean,
 /**
  * The billing screen shows the table grid; off, the orders being cooked take its room.
  */
-tablesOnCounter: boolean, };
+tablesOnCounter: boolean, 
+/**
+ * A beep when a phone lands an order — the shop's switch under Settings › Billing.
+ */
+arrivalBeep: boolean, };

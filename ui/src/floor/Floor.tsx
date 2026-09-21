@@ -30,6 +30,7 @@ import { call, subscribe } from '../ipc/call';
 import { useMay } from '../shell/permissions';
 /* The one table tile in the product. */
 import { AddTile, Tile } from '../billing/TableGrid';
+import { hasArrived, useArrivals } from '../billing/arrivals';
 import type { FloorView } from '../ipc/generated/FloorView';
 import type { SectionView } from '../ipc/generated/SectionView';
 import type { TableRowView } from '../ipc/generated/TableRowView';
@@ -42,6 +43,8 @@ type Filter = 'all' | 'busy' | 'attention';
 
 export function Floor() {
   const [floor, setFloor] = useState<FloorView | null>(null);
+  /** The orders that landed, or grew, while this screen was open: their tiles beat for a moment. */
+  const landed = useArrivals(floor?.tiles ?? null, floor?.arrivalBeep ?? false);
   const [section, setSection] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [editing, setEditing] = useState<TableRowView | null>(null);
@@ -173,6 +176,7 @@ export function Floor() {
     onDelete: (tile: TableView) => setDeletingOne(rowFor(tile.id)),
     canTick: (tile: TableView) => pickable && isATable(tile.id),
     onPrintBill: printTheBill,
+    landed,
     // The dashed card at the end of a room opens the panel that adds tables.
     onAddTable: pickable ? () => setArrangeOpen(true) : undefined,
   };
@@ -766,6 +770,7 @@ function Grid({
   onDelete,
   canTick,
   onPrintBill,
+  landed,
   none,
   canArrange,
   onAddTable,
@@ -779,6 +784,8 @@ function Grid({
   /** A parcel order is a tile with no table behind it — nothing to tick. */
   canTick: (tile: TableView) => boolean;
   onPrintBill: (tile: TableView) => void;
+  /** See `useArrivals`. */
+  landed: ReadonlySet<string>;
   /** True when the shop has no tables at all, rather than none in this view. */
   none?: boolean;
   canArrange: boolean;
@@ -812,6 +819,7 @@ function Grid({
           onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
           onDelete={canTick(tile) ? () => onDelete(tile) : undefined}
           onPrintBill={() => onPrintBill(tile)}
+          arrived={hasArrived(landed, tile)}
         />
       ))}
       {onAddTable ? <AddTile onAdd={onAddTable} /> : null}
@@ -833,6 +841,7 @@ function Plan({
   onDelete,
   canTick,
   onPrintBill,
+  landed,
 }: {
   floor: FloorView;
   tiles: readonly TableView[];
@@ -846,6 +855,7 @@ function Plan({
   onDelete: (tile: TableView) => void;
   canTick: (tile: TableView) => boolean;
   onPrintBill: (tile: TableView) => void;
+  landed: ReadonlySet<string>;
 }) {
   const [dragging, setDragging] = useState<string | null>(null);
   const placed = useMemo(
@@ -883,6 +893,7 @@ function Plan({
                 onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
                 onDelete={canTick(tile) ? () => onDelete(tile) : undefined}
                 onPrintBill={() => onPrintBill(tile)}
+                arrived={hasArrived(landed, tile)}
               />
             </div>
           ) : null}

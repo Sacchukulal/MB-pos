@@ -99,3 +99,4 @@ export { cx } from './cx';
 /** '3 items', never '3 item(s)'. */
 export { plural } from './words';
 export { beatsFor, useDevicePixelRatio } from './screen';
+export { beep } from './sound';

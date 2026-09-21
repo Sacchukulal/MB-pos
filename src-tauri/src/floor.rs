@@ -78,6 +78,8 @@ pub struct FloorView {
     pub can_arrange: bool,
     /// Whether the billing screen shows these tables — the switch on this screen.
     pub tables_on_counter: bool,
+    /// A beep when a phone lands an order — the shop's switch under Settings › Billing.
+    pub arrival_beep: bool,
 }
 
 /// What a change to several tables at once did — and what it left alone, named, with the
@@ -239,6 +241,7 @@ pub fn floor_on(app: &App) -> UiResult<FloorView> {
                     has_layout: tables.iter().any(|t| t.pos.is_some()),
                     can_arrange,
                     tables_on_counter: config.billing.tables_on_counter,
+                    arrival_beep: config.billing.arrival_beep,
                     warn_minutes: crate::ipc::count(warn),
                     late_minutes: crate::ipc::count(late),
                 })

@@ -95,6 +95,7 @@ function floor(over: Partial<FloorView> = {}): FloorView {
     // The default is an owner, because the interesting cases are about the arranging panel.
     canArrange: true,
     tablesOnCounter: true,
+    arrivalBeep: false,
     ...over,
   };
 }

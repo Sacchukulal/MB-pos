@@ -71,7 +71,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const [floor, setFloor] = useState<readonly TableView[] | null>(null);
   const tables = floor ?? NO_TABLES;
   /** The orders that landed while this screen was open: their cards beat for a moment. */
-  const arrived = useArrivals(floor);
+  const arrived = useArrivals(floor, cart?.arrivalBeep ?? false);
   const [menu, setMenu] = useState<readonly MenuItemView[]>([]);
   // The grid is unfiltered: the search box is for the menu, and a table is reached by typing
   // its number and pressing Enter.

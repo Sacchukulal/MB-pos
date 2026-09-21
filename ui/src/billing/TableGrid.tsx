@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from 'react';
 
 import { Button, cx, EmptyState, Icon } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
+import { hasArrived } from './arrivals';
 
 /* The tile brings its own styling. */
 import './billing.css';
@@ -98,7 +99,7 @@ export function TableGrid({
                 onOpen={() => onOpen(table)}
                 onPrintBill={() => onPrintBill(table)}
                 onSplit={onSplit ? () => onSplit(table) : undefined}
-                arrived={table.orderId !== null && arrived?.has(table.orderId) === true}
+                arrived={hasArrived(arrived, table)}
               />
             ))}
           </div>

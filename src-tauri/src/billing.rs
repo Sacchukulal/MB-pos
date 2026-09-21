@@ -301,6 +301,8 @@ pub struct CartView {
     pub kitchen_ticket_off: bool,
     /// The billing screen shows the table grid; off, the orders being cooked take its room.
     pub tables_on_counter: bool,
+    /// A beep when a phone lands an order — the shop's switch under Settings › Billing.
+    pub arrival_beep: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -547,6 +549,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         order_type_locked: config.billing.lock_order_type,
         kitchen_ticket_off: config.billing.kitchen_ticket_off,
         tables_on_counter: config.billing.tables_on_counter,
+        arrival_beep: config.billing.arrival_beep,
     })
 }
 

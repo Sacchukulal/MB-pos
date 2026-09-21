@@ -24,4 +24,8 @@ canArrange: boolean,
 /**
  * Whether the billing screen shows these tables — the switch on this screen.
  */
-tablesOnCounter: boolean, };
+tablesOnCounter: boolean, 
+/**
+ * A beep when a phone lands an order — the shop's switch under Settings › Billing.
+ */
+arrivalBeep: boolean, };

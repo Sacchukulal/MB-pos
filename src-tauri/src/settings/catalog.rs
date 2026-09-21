@@ -1865,6 +1865,16 @@ pub const CATALOG: &[Entry] = &[
         ["lock", "idle", "timeout", "screen"], 0..=240 "minutes", u32,
         billing.idle_lock_minutes),
     flag!(
+        "billing.arrival_beep",
+        Billing,
+        Row,
+        "Beep when an order comes in",
+        "A short sound when a phone puts an order on the floor, or adds to one already there. \
+         The card beats either way; this is for a cashier looking at a customer, not the screen.",
+        ["beep", "sound", "chime", "alert", "phone order", "notification"],
+        billing.arrival_beep
+    ),
+    flag!(
         "billing.kitchen_ticket_off",
         Billing,
         Row,
@@ -2231,6 +2241,7 @@ const TOPICS: &[(&str, &str)] = &[
     ("billing.locked_order_type", "At the counter"),
     ("billing.kitchen_ticket_off", "Before it prints"),
     ("billing.kitchen_screen", "Before it prints"),
+    ("billing.arrival_beep", "At the counter"),
     ("billing.idle_lock_minutes", "At the counter"),
     ("billing.service_charge", "Charges you add"),
     ("billing.packing_charge", "Charges you add"),
