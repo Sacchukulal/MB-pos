@@ -213,7 +213,9 @@ describe('the settings screen', () => {
     const name = await screen.findByLabelText('Shop name');
     fireEvent.change(name, { target: { value: 'Anna Kuteera Veg' } });
 
-    expect(screen.getByText('not saved')).toBeTruthy();
+    // The field wears a stripe; the words are in the save bar, once.
+    expect(name.closest('.mb-settings__field')!.classList.contains('mb-settings__field--changed')).toBe(true);
+    expect(screen.queryByText('not saved')).toBeNull();
     expect(screen.getByText(/1 setting changed and not saved/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -234,7 +236,7 @@ describe('the settings screen', () => {
 
     fireEvent.change(name, { target: { value: 'Anna Kuteera' } });
     expect(screen.queryByText(/changed and not saved/)).toBeNull();
-    expect(screen.queryByText('not saved')).toBeNull();
+    expect(name.closest('.mb-settings__field')!.classList.contains('mb-settings__field--changed')).toBe(false);
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
   });
 
@@ -373,7 +375,8 @@ describe('the settings screen', () => {
 
     // And editing either one marks the LINE, not a box inside it.
     fireEvent.click(screen.getByLabelText('Title in bold'));
-    expect(line!.textContent).toContain('not saved');
+    expect(line!.classList.contains('mb-settings__field--changed')).toBe(true);
+    expect(line!.querySelector('.mb-settings__field--changed')).toBeNull();
   });
 
   it('asks for the KITCHEN sample on the kitchen section', async () => {

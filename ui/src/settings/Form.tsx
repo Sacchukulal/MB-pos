@@ -177,11 +177,6 @@ function Line({
           />
         ))}
       </div>
-      {changed ? (
-        <span className="mb-settings__mark" aria-label="changed and not saved">
-          not saved
-        </span>
-      ) : null}
     </div>
   );
 }
@@ -326,11 +321,6 @@ export function Field({
       )}
     >
       {body}
-      {changed ? (
-        <span className="mb-settings__mark" aria-label="changed and not saved">
-          not saved
-        </span>
-      ) : null}
     </div>
   );
 }

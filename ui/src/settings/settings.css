@@ -141,16 +141,12 @@
   min-width: 0;
 }
 
-/* Changed and not saved. */
+/* Changed and not saved: a silent stripe; the save bar carries the words. */
 .mb-settings__field--changed {
   padding-left: var(--space-3);
   border-left: var(--tile-stripe) solid var(--warn);
 }
 
-.mb-settings__mark {
-  font-size: var(--text-xs);
-  color: var(--warn);
-}
 
 /*
  * A search hit says which section it came from, or "Round off the total" answers a question
