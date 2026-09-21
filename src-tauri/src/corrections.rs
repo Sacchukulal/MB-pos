@@ -205,7 +205,10 @@ pub fn bills_on(app: &App, filter: BillFilter) -> UiResult<BillsView> {
                     tables.iter().find(|t| &t.id == id).map(|t| t.label.clone())
                 };
 
-                let mut rows = Vec::new();
+                // Each row with the clock it sorts by: when the bill happened, then its
+                // number — the two run together, so two bills of the same minute still
+                // read in series.
+                let mut rows: Vec<((mb_core::Timestamp, u64), BillRowView)> = Vec::new();
                 let mut cashiers: Vec<crate::lan::PersonPick> = Vec::new();
                 for order in repos
                     .orders()
@@ -231,15 +234,23 @@ pub fn bills_on(app: &App, filter: BillFilter) -> UiResult<BillsView> {
 
                     let reprints = repos.corrections().reprint_count(&id)?;
                     let refunded = repos.corrections().refunded_so_far(&id)?;
-                    rows.push(BillRowView {
-                        reprints,
-                        refunded: refunded.is_positive().then(|| MoneyView::from(refunded)),
-                        ..row
-                    });
+                    let Some(at) = billed_at(&order) else {
+                        continue;
+                    };
+                    let number = order.bill_number().map_or(0, |n| n.value);
+                    rows.push((
+                        (at, number),
+                        BillRowView {
+                            reprints,
+                            refunded: refunded.is_positive().then(|| MoneyView::from(refunded)),
+                            ..row
+                        },
+                    ));
                 }
                 // Newest first: the bill somebody wants is nearly always the one that just
                 // printed.
-                rows.reverse();
+                rows.sort_by(|a, b| b.0.cmp(&a.0));
+                let rows: Vec<BillRowView> = rows.into_iter().map(|(_, row)| row).collect();
                 cashiers.sort_by(|a, b| a.name.cmp(&b.name));
 
                 let totals = totals_of(&rows);
@@ -293,6 +304,18 @@ impl Names<'_> {
 }
 
 /// Who took the money, or who cancelled.
+/// When the bill happened: the moment it was paid, or the moment it was cancelled. The
+/// order was opened earlier, sometimes much earlier on a table, and that clock does not run
+/// in step with the bill numbers; this one does. The Bills list shows and sorts by it.
+fn billed_at(order: &AnyOrder) -> Option<mb_core::Timestamp> {
+    match order {
+        AnyOrder::Settled(o) => Some(o.settled_at),
+        AnyOrder::Voided(o) => Some(o.settled_at),
+        AnyOrder::Cancelled(o) => Some(o.cancelled_at),
+        AnyOrder::Draft(_) | AnyOrder::Open(_) => None,
+    }
+}
+
 fn taken_by(order: &AnyOrder) -> Option<&StaffId> {
     match order {
         AnyOrder::Settled(o) => Some(&o.settled_by),
@@ -360,7 +383,7 @@ fn bill_row(
             .bill_number()
             .map(|n| n.formatted.clone())
             .unwrap_or_default(),
-        at: words::when(core.created_at),
+        at: words::when(billed_at(order)?),
         table: core.table().map(|t| {
             let label = label_of(t).unwrap_or_else(|| t.as_str().to_owned());
             match core.seat() {
