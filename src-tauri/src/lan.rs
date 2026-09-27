@@ -395,9 +395,9 @@ impl mb_lan::Counter for Bridge {
 
         match crate::orders::apply(&app, &device.id, &staff, &device.permissions, intent) {
             Ok(applied) => {
-                // The cashier is told, never overwritten.
-                if let Some(change) = applied.tell_the_cashier {
-                    app.note_floor_change(change);
+                // Applying the intent reconciles the cart and records the notice under
+                // the same action lock. The adapter only delivers the notification.
+                if applied.tell_the_cashier.is_some() {
                     // And tell the screen, because a note the cashier has to press something to
                     // discover is a note they find after they have taken the money.
                     crate::push::emit_floor_change(&self.handle);
@@ -422,11 +422,15 @@ impl mb_lan::Counter for Bridge {
             .clone()
             .map_or_else(|| StaffId::new(crate::state::DEFAULT_STAFF), StaffId::new);
 
-        crate::orders::apply_batch(&app, &device.id, &staff, &device.permissions, batch)
+        let result = crate::orders::apply_batch(&app, &device.id, &staff, &device.permissions, batch)
             .unwrap_or_else(|e| mb_lan::BatchResult {
                 outcomes: Vec::new(),
                 says: e.message,
-            })
+            });
+        // Add More on a phone uses batches too. Refresh the counter after the last
+        // intent has reconciled, including batches that changed notes or quantities.
+        crate::push::emit_floor_change(&self.handle);
+        result
     }
 
     fn receive(&self, device: &mb_lan::Device, forwarded: &mb_lan::Forwarded) -> mb_lan::Receipt {

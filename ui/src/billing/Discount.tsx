@@ -17,6 +17,7 @@ export function DiscountDialog({
   line = null,
   onClose,
   onChanged,
+  onFailed,
 }: {
   cart: CartView;
   /** One line of the bill, when the money comes off that line alone. */
@@ -24,6 +25,7 @@ export function DiscountDialog({
   onClose: () => void;
   /** The whole recomputed cart, straight from Rust. */
   onChanged: (cart: CartView) => void;
+  onFailed?: (cause: unknown) => void;
 }) {
   const [kind, setKind] = useState('percent');
   const [value, setValue] = useState('');
@@ -45,6 +47,7 @@ export function DiscountDialog({
           value,
           reason: reason.trim() === '' ? null : reason.trim(),
           line: line ? line.index : null,
+          expectedLine: line?.editToken,
         }),
       );
       onClose();
@@ -52,6 +55,7 @@ export function DiscountDialog({
       // Rust's sentence, verbatim — "that is 30% — you can give up to 10%" is already what a
       // cashier needs to read.
       setProblem(isUiError(cause) ? cause.message : String(cause));
+      if (isUiError(cause) && cause.code === 'order.changed') onFailed?.(cause);
     } finally {
       setBusy(false);
     }
@@ -61,10 +65,11 @@ export function DiscountDialog({
     setBusy(true);
     setProblem(null);
     try {
-      onChanged(await call('cart_clear_discount', { line: line ? line.index : null }));
+      onChanged(await call('cart_clear_discount', { line: line ? line.index : null, expectedLine: line?.editToken }));
       onClose();
     } catch (cause) {
       setProblem(isUiError(cause) ? cause.message : String(cause));
+      if (isUiError(cause) && cause.code === 'order.changed') onFailed?.(cause);
     } finally {
       setBusy(false);
     }

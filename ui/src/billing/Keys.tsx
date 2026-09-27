@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { Button, Input, Modal, NumberInput, Pick, cx, onlyAmount } from '../kit';
+import { Button, Icon, Input, Modal, NumberInput, Pick, cx, onlyAmount } from '../kit';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
 import { SHORTCUTS, type Mode } from './keyboard';
@@ -113,32 +113,41 @@ export function HowMany({
  */
 export function TableBox({
   tables,
+  busy = false,
   onOpen,
   onClose,
 }: {
   tables: readonly TableView[];
-  onOpen: (table: TableView) => void;
+  busy?: boolean;
+  onOpen: (table: TableView, seat?: string) => void;
   onClose: () => void;
 }) {
   const [typed, setTyped] = useState('');
   const [problem, setProblem] = useState<string | undefined>();
+  const [occupied, setOccupied] = useState<TableView | null>(null);
   const submit = () => {
+    if (busy) return;
     const wanted = typed.trim().toLowerCase();
-    const table = tables.find((t) => t.label.toLowerCase() === wanted);
-    if (table) onOpen(table);
+    const table = tables.find((t) => !t.seat && t.label.toLowerCase() === wanted);
+    if (table?.orderId || (table && table.state !== 'free')) setOccupied(table);
+    else if (table) onOpen(table);
     else setProblem(wanted === '' ? 'Type the table number.' : `There is no table ${typed.trim()}.`);
   };
+
+  if (occupied) {
+    return <OccupiedTableBox table={occupied} tables={tables} busy={busy} onOpen={onOpen} onClose={onClose} />;
+  }
 
   return (
     <Modal
       open
       small
       title="Which table?"
-      onClose={onClose}
+      onClose={() => { if (!busy) onClose(); }}
       actions={
         <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit}>
+          <Button disabled={busy} onClick={onClose}>Cancel</Button>
+          <Button disabled={busy} variant="primary" onClick={submit}>
             Open
           </Button>
         </>
@@ -149,6 +158,7 @@ export function TableBox({
         value={typed}
         autoFocus
         autoComplete="off"
+        disabled={busy}
         error={problem}
         onChange={(event) => {
           setTyped(event.target.value);
@@ -157,11 +167,91 @@ export function TableBox({
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault();
+            // React can mount the next dialog before this native event reaches document.
+            // Keep this press from also confirming that dialog's default choice.
+            event.stopPropagation();
+            if (event.repeat) return;
             submit();
           }
         }}
       />
     </Modal>
+  );
+}
+
+/** Keep the existing party, or carry the typed items to a separate bill on this table. */
+function OccupiedTableBox({ table, tables, busy, onOpen, onClose }: {
+  table: TableView;
+  tables: readonly TableView[];
+  busy: boolean;
+  onOpen: (table: TableView, seat?: string) => void;
+  onClose: () => void;
+}) {
+  const [seat, setSeat] = useState<string | undefined>();
+  const picker = useRef<HTMLDivElement>(null);
+  // A is the original party. Saved and unsaved parties both reserve their letters.
+  // Saved subtable tiles carry the ORDER id, so match their printed seat in the same room.
+  const taken = new Set(tables.filter((t) => t.seat && t.section === table.section
+    && t.label === `${table.label}${t.seat}`).map((t) => t.seat));
+  const choices: (string | undefined)[] = [
+    undefined,
+    ...Array.from('BCDEFGHIJKLMNOPQRSTUVWXYZ').filter((letter) => !taken.has(letter)),
+  ];
+  const available = seat === undefined || !taken.has(seat);
+  const label = `${table.label}${seat ?? ''}`;
+  const choose = () => {
+    if (!busy && available) onOpen(table, seat);
+  };
+  const step = (direction: number) => {
+    if (busy) return;
+    const index = Math.max(0, choices.indexOf(seat));
+    setSeat(choices[Math.max(0, Math.min(choices.length - 1, index + direction))]);
+    picker.current?.focus();
+  };
+  useEffect(() => { picker.current?.focus(); }, []);
+
+  return (
+    <div onKeyDown={(event) => {
+      if (event.key === 'Enter' && event.repeat) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        event.stopPropagation();
+        step(event.key === 'ArrowLeft' ? -1 : 1);
+      }
+    }}>
+      <Modal
+        open
+        small
+        title={`Table ${table.label} already has an order`}
+        onClose={() => { if (!busy) onClose(); }}
+        onEnter={choose}
+        actions={<>
+          <Button disabled={busy} onClick={onClose}>Cancel</Button>
+          <Button disabled={busy || !available} variant="primary" onClick={choose}>Continue</Button>
+        </>}
+      >
+        <div className="mb-ask">
+          <div ref={picker} className="mb-table-choice" tabIndex={0} role="group" aria-label="Order table">
+            <Button disabled={busy || seat === undefined} aria-label="Previous table option" onClick={() => step(-1)}>
+              <Icon name="chevron-left" />
+            </Button>
+            <span className="mb-table-choice__label" aria-live="polite">{label}</span>
+            <Button disabled={busy || seat === choices[choices.length - 1]} aria-label="Next table option" onClick={() => step(1)}>
+              <Icon name="chevron-right" />
+            </Button>
+          </div>
+          <span>{seat === undefined ? 'Add items to the existing order.' : `Create a separate order on table ${label}.`}</span>
+          {!available ? <span role="alert">This subtable was just taken. Choose another letter.</span> : null}
+          <span className="mb-ask__keys">
+            <kbd className="mb-kbd">{'\u2190 \u2192'}</kbd> choose <kbd className="mb-kbd">Enter</kbd> continue
+          </span>
+        </div>
+      </Modal>
+    </div>
   );
 }
 

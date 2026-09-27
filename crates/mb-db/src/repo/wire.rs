@@ -9,7 +9,7 @@
 use base64::Engine as _;
 use mb_core::{
     AnyOrder, Bill, BusinessDay, Cart, CartLine, Charge, Claimed, DiscountEntry, KitchenLedger,
-    Money, OrderCore, OrderId, Placement, Settlement, SettledOrder, StaffId, TableId, Timestamp,
+    Money, OrderCore, OrderId, Placement, SettledOrder, Settlement, StaffId, TableId, Timestamp,
 };
 use rusqlite::Transaction;
 use rusqlite::types::ValueRef;
@@ -69,10 +69,20 @@ impl WireRow {
     pub fn from_json(v: &Value) -> Result<WireRow, DbError> {
         let bad = |what: &str| DbError::invariant(format!("a wire row needs {what}"));
         Ok(WireRow {
-            table: v.get("table").and_then(Value::as_str).ok_or_else(|| bad("a table"))?.to_owned(),
-            id: v.get("id").and_then(Value::as_str).ok_or_else(|| bad("an id"))?.to_owned(),
+            table: v
+                .get("table")
+                .and_then(Value::as_str)
+                .ok_or_else(|| bad("a table"))?
+                .to_owned(),
+            id: v
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| bad("an id"))?
+                .to_owned(),
             updated_at: Timestamp::from_millis(
-                v.get("updated_at").and_then(Value::as_i64).ok_or_else(|| bad("updated_at"))?,
+                v.get("updated_at")
+                    .and_then(Value::as_i64)
+                    .ok_or_else(|| bad("updated_at"))?,
             ),
             deleted: v.get("deleted").and_then(Value::as_bool).unwrap_or(false),
             data: v.get("data").cloned().unwrap_or_else(|| json!({})),
@@ -197,7 +207,12 @@ impl<'a> WireRepo<'a> {
         else {
             return Ok(Vec::new());
         };
-        Ok(vec![Self::wire_row(&row.table_name, &row.row_id, row.created_at, data)])
+        Ok(vec![Self::wire_row(
+            &row.table_name,
+            &row.row_id,
+            row.created_at,
+            data,
+        )])
     }
 
     /// One wire row from a map of columns, stamped with the row's own moment where it has one.
@@ -245,7 +260,12 @@ impl<'a> WireRepo<'a> {
         if let Some(fix) = fix {
             fix(&mut data);
         }
-        Ok(vec![Self::wire_row(&row.table_name, &row.row_id, row.created_at, data)])
+        Ok(vec![Self::wire_row(
+            &row.table_name,
+            &row.row_id,
+            row.created_at,
+            data,
+        )])
     }
 
     /// The 0/1 columns the cloud types as booleans. ONE list, applied to every typed row.
@@ -273,7 +293,11 @@ impl<'a> WireRepo<'a> {
         params: P,
     ) -> Result<Vec<Map<String, Value>>, DbError> {
         let mut stmt = self.tx.prepare(sql)?;
-        let names: Vec<String> = stmt.column_names().iter().map(|s| (*s).to_owned()).collect();
+        let names: Vec<String> = stmt
+            .column_names()
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
         let mut rows = stmt.query(params)?;
         let mut out = Vec::new();
         while let Some(r) = rows.next()? {
@@ -311,14 +335,24 @@ impl<'a> WireRepo<'a> {
         let Some(first) = out.first_mut() else {
             return Ok(out);
         };
-        let mut stmt = self
-            .tx
-            .prepare_cached("SELECT permission_code FROM role_permissions WHERE role_id = ?1 ORDER BY 1")?;
+        let mut stmt = self.tx.prepare_cached(
+            "SELECT permission_code FROM role_permissions WHERE role_id = ?1 ORDER BY 1",
+        )?;
         let codes = stmt
             .query_map([&row.row_id], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         if let Value::Object(map) = &mut first.data {
-            map.insert("permissions".to_owned(), json!(codes));
+            if mb_auth::is_owner_role(Some(&row.row_id)) {
+                map.insert(
+                    "permissions".to_owned(),
+                    json!(mb_auth::PermissionSet::everything().codes()),
+                );
+                map.insert("max_discount_bp".to_owned(), Value::Null);
+                map.insert("max_discount_paise".to_owned(), Value::Null);
+                map.insert("is_builtin".to_owned(), Value::Bool(true));
+            } else {
+                map.insert("permissions".to_owned(), json!(codes));
+            }
         }
         Ok(out)
     }
@@ -331,17 +365,29 @@ impl<'a> WireRepo<'a> {
     /// One stored row, whole, as a wire row — and, for a table whose children travel with it,
     /// each child as a wire row of its own. This is the one boxed reader: the outbox, the day
     /// file and `with_row` all read through it.
-    pub fn whole_rows(&self, table: &str, id: &str, at: Timestamp) -> Result<Vec<WireRow>, DbError> {
+    pub fn whole_rows(
+        &self,
+        table: &str,
+        id: &str,
+        at: Timestamp,
+    ) -> Result<Vec<WireRow>, DbError> {
         let Some(data) = self.stored_row(table, id)? else {
             return Ok(Vec::new());
         };
         let mut out = vec![Self::wire_row(table, id, at, data)];
         for (child, parent_column) in children_of(table) {
             for row in self.select_all(
-                &format!("SELECT * FROM \"{child}\" WHERE \"{parent_column}\" = ?1 ORDER BY \"{}\"", key_column(child)),
+                &format!(
+                    "SELECT * FROM \"{child}\" WHERE \"{parent_column}\" = ?1 ORDER BY \"{}\"",
+                    key_column(child)
+                ),
                 [id],
             )? {
-                let child_id = row.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
+                let child_id = row
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
                 out.push(Self::wire_row(child, &child_id, at, row));
             }
         }
@@ -401,7 +447,14 @@ impl<'a> WireRepo<'a> {
 
     /// The one builder of a cloud bill, whatever became of the order.
     fn bill_row(&self, outlet: &str, parts: &Billed<'_>) -> Result<WireRow, DbError> {
-        let Billed { core, token, number, money, staff, fate } = *parts;
+        let Billed {
+            core,
+            token,
+            number,
+            money,
+            staff,
+            fate,
+        } = *parts;
         let id = core.id.as_str();
         let repos = crate::repo::Repos::new(self.tx);
 
@@ -413,7 +466,11 @@ impl<'a> WireRepo<'a> {
         )?;
         let customer_name: Option<String> = self
             .tx
-            .query_row("SELECT customer_name FROM bills WHERE order_id = ?1", [id], |r| r.get(0))
+            .query_row(
+                "SELECT customer_name FROM bills WHERE order_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
             .ok()
             .flatten();
 
@@ -424,19 +481,32 @@ impl<'a> WireRepo<'a> {
                     .find_table(table)?
                     .map(|t| t.label)
                     .unwrap_or_else(|| table.as_str().to_owned());
-                let seat = seat.as_ref().map(|x| x.as_str().to_owned()).unwrap_or_default();
+                let seat = seat
+                    .as_ref()
+                    .map(|x| x.as_str().to_owned())
+                    .unwrap_or_default();
                 ("table", Some(format!("{label}{seat}")))
             }
             Placement::Parcel => ("parcel", None),
             Placement::SelfService => ("self_service", None),
             Placement::Delivery => ("delivery", None),
         };
-        let staff_name = repos.people().find_staff(outlet, staff.as_str())?.map(|p| p.name);
+        let staff_name = repos
+            .people()
+            .find_staff(outlet, staff.as_str())?
+            .map(|p| p.name);
 
         // What rebuilds the order on another counter. Nothing here repeats a typed column:
         // `settled_at` and the settling person are read back from `settled_at` / `staff_id`.
         let mut restore = Map::new();
         restore.insert("placement".to_owned(), json!(core.placement));
+        restore.insert("billing".to_owned(), json!(core.billing));
+        let versions: Vec<String> = self
+            .tx
+            .prepare("SELECT snapshot FROM bill_versions WHERE order_id = ?1 ORDER BY revision")?
+            .query_map([id], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        restore.insert("versions".to_owned(), json!(versions));
         if let Some(covers) = core.covers {
             restore.insert("covers".to_owned(), json!(covers));
         }
@@ -473,7 +543,12 @@ impl<'a> WireRepo<'a> {
         }
         let (status, settled_at, reason, updated_at) = match fate {
             Fate::Settled { at } => ("settled", Some(at), None, at),
-            Fate::Voided { settled_at, reason, at, by } => {
+            Fate::Voided {
+                settled_at,
+                reason,
+                at,
+                by,
+            } => {
                 restore.insert(
                     "void".to_owned(),
                     json!({ "reason": reason, "voided_at": ms(at), "voided_by": by }),
@@ -490,21 +565,21 @@ impl<'a> WireRepo<'a> {
         };
 
         let paise = |m: Money| m.paise();
-        let (subtotal, discount, tax, charges_total, round_off, grand_total) = money.map_or(
-            (0, 0, 0, 0, 0, 0),
-            |(bill, _)| {
+        let (subtotal, discount, tax, charges_total, round_off, grand_total) =
+            money.map_or((0, 0, 0, 0, 0, 0), |(bill, _)| {
                 let gst = bill.total_gst;
                 (
                     paise(bill.subtotal),
                     paise(bill.total_discount),
-                    gst.central.paise() + gst.state.paise() + gst.integrated.paise()
+                    gst.central.paise()
+                        + gst.state.paise()
+                        + gst.integrated.paise()
                         + bill.total_vat.into_money().paise(),
                     paise(bill.total_charges),
                     paise(bill.round_off),
                     paise(bill.grand_total),
                 )
-            },
-        );
+            });
         let data = json!({
             "terminal_id": terminal_id,
             "bill_number": number.formatted,
@@ -555,12 +630,19 @@ impl<'a> WireRepo<'a> {
     /// The day's one row: bills, money, the split by payment mode, the expenses. The money is
     /// `DaysRepo::figures` — the same figures the close freezes; gross, discount and tax are
     /// the day-wise report's.
-    pub(crate) fn day_totals(&self, outlet: &str, key: &str, at: Timestamp) -> Result<Option<WireRow>, DbError> {
+    pub(crate) fn day_totals(
+        &self,
+        outlet: &str,
+        key: &str,
+        at: Timestamp,
+    ) -> Result<Option<WireRow>, DbError> {
         let day = Self::day_of(key)?;
         let repos = crate::repo::Repos::new(self.tx);
         let figures = repos.days().figures(outlet, day)?;
         let voids = repos.corrections().day_totals(outlet, day)?.voided_bills;
-        let by_day = repos.reports().sales_by(outlet, Period::one_day(day), SalesBy::Day)?;
+        let by_day = repos
+            .reports()
+            .sales_by(outlet, Period::one_day(day), SalesBy::Day)?;
         let mut by_payment = Map::new();
         for (mode, amount) in &figures.by_payment {
             by_payment.insert(mode.clone(), Value::from(amount.paise()));
@@ -600,7 +682,13 @@ impl<'a> WireRepo<'a> {
     }
 
     /// One row per item (or category) sold that day.
-    pub(crate) fn day_group_totals(&self, outlet: &str, key: &str, at: Timestamp, by: SalesBy) -> Result<Vec<WireRow>, DbError> {
+    pub(crate) fn day_group_totals(
+        &self,
+        outlet: &str,
+        key: &str,
+        at: Timestamp,
+        by: SalesBy,
+    ) -> Result<Vec<WireRow>, DbError> {
         let day = Self::day_of(key)?;
         let repos = crate::repo::Repos::new(self.tx);
         let buckets = repos.reports().sales_by(outlet, Period::one_day(day), by)?;
@@ -612,7 +700,11 @@ impl<'a> WireRepo<'a> {
                 SalesBy::Item => {
                     let category_id: Option<String> = self
                         .tx
-                        .query_row("SELECT category_id FROM items WHERE id = ?1", [&b.key], |r| r.get(0))
+                        .query_row(
+                            "SELECT category_id FROM items WHERE id = ?1",
+                            [&b.key],
+                            |r| r.get(0),
+                        )
                         .ok()
                         .flatten();
                     (
@@ -654,7 +746,9 @@ impl<'a> WireRepo<'a> {
         let Value::Object(map) = payload else {
             return Ok(false);
         };
-        let mut stmt = self.tx.prepare(&format!("PRAGMA table_info(\"{table}\")"))?;
+        let mut stmt = self
+            .tx
+            .prepare(&format!("PRAGMA table_info(\"{table}\")"))?;
         let columns: Vec<String> = stmt
             .query_map([], |r| r.get::<_, String>(1))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -676,10 +770,8 @@ impl<'a> WireRepo<'a> {
             .join(", ");
         let sql = format!("INSERT OR REPLACE INTO \"{table}\" ({names}) VALUES ({marks})");
         let mut stmt = self.tx.prepare(&sql)?;
-        let params: Vec<rusqlite::types::Value> = present
-            .iter()
-            .map(|c| to_sql(&map[*c]))
-            .collect();
+        let params: Vec<rusqlite::types::Value> =
+            present.iter().map(|c| to_sql(&map[*c])).collect();
         stmt.execute(rusqlite::params_from_iter(params))?;
         Ok(true)
     }
@@ -709,13 +801,18 @@ impl<'a> WireRepo<'a> {
         };
         let parsed: Restore = serde_json::from_value(restore.clone())
             .map_err(|e| DbError::invariant(format!("bill {id} could not be read back: {e}")))?;
-        let lines: Vec<CartLine> = serde_json::from_value(data.get("lines").cloned().unwrap_or(Value::Null))
-            .map_err(|e| DbError::invariant(format!("bill {id} lines could not be read back: {e}")))?;
+        let lines: Vec<CartLine> = serde_json::from_value(
+            data.get("lines").cloned().unwrap_or(Value::Null),
+        )
+        .map_err(|e| DbError::invariant(format!("bill {id} lines could not be read back: {e}")))?;
         let business_day = encode::business_day_from_sql(
-            data.get("business_day").and_then(Value::as_i64).unwrap_or(0),
+            data.get("business_day")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
             "bills.business_day",
         )?;
-        let created_at = encode::timestamp_from_sql(data.get("created_at").and_then(Value::as_i64).unwrap_or(0));
+        let created_at =
+            encode::timestamp_from_sql(data.get("created_at").and_then(Value::as_i64).unwrap_or(0));
         let terminal_id = data
             .get("terminal_id")
             .and_then(Value::as_str)
@@ -725,16 +822,20 @@ impl<'a> WireRepo<'a> {
             Some(number) => number,
             None => Claimed {
                 value: 0,
-                formatted: data.get("bill_number").and_then(Value::as_str).unwrap_or("").to_owned(),
+                formatted: data
+                    .get("bill_number")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
                 business_day,
             },
         };
 
-        let mut cart = Cart::new();
-        for line in lines {
-            cart.push(line)
-                .map_err(|e| DbError::invariant(format!("bill {id} line could not be restored: {e}")))?;
-        }
+        // Restore the issued rows exactly. Coalescing equal lines can change per-line
+        // discount/tax rounding and lose the bill's original line structure.
+        let cart = Cart::from_lines(lines).map_err(|e| {
+            DbError::invariant(format!("bill {id} lines could not be restored: {e}"))
+        })?;
         let core = OrderCore {
             id: OrderId::new(id),
             business_day,
@@ -745,6 +846,7 @@ impl<'a> WireRepo<'a> {
             created_by: parsed.created_by,
             note: parsed.note,
             kitchen: KitchenLedger::new(),
+            billing: parsed.billing,
         };
 
         let order = if let Some(cancel) = parsed.cancel {
@@ -758,11 +860,17 @@ impl<'a> WireRepo<'a> {
             })
         } else {
             let Some(input) = parsed.bill_input else {
-                return Err(DbError::invariant(format!("bill {id} carries no bill input")));
+                return Err(DbError::invariant(format!(
+                    "bill {id} carries no bill input"
+                )));
             };
             let settlement: Settlement =
                 serde_json::from_value(data.get("payments").cloned().unwrap_or(Value::Null))
-                    .map_err(|e| DbError::invariant(format!("bill {id} payments could not be read back: {e}")))?;
+                    .map_err(|e| {
+                        DbError::invariant(format!(
+                            "bill {id} payments could not be read back: {e}"
+                        ))
+                    })?;
             let bill = mb_core::compute_bill(mb_core::BillInput {
                 cart: &core.cart,
                 bill_discount: input.bill_discount,
@@ -782,8 +890,14 @@ impl<'a> WireRepo<'a> {
                 .unwrap_or(0);
             let settled_by = parsed
                 .settled_by
-                .or_else(|| data.get("staff_id").and_then(Value::as_str).map(StaffId::new))
-                .ok_or_else(|| DbError::invariant(format!("bill {id} names nobody who settled it")))?;
+                .or_else(|| {
+                    data.get("staff_id")
+                        .and_then(Value::as_str)
+                        .map(StaffId::new)
+                })
+                .ok_or_else(|| {
+                    DbError::invariant(format!("bill {id} names nobody who settled it"))
+                })?;
             let settled = SettledOrder {
                 core,
                 token: parsed.token,
@@ -796,14 +910,29 @@ impl<'a> WireRepo<'a> {
             match parsed.void {
                 Some(v) => AnyOrder::Voided(
                     settled
-                        .void(&v.reason, v.voided_by, encode::timestamp_from_sql(v.voided_at))
-                        .map_err(|e| DbError::invariant(format!("bill {id} could not be voided back: {e}")))?,
+                        .void(
+                            &v.reason,
+                            v.voided_by,
+                            encode::timestamp_from_sql(v.voided_at),
+                        )
+                        .map_err(|e| {
+                            DbError::invariant(format!("bill {id} could not be voided back: {e}"))
+                        })?,
                 ),
                 None => AnyOrder::Settled(settled),
             }
         };
         let repos = crate::repo::Repos::new(self.tx);
         repos.orders().save(outlet, &terminal_id, &order)?;
+        for snapshot in parsed.versions {
+            let old: AnyOrder =
+                serde_json::from_str(&snapshot).map_err(|e| DbError::invariant(e.to_string()))?;
+            if old.core().id.as_str() != id {
+                return Err(DbError::invariant("bill version belongs to another order"));
+            }
+            self.tx.execute("INSERT INTO bill_versions (id, order_id, revision, snapshot) VALUES (?1, ?2, ?3, ?4) ON CONFLICT DO NOTHING",
+                rusqlite::params![format!("{id}_v{}", old.core().billing.revision), id, old.core().billing.revision, snapshot])?;
+        }
         if let Some(customer) = data.get("customer_id").and_then(Value::as_str) {
             self.tx.execute(
                 "UPDATE orders SET customer_id = ?2 WHERE id = ?1",
@@ -834,9 +963,20 @@ struct Billed<'a> {
 /// What became of the order a cloud bill stands for.
 #[derive(Clone, Copy)]
 enum Fate<'a> {
-    Settled { at: Timestamp },
-    Voided { settled_at: Timestamp, reason: &'a str, at: Timestamp, by: &'a StaffId },
-    Cancelled { reason: &'a str, at: Timestamp, by: &'a StaffId },
+    Settled {
+        at: Timestamp,
+    },
+    Voided {
+        settled_at: Timestamp,
+        reason: &'a str,
+        at: Timestamp,
+        by: &'a StaffId,
+    },
+    Cancelled {
+        reason: &'a str,
+        at: Timestamp,
+        by: &'a StaffId,
+    },
 }
 
 fn to_sql(v: &Value) -> rusqlite::types::Value {
@@ -864,6 +1004,10 @@ fn to_sql(v: &Value) -> rusqlite::types::Value {
 /// sender wrote or a newer one leaves out; both shapes read.
 #[derive(Debug, Deserialize)]
 struct Restore {
+    #[serde(default)]
+    billing: mb_core::BillingAccount,
+    #[serde(default)]
+    versions: Vec<String>,
     placement: Placement,
     #[serde(default)]
     covers: Option<u32>,
@@ -931,7 +1075,12 @@ impl<'a> WireRepo<'a> {
     // ------------------------------------------------------- the whole row
 
     /// Attach the counter's whole row to each typed wire row, so the cloud can hand it back.
-    fn with_row(&self, mut out: Vec<WireRow>, table: &str, id: &str) -> Result<Vec<WireRow>, DbError> {
+    fn with_row(
+        &self,
+        mut out: Vec<WireRow>,
+        table: &str,
+        id: &str,
+    ) -> Result<Vec<WireRow>, DbError> {
         let Some(full) = self.full_row(table, id)? else {
             return Ok(out);
         };
@@ -987,7 +1136,9 @@ impl<'a> WireRepo<'a> {
         let outcome = self.restore_row_inside(outlet, table, id, updated_at, data);
         match &outcome {
             Ok(_) => self.tx.execute_batch("RELEASE restore_row")?,
-            Err(_) => self.tx.execute_batch("ROLLBACK TO restore_row; RELEASE restore_row")?,
+            Err(_) => self
+                .tx
+                .execute_batch("ROLLBACK TO restore_row; RELEASE restore_row")?,
         }
         outcome
     }
@@ -1009,7 +1160,8 @@ impl<'a> WireRepo<'a> {
             }
             "roles" => {
                 let role = cloud_role_from(id, updated_at, data);
-                crate::repo::people::PeopleRepo::new(self.tx).apply_role_from_cloud(outlet, &role)?
+                crate::repo::people::PeopleRepo::new(self.tx)
+                    .apply_role_from_cloud(outlet, &role)?
             }
             "staff" => {
                 // The whole row first (address, emergency contact, id proof), then the typed
@@ -1032,7 +1184,11 @@ impl<'a> WireRepo<'a> {
                 None => self.write_boxed(table, data)?,
             },
         };
-        Ok(if written { Restored::Written } else { Restored::Skipped })
+        Ok(if written {
+            Restored::Written
+        } else {
+            Restored::Skipped
+        })
     }
 
     /// The whole counter row a typed cloud row carries, back into its own table.
@@ -1047,13 +1203,21 @@ impl<'a> WireRepo<'a> {
     }
 
     /// A day whose bills are not here: one row the day-wise report can read.
-    fn write_day_totals(&self, outlet: &str, updated_at: Timestamp, data: &Value) -> Result<(), DbError> {
+    fn write_day_totals(
+        &self,
+        outlet: &str,
+        updated_at: Timestamp,
+        data: &Value,
+    ) -> Result<(), DbError> {
         let int = |key: &str| data.get(key).and_then(Value::as_i64).unwrap_or(0);
         let day = int("business_day");
         if day <= 0 {
             return Err(DbError::BadValue {
                 column: "cloud_day_totals.business_day",
-                value: data.get("business_day").map(Value::to_string).unwrap_or_default(),
+                value: data
+                    .get("business_day")
+                    .map(Value::to_string)
+                    .unwrap_or_default(),
             });
         }
         let by_payment = data
@@ -1143,7 +1307,11 @@ fn str_of(data: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn day_of_field(data: &Value, key: &str, column: &'static str) -> Result<Option<BusinessDay>, DbError> {
+fn day_of_field(
+    data: &Value,
+    key: &str,
+    column: &'static str,
+) -> Result<Option<BusinessDay>, DbError> {
     data.get(key)
         .and_then(Value::as_i64)
         .map(|n| encode::business_day_from_sql(n, column))
@@ -1160,11 +1328,18 @@ pub fn cloud_staff_from(
 ) -> Result<crate::repo::people::CloudStaff, DbError> {
     use crate::repo::people::{CloudStaff, StaffStatus};
     let deleted = data.get("deleted_at").is_some_and(|v| !v.is_null())
-        || data.get("deleted").and_then(Value::as_bool).unwrap_or(false);
+        || data
+            .get("deleted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
     let status = if deleted {
         StaffStatus::Left
     } else {
-        StaffStatus::from_sql(data.get("status").and_then(Value::as_str).unwrap_or("active"))?
+        StaffStatus::from_sql(
+            data.get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("active"),
+        )?
     };
     let employment_type = str_of(data, "employment_type").unwrap_or_else(|| "full_time".to_owned());
     if !["full_time", "part_time", "casual"].contains(&employment_type.as_str()) {
@@ -1182,7 +1357,10 @@ pub fn cloud_staff_from(
         status,
         designation: str_of(data, "designation"),
         department: str_of(data, "department"),
-        is_rider: data.get("is_rider").and_then(Value::as_bool).unwrap_or(false),
+        is_rider: data
+            .get("is_rider")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         employment_type,
         left_on: day_of_field(data, "left_on", "staff.left_on")?,
         updated_at,
@@ -1191,7 +1369,11 @@ pub fn cloud_staff_from(
 
 /// A role as the cloud carries it.
 #[must_use]
-pub fn cloud_role_from(id: &str, updated_at: Timestamp, data: &Value) -> crate::repo::people::CloudRole {
+pub fn cloud_role_from(
+    id: &str,
+    updated_at: Timestamp,
+    data: &Value,
+) -> crate::repo::people::CloudRole {
     let permissions = data
         .get("permissions")
         .and_then(Value::as_array)
@@ -1206,7 +1388,10 @@ pub fn cloud_role_from(id: &str, updated_at: Timestamp, data: &Value) -> crate::
     crate::repo::people::CloudRole {
         id: id.to_owned(),
         name: str_of(data, "name").unwrap_or_else(|| "Role".to_owned()),
-        is_builtin: data.get("is_builtin").and_then(Value::as_bool).unwrap_or(false),
+        is_builtin: data
+            .get("is_builtin")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         max_discount_bp: data.get("max_discount_bp").and_then(Value::as_i64),
         max_discount_paise: data.get("max_discount_paise").and_then(Value::as_i64),
         permissions,
@@ -1215,7 +1400,10 @@ pub fn cloud_role_from(id: &str, updated_at: Timestamp, data: &Value) -> crate::
 }
 
 // So the id types are the same ones the rest of the crate speaks.
-#[allow(dead_code, reason = "named so a reader can see which id a table is keyed by")]
+#[allow(
+    dead_code,
+    reason = "named so a reader can see which id a table is keyed by"
+)]
 type _Table = TableId;
 
 /// What a restore brought down, row by row.
@@ -1258,7 +1446,8 @@ fn restore_rank(table: &str) -> u8 {
         "staff" => 2,
         "menu_categories" | "categories" => 3,
         "menu_items" | "items" | "customers" | "expense_categories" => 4,
-        "customer_ledger" | "credit_adjustments" | "customer_payments" | "expenses" | "cash_movements" => 5,
+        "customer_ledger" | "credit_adjustments" | "customer_payments" | "expenses"
+        | "cash_movements" => 5,
         "bills" | "orders" => 6,
         "refunds" | "bill_reverts" | "bill_revert_lines" | "bill_revert_payments" => 7,
         "day_totals" | "day_item_totals" | "day_category_totals" => 8,
@@ -1272,7 +1461,12 @@ impl WireRepo<'_> {
     /// except a staff member, who comes back as having left, because bills name people.
     /// Masters are written with foreign keys deferred (they name each other in any order);
     /// from the bills on, each row stands or fails on its own.
-    pub fn restore_rows(&self, outlet: &str, mut rows: Vec<WireRow>, report: &mut RestoreReport) -> Result<(), DbError> {
+    pub fn restore_rows(
+        &self,
+        outlet: &str,
+        mut rows: Vec<WireRow>,
+        report: &mut RestoreReport,
+    ) -> Result<(), DbError> {
         rows.sort_by_key(|r| restore_rank(&r.table));
         self.tx.execute_batch("PRAGMA defer_foreign_keys = ON")?;
         let mut checking = false;

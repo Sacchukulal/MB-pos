@@ -109,6 +109,17 @@ fn seat(
     items: &[(&str, i64, i64)],
     told: Option<i64>,
 ) -> OrderId {
+    seat_on_day(app, id, table, items, told, day())
+}
+
+fn seat_on_day(
+    app: &App,
+    id: &str,
+    table: &str,
+    items: &[(&str, i64, i64)],
+    told: Option<i64>,
+    business_day: BusinessDay,
+) -> OrderId {
     let mut cart = Cart::new();
     for (item, paise, qty) in items {
         cart.add(
@@ -122,7 +133,7 @@ fn seat(
 
     let mut draft = DraftOrder::new(
         OrderId::new(id),
-        day(),
+        business_day,
         at(1),
         mb_core::Placement::on_table(TableId::new(table)),
         StaffId::new(crate::state::DEFAULT_STAFF),
@@ -147,7 +158,7 @@ fn seat(
                     OUTLET,
                     crate::terminals::TERMINAL,
                     mb_db::numbering::CounterKind::Token,
-                    day(),
+                    business_day,
                 )?;
                 repos.orders().save(
                     OUTLET,
@@ -276,11 +287,11 @@ fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
         "the kitchen was told about all three already — this is the three-dosa bug",
     );
 
-    // The absorbed order is CANCELLED with a link, not deleted.
+    // The absorbed order keeps serving its table, linked to the combined bill.
     let absorbed = read(&app, &five);
     assert!(
-        matches!(absorbed, AnyOrder::Cancelled(_)),
-        "recorded, not deleted"
+        matches!(absorbed, AnyOrder::Open(_)),
+        "the source table remains occupied for service"
     );
     assert_eq!(
         absorbed.bill_number(),
@@ -307,14 +318,15 @@ fn merging_two_tables_combines_the_food_and_never_re_tells_the_kitchen() {
         "where the food went is a row"
     );
 
-    // Table 2 is free, table 1 is busy.
+    // Table 2 stays occupied until the combined bill is paid and service is released.
     let floor = floor_on(&app).expect("the floor");
     let two = floor
         .tiles
         .iter()
         .find(|t| t.label == "2")
         .expect("table 2");
-    assert!(two.order_id.is_none());
+    assert_eq!(two.order_id.as_deref(), Some(five.as_str()));
+    assert_eq!(two.billed_into.as_deref(), Some(four.as_str()));
 }
 
 #[test]
@@ -1083,6 +1095,245 @@ fn marked_labels(tiles: &[crate::billing::TableView]) -> Vec<String> {
         .filter(|t| t.selected)
         .map(|t| t.label.clone())
         .collect()
+}
+
+#[test]
+fn splitting_without_a_letter_allocates_a_visible_party_and_refuses_collisions() {
+    let scratch = Scratch::new("split_auto_seat");
+    let app = a_shop_with_a_room(&scratch);
+    let order = seat(&app, "ord_split_auto", "tbl_1", &[("itm_dosa", 12_000, 4)], None);
+    for expected in ["1B", "1C"] {
+        let floor = split_order_on(&app, SplitRequest {
+            order_id: order.as_str().to_owned(), lines: vec![(0, "1".to_owned())],
+            to_table: None, seat: None,
+        }).expect("split");
+        assert!(floor.tiles.iter().any(|tile| tile.label == expected && tile.order_id.is_some()));
+    }
+    let before = read(&app, &order);
+    split_order_on(&app, SplitRequest {
+        order_id: order.as_str().to_owned(), lines: vec![(0, "1".to_owned())],
+        to_table: None, seat: Some("B".to_owned()),
+    }).expect_err("occupied seat");
+    assert_eq!(read(&app, &order), before, "a refused split changes nothing");
+}
+
+#[test]
+fn a_combined_bill_can_join_another_without_stranding_its_serving_tables() {
+    let scratch = Scratch::new("nested_merge");
+    let app = a_shop_with_a_room(&scratch);
+    let a = seat(&app, "ord_a", "tbl_1", &[("itm_dosa", 12_000, 1)], None);
+    let b = seat(&app, "ord_b", "tbl_2", &[("itm_tea", 2_000, 1)], None);
+    let c = seat(&app, "ord_c", "tbl_3", &[("itm_tea", 2_000, 1)], None);
+    merge_orders_on(&app, a.as_str().to_owned(), b.as_str().to_owned()).expect("first combine");
+    merge_orders_on(&app, b.as_str().to_owned(), c.as_str().to_owned()).expect("second combine");
+    for source in [&a, &b] {
+        assert_eq!(read(&app, source).core().billing.billed_into.as_ref(), Some(&c));
+    }
+    let combined = read(&app, &c);
+    assert_eq!(combined.core().billing.sources.len(), 2);
+    assert_eq!(combined.core().billing.serving.len(), 2);
+    crate::floor::release_serving_table_on(&app, a.as_str().to_owned()).expect_err("not paid yet");
+    crate::ipc::open_order_on(&app, c.as_str().to_owned()).expect("open combined bill");
+    crate::flows::complete_bill_on(&app, Some("cash".to_owned())).expect("paid");
+    let paid_floor = floor_on(&app).expect("paid floor");
+    let root_service = paid_floor.tiles.iter().find(|tile| tile.label == "3").expect("root table");
+    assert_eq!(root_service.billed_into.as_deref(), Some(c.as_str()));
+    let root_service_id = root_service.order_id.clone().expect("root table remains occupied");
+    for source in [&a, &b] {
+        crate::floor::release_serving_table_on(&app, source.as_str().to_owned()).expect("released");
+        assert!(matches!(read(&app, source), AnyOrder::Cancelled(_)));
+    }
+    crate::floor::release_serving_table_on(&app, root_service_id).expect("root table released");
+    assert!(floor_on(&app).expect("released floor").tiles.iter().all(|tile| tile.order_id.is_none()));
+}
+
+#[test]
+fn moving_a_loaded_order_refreshes_the_saved_baseline() {
+    let scratch = Scratch::new("move_loaded");
+    let app = a_shop_with_a_room(&scratch);
+    let id = seat(&app, "ord_move_loaded", "tbl_1", &[("itm_dosa", 12_000, 1)], None);
+    crate::ipc::open_order_on(&app, id.as_str().to_owned()).expect("loaded");
+    app.with_cart_mut(|state| {
+        state.cart.add(snapshot("itm_tea", 2_000), Qty::from_whole(1).expect("one"), None, vec![]).expect("tea");
+        Ok(())
+    }).expect("typed");
+    move_order_on(&app, id.as_str().to_owned(), "tbl_2".to_owned()).expect("moved");
+    let parked = crate::flows::park_open_order(&app).expect("save after move has no stale conflict");
+    assert_eq!(parked.core.table().map(TableId::as_str), Some("tbl_2"));
+    assert_eq!(parked.core.cart.len(), 2, "typed food survives the move");
+}
+
+#[test]
+fn combining_an_already_paid_combination_retargets_its_service_only_order() {
+    let scratch = Scratch::new("recombine_paid");
+    let app = a_shop_with_a_room(&scratch);
+    crate::signin_tests::hire(&app, "staff_owner", "Owner", RolePreset::Owner, "2468");
+    let mut config = app.shop_config();
+    config.billing.kitchen_screen = true;
+    app.publish_shop_config(config);
+    let a = seat(&app, "ord_a", "tbl_1", &[("itm_dosa", 12_000, 1)], None);
+    let b = seat(&app, "ord_b", "tbl_2", &[("itm_tea", 2_000, 1)], None);
+    crate::kitchen::send(&app, a.as_str(), None).expect("first table's kitchen ticket");
+    crate::kitchen::send(&app, b.as_str(), None).expect("root table's kitchen ticket");
+    let before = crate::kitchen::look(&app, crate::kitchen::DEFAULT_STATION);
+    let root_ticket = before.tickets.iter().find(|ticket| ticket.order_id == b.as_str()).expect("root ticket");
+    let root_ticket_id = root_ticket.id.clone();
+    let root_token = root_ticket.token.clone();
+    merge_orders_on(&app, a.as_str().to_owned(), b.as_str().to_owned()).expect("combine");
+    crate::ipc::open_order_on(&app, b.as_str().to_owned()).expect("load");
+    crate::flows::complete_bill_on(&app, Some("cash".to_owned())).expect("first payment");
+    let first_floor = floor_on(&app).expect("serving floor");
+    let service = first_floor.tiles.iter().find(|tile| tile.label == "2")
+        .and_then(|tile| tile.order_id.clone()).expect("service order");
+    assert_ne!(service, b.as_str());
+    let after = crate::kitchen::look(&app, crate::kitchen::DEFAULT_STATION);
+    let root_ticket = after.tickets.iter().find(|ticket| ticket.id == root_ticket_id).expect("same kitchen ticket");
+    assert_eq!(root_ticket.order_id, service, "kitchen follows the serving order");
+    assert_eq!(root_ticket.token, root_token, "payment does not rename the cook's ticket");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        assert!(Repos::new(tx).kitchen().courses_fired(&service)?.everything, "settling must not make courses unfired");
+        Ok(())
+    }).map_err(|error| crate::words::from_db(&error))).expect("course retained");
+    let c = seat(&app, "ord_c", "tbl_3", &[("itm_tea", 2_000, 1)], None);
+    crate::kitchen::send(&app, c.as_str(), None).expect("new root's kitchen ticket");
+    merge_orders_on(&app, b.as_str().to_owned(), c.as_str().to_owned()).expect("combine paid root again");
+    assert_eq!(read(&app, &OrderId::new(&service)).core().billing.billed_into.as_ref(), Some(&c));
+    crate::ipc::open_order_on(&app, c.as_str().to_owned()).expect("load survivor");
+    crate::flows::complete_bill_on(&app, Some("cash".to_owned())).expect("pay remainder");
+    let occupied = floor_on(&app).expect("all serving tables");
+    assert_eq!(occupied.tiles.iter().filter(|tile| tile.order_id.is_some()).count(), 3);
+    for tile in occupied.tiles.into_iter().filter(|tile| tile.order_id.is_some()) {
+        assert_eq!(tile.billed_into.as_deref(), Some(c.as_str()));
+        crate::floor::release_serving_table_on(&app, tile.order_id.expect("occupied")).expect("released");
+    }
+    assert!(floor_on(&app).expect("free floor").tiles.iter().all(|tile| tile.order_id.is_none()));
+    assert!(crate::kitchen::look(&app, crate::kitchen::DEFAULT_STATION).tickets.is_empty(), "releasing all tables closes their original kitchen work");
+}
+
+#[test]
+fn candidates_include_each_bill_from_the_same_table() {
+    let scratch = Scratch::new("combine_candidates");
+    let app = a_shop_with_a_room(&scratch);
+    crate::signin_tests::hire(&app, "staff_owner", "Owner", RolePreset::Owner, "2468");
+    for id in ["ord_first", "ord_second"] {
+        // Both represent separate visits to one physical table.
+        seat_on_day(&app, id, "tbl_1", &[("itm_dosa", 12_000, 1)], None,
+            crate::flows::today(crate::flows::now()));
+        crate::ipc::open_order_on(&app, id.to_owned()).expect("open visit");
+        crate::flows::complete_bill_on(&app, Some("cash".to_owned())).expect("paid visit");
+    }
+    let candidates = crate::floor::combine_candidates_on(&app).expect("candidates");
+    assert_eq!(candidates.len(), 2);
+    assert!(candidates.iter().any(|tile| tile.id == "ord_first"));
+    assert!(candidates.iter().any(|tile| tile.id == "ord_second"));
+    assert!(candidates.iter().all(|tile| tile.bill_number.is_some()));
+    merge_orders_on(&app, "ord_first".to_owned(), "ord_second".to_owned()).expect("combine paid visits");
+    let candidates = crate::floor::combine_candidates_on(&app).expect("working candidates");
+    assert_eq!(candidates.len(), 1, "an absorbed paid source is not offered while the correction is pending");
+    assert_eq!(candidates[0].order_id.as_deref(), Some("ord_second"));
+}
+
+#[test]
+fn moving_a_correction_keeps_the_issued_bill_and_updates_only_its_draft() {
+    let scratch = Scratch::new("move_correction");
+    let app = a_shop_with_a_room(&scratch);
+    crate::signin_tests::hire(&app, "staff_owner", "Owner", RolePreset::Owner, "2468");
+    let id = seat(&app, "ord_move_correction", "tbl_1", &[("itm_dosa", 12_000, 1)], None);
+    crate::ipc::open_order_on(&app, id.as_str().to_owned()).expect("loaded");
+    crate::flows::complete_bill_on(&app, Some("cash".to_owned())).expect("paid");
+    let issued = read(&app, &id);
+    crate::corrections::revert_bill_on(&app, id.as_str().to_owned(), "Correct table".to_owned(), None, None).expect("correction");
+    move_order_on(&app, id.as_str().to_owned(), "tbl_3".to_owned()).expect("moved correction");
+    assert_eq!(read(&app, &id), issued, "reports retain the issued sale");
+    let working = crate::flows::find_order(&app, &id).expect("working").expect("draft");
+    assert_eq!(working.core().table().map(TableId::as_str), Some("tbl_3"));
+    crate::flows::park_open_order(&app).expect("draft baseline is current");
+    let other = seat(&app, "ord_other_move", "tbl_4", &[("itm_tea", 2_000, 1)], None);
+    let refused = move_order_on(&app, other.as_str().to_owned(), "tbl_3".to_owned()).expect_err("correction draft occupies target");
+    assert_eq!(refused.code, "floor.table_busy");
+    assert_eq!(read(&app, &other).core().table().map(TableId::as_str), Some("tbl_4"));
+}
+
+#[test]
+fn splitting_sent_food_preserves_kitchen_station_course_and_completion() {
+    use mb_core::kitchen_delivery::{Delivery, State};
+    let scratch = Scratch::new("split_kitchen_work");
+    let app = a_shop_with_a_room(&scratch);
+    let id = seat(&app, "ord_split_kds", "tbl_1", &[("itm_dosa", 12_000, 2), ("itm_tea", 2_000, 2)], None);
+    let mut order = read(&app, &id);
+    let mut cart = Cart::new();
+    for (index, source) in order.core().cart.lines().iter().enumerate() {
+        let mut line = source.clone();
+        line.snapshot.category_id = Some(mb_core::CategoryId::new(if index == 0 { "cat_hot" } else { "cat_cold" }));
+        line.snapshot.course = Some(if index == 0 { "Main" } else { "Drinks" }.to_owned());
+        cart.push(line).expect("line");
+    }
+    order.core_mut().cart = cart;
+    let pending = order.core().kitchen.pending(&order.core().cart).expect("pending");
+    order.core_mut().kitchen.mark_printed(&pending).expect("sent");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        for (id, station) in [("cat_hot", "Hot"), ("cat_cold", "Cold")] {
+            repos.menu().save_category(OUTLET, &mb_db::repo::menu::Category {
+                id: mb_core::CategoryId::new(id), name: station.to_owned(), sort_order: 0,
+                is_active: true, station: Some(station.to_owned()), default_tax_class_id: None,
+            }, at(1))?;
+        }
+        repos.orders().save(OUTLET, app.terminal_id(), &order)?;
+        repos.devices().pair(OUTLET, &mb_db::repo::devices::LanDevice {
+            id: "screen_kitchen".to_owned(), name: "Kitchen screen".to_owned(),
+            platform: "android".to_owned(), secret_hash: "fixture-only".to_owned(),
+            staff_id: None, paired_at: at(1), paired_by: None, last_seen_at: None,
+            last_ip: None, revoked_at: None, install_id: None,
+        }, None)?;
+        for (ticket_id, station, course, state, item) in [
+            ("kds_hot", "Hot", "Main", State::Shown, "itm_dosa"),
+            ("kds_cold", "Cold", "Drinks", State::Bumped, "itm_tea"),
+        ] {
+            let mut delivery = Delivery::new(ticket_id, id.as_str(), station, at(2));
+            delivery.state = state;
+            delivery.shown_at = Some(at(3));
+            delivery.bumped_at = (state == State::Bumped).then_some(at(4));
+            repos.kitchen().send(OUTLET, &delivery, Some(course), Some(7), day())?;
+            let mut ticket = repos.kitchen().get(ticket_id)?.expect("ticket");
+            ticket.bumped_lines.push(item.to_owned());
+            ticket.bumped_by = Some(StaffId::new(crate::state::DEFAULT_STAFF));
+            ticket.bumped_on = Some("screen_kitchen".to_owned());
+            repos.kitchen().save(&ticket)?;
+        }
+        Ok(())
+    }).map_err(|error| crate::words::from_db(&error))).expect("kitchen work");
+    let (result, paper) = slips_taken(&app, || split_order_on(&app, SplitRequest {
+        order_id: id.as_str().to_owned(), lines: vec![(0, "1".to_owned()), (1, "2".to_owned())],
+        to_table: None, seat: None,
+    }));
+    let floor = result.expect("split");
+    assert!(paper.is_empty(), "splitting must not send another cooking slip");
+    let split_id = floor.tiles.iter().find(|tile| tile.label == "1B").and_then(|tile| tile.order_id.clone()).expect("split party");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let copies = repos.kitchen().for_order(&split_id)?;
+        assert_eq!(copies.len(), 2);
+        for copy in copies {
+            let original_id = if copy.delivery.station == "Hot" { "kds_hot" } else { "kds_cold" };
+            let original = repos.kitchen().get(original_id)?.expect("original");
+            assert_ne!(copy.delivery.id, original.delivery.id);
+            assert_eq!(copy.delivery.state, original.delivery.state);
+            assert_eq!(copy.delivery.sent_at, original.delivery.sent_at);
+            assert_eq!(copy.delivery.shown_at, original.delivery.shown_at);
+            assert_eq!(copy.delivery.bumped_at, original.delivery.bumped_at);
+            assert_eq!(copy.course, original.course);
+            assert_eq!(copy.bumped_by, original.bumped_by);
+            assert_eq!(copy.bumped_on, original.bumped_on);
+            assert_eq!(copy.bumped_lines, vec![if copy.delivery.station == "Hot" { "itm_dosa" } else { "itm_tea" }.to_owned()]);
+        }
+        assert!(repos.kitchen().get("kds_cold")?.expect("cold").bumped_lines.is_empty(), "moved identities leave the source ticket");
+        Ok(())
+    }).map_err(|error| crate::words::from_db(&error))).expect("preserved work");
+    let hot = crate::kitchen::look(&app, "Hot");
+    assert_eq!(hot.tickets.len(), 2, "each serving party retains its already-sent food");
+    assert!(hot.tickets.iter().all(|ticket| ticket.lines.len() == 1 && ticket.lines[0].qty == "1" && ticket.lines[0].is_done));
+    assert!(crate::kitchen::look(&app, "Cold").tickets.is_empty(), "finished food is not resurrected");
 }
 
 /// Typed items join a busy table's bill without being written until the counter parks them.

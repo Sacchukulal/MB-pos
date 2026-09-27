@@ -454,7 +454,10 @@ fn t19_one_name_and_the_photographs_go_with_their_backup() {
     let left = backup::list(&dir).expect("list");
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].path, target);
-    assert!(!old.attachments_path().exists(), "photographs outlived their backup");
+    assert!(
+        !old.attachments_path().exists(),
+        "photographs outlived their backup"
+    );
     assert!(!older.path.exists());
     assert!(!orphan.exists(), "the orphaned photograph folder survived");
 
@@ -672,6 +675,36 @@ fn t8_and_t9_export_import_round_trip_survives_nasty_text() {
         "an import over a shop with orders in it was allowed"
     );
     export::import_all(&target, &folder, false, true).expect("force");
+
+    // Recovery may replace immutable history, but ordinary writes must still be refused.
+    target
+        .transaction(|tx| {
+            assert!(
+                tx.execute("UPDATE bill_versions SET snapshot = '{}'", [])
+                    .is_err()
+            );
+            assert!(tx.execute("DELETE FROM bill_versions", []).is_err());
+            Ok(())
+        })
+        .expect("history guards restored");
+
+    let imported = shop::snapshot(&target);
+    let versions_file = folder.join("bill_versions.csv");
+    let mut versions = std::fs::read_to_string(&versions_file).expect("read versions");
+    versions.push_str("bad_version,missing_order,999,{}\r\n");
+    std::fs::write(&versions_file, versions).expect("plant an invalid foreign key");
+    assert!(export::import_all(&target, &folder, false, true).is_err());
+    assert_eq!(
+        shop::snapshot(&target),
+        imported,
+        "a failed import must restore both data and guards"
+    );
+    target
+        .transaction(|tx| {
+            assert!(tx.execute("DELETE FROM bill_versions", []).is_err());
+            Ok(())
+        })
+        .expect("rollback restored immutable history guards");
 }
 
 fn shop_item() -> mb_db::repo::menu::MenuItem {

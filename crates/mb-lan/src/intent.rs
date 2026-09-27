@@ -10,6 +10,9 @@ pub struct Intent {
     /// Which order this is about.
     #[serde(default)]
     pub order_id: Option<String>,
+    /// The durable open intent this operation belongs to, even across partial retries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_intent_id: Option<String>,
     /// The phone's clock when the person pressed the button, in milliseconds since the epoch.
     /// Used for exactly one thing: deciding whether a queued intent is too old to apply without
     /// asking a person (see `Outcome::Held`).
@@ -34,6 +37,11 @@ pub enum What {
         table_id: Option<String>,
         covers: Option<u32>,
     },
+    /// A separate party at an existing table; the counter allocates the letter atomically.
+    OpenParty {
+        table_id: String,
+        covers: Option<u32>,
+    },
     /// No price, deliberately. The counter looks the item up and freezes its own snapshot, so a
     /// phone holding a stale catalogue cannot sell yesterday's price.
     AddItem {
@@ -47,6 +55,12 @@ pub enum What {
     SetQty {
         line: usize,
         qty: String,
+    },
+    /// Reduce an already-sent line atomically, retaining the rest and cancelling only the excess.
+    ReduceQty {
+        expected: LineView,
+        qty: String,
+        reason: String,
     },
     /// Compulsory reason.
     VoidItem {
@@ -93,8 +107,10 @@ impl What {
     pub const fn name(&self) -> &'static str {
         match self {
             What::OpenOrder { .. } => "open an order",
+            What::OpenParty { .. } => "open another party",
             What::AddItem { .. } => "add an item",
             What::SetQty { .. } => "change a quantity",
+            What::ReduceQty { .. } => "cancel part of an item",
             What::VoidItem { .. } => "void an item",
             What::SetOrderNote { .. } => "put a note on the order",
             What::SetCustomer { .. } => "put this on an account",
@@ -221,6 +237,7 @@ mod tests {
         let json = serde_json::to_string(&Intent {
             id: "i1".to_owned(),
             order_id: Some("ord_1".to_owned()),
+            open_intent_id: None,
             at: 0,
             sent_at: None,
             what: What::AddItem {

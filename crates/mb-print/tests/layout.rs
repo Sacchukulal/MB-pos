@@ -56,6 +56,28 @@ fn normalise(s: &str) -> String {
     s.replace("\r\n", "\n")
 }
 
+#[test]
+fn revised_receipt_lists_each_refund_mode() {
+    let mut fixture = Fixture::new();
+    let mb_core::AnyOrder::Settled(order) = &mut fixture.order else {
+        panic!("fixture is settled");
+    };
+    order.core.billing.revision = 1;
+    order.core.billing.refunds = vec![
+        ("Cash".to_owned(), Money::from_paise(5_000)),
+        ("Card".to_owned(), Money::from_paise(2_900)),
+    ];
+    let doc = bill_document(
+        &common::metrics(PaperKind::Mm80),
+        &fixture.context(Copy::Original),
+    )
+    .expect("builds");
+    let rendered = text::to_text(&layout(&doc).expect("lays out"));
+    assert!(rendered.contains("REVISED - version 2"));
+    assert!(rendered.contains("Returned 50.00 by Cash"));
+    assert!(rendered.contains("Returned 29.00 by Card"));
+}
+
 /// A long name wraps and loses nothing.
 #[test]
 fn t3_a_long_name_wraps_and_loses_nothing() {

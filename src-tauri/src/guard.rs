@@ -52,6 +52,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // the same authority as looking at the bill list.
     ("bill_pdf", Access::Needs(Permission::ReportsView)),
     ("current_cart", Access::Needs(Permission::BillCreate)),
+    ("reload_current_order", Access::Needs(Permission::BillCreate)),
     ("cart_add", Access::Needs(Permission::BillCreate)),
     ("cart_set_qty", Access::Needs(Permission::BillCreate)),
     ("cart_remove", Access::Needs(Permission::BillCreate)),
@@ -196,6 +197,8 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ),
     ("move_order", Access::Needs(Permission::BillCreate)),
     ("merge_orders", Access::Needs(Permission::BillCreate)),
+    ("combine_candidates", Access::Needs(Permission::BillCreate)),
+    ("release_serving_table", Access::Needs(Permission::BillCreate)),
     ("split_order", Access::Needs(Permission::BillCreate)),
     // Customers and what they owe.
     // The customer list and one account open to whoever may take a repayment too: a cashier
@@ -393,10 +396,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // What the floor did while the cashier was typing.
     (
         "take_the_floors_items",
-        Access::Needs(Permission::BillCreate),
-    ),
-    (
-        "dismiss_the_floors_items",
         Access::Needs(Permission::BillCreate),
     ),
     // The licence.

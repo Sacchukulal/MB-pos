@@ -30,10 +30,11 @@ pub struct Origin {
     pub created_at: Timestamp,
     pub business_day: BusinessDay,
     pub opened_by: StaffId,
+    pub baseline: Option<OrderCore>,
 }
 
 /// One counter's work in progress.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CartState {
     pub cart: Cart,
     // Private, with two setters, so a table can never sit on a parcel.
@@ -55,6 +56,7 @@ pub struct CartState {
     pub note: Option<String>,
     /// What the floor did while the cashier had this open.
     pub from_the_floor: Vec<crate::orders::FloorChange>,
+    pub account: mb_core::BillingAccount,
 }
 
 impl Default for CartState {
@@ -81,6 +83,7 @@ impl CartState {
             covers: None,
             note: None,
             from_the_floor: Vec::new(),
+            account: mb_core::BillingAccount::default(),
         }
     }
 
@@ -103,14 +106,16 @@ impl CartState {
                 created_at: core.created_at,
                 business_day: core.business_day,
                 opened_by: core.created_by.clone(),
+                baseline: Some(core.clone()),
             }),
-            settlement: Settlement::new(),
-            bill_discount: None,
+            settlement: core.billing.settlement.clone(),
+            bill_discount: core.billing.discount.clone(),
             kitchen: core.kitchen.clone(),
             customer: None,
             covers: core.covers,
             note: core.note.clone(),
             from_the_floor: Vec::new(),
+            account: core.billing.clone(),
         }
     }
 
@@ -201,17 +206,118 @@ impl CartState {
             created_by,
             note: self.note.clone(),
             kitchen: self.kitchen.clone(),
+            billing: mb_core::BillingAccount {
+                discount: self.bill_discount.clone(),
+                settlement: self.settlement.clone(),
+                ..self.account.clone()
+            },
         })
     }
 
     /// The cart is now this order on disk.
     pub fn adopt(&mut self, core: &OrderCore) {
+        // Clearing an unfinished entry may discard only money that was never saved.
+        // A receipt parked before a failed settlement must remain paid on this counter.
+        self.account = core.billing.clone();
         self.origin = Some(Origin {
             id: core.id.clone(),
             created_at: core.created_at,
             business_day: core.business_day,
             opened_by: core.created_by.clone(),
+            baseline: Some(core.clone()),
         });
+    }
+
+    /// Compare the complete draft, including its receipts, with what was last read.
+    pub fn has_local_changes(&self) -> UiResult<bool> {
+        let Some(origin) = &self.origin else {
+            return Ok(!self.cart.is_empty() || !self.settlement.payments().is_empty());
+        };
+        let Some(baseline) = &origin.baseline else { return Ok(true); };
+        Ok(self.to_core(origin.created_at, &origin.opened_by, "")? != *baseline)
+    }
+
+    /// Rebase only independent edits. No menu lookup is allowed here: saved snapshots
+    /// are the prices the guest ordered, and kitchen/receipt state is authoritative data.
+    pub fn reconciled(&self, order: &AnyOrder, label: Option<String>) -> UiResult<Self> {
+        let Some(origin) = &self.origin else { return Ok(self.clone()); };
+        if origin.id != order.core().id { return Err(order_conflict()); }
+        let Some(base) = &origin.baseline else { return Err(order_conflict()); };
+        let local = self.to_core(origin.created_at, &origin.opened_by, "")?;
+        let remote = order.core();
+        if remote == base { return Ok(self.clone()); }
+        let core = merge_order_core(base, &local, remote)?;
+        let mut merged = Self::load(order, label);
+        merged.cart = core.cart.clone();
+        merged.order_type = core.order_type();
+        merged.table = core.table().map(|id| TableSeat {
+            id: id.clone(),
+            label: merged.table.as_ref().map(|t| t.label.clone()).unwrap_or_else(|| id.as_str().to_owned()),
+            seat: core.seat().cloned(),
+        });
+        merged.kitchen = core.kitchen;
+        merged.covers = core.covers;
+        merged.note = core.note;
+        merged.bill_discount = core.billing.discount.clone();
+        merged.settlement = core.billing.settlement.clone();
+        merged.account = core.billing;
+        // Cash typed at the counter remains an unsaved entry until park/settlement.
+        // Clearing that entry must restore only the receipts actually on disk.
+        merged.account.settlement = remote.billing.settlement.clone();
+        merged.customer = self.customer.clone();
+        merged.from_the_floor = self.from_the_floor.clone();
+        // load() records the remote baseline, not the merged (still unsaved) draft.
+        Ok(merged)
+    }
+
+    /// A combined bill still serves independent tables. Counter changes belong to its
+    /// main table; quantities already assigned to a source table cannot be consumed.
+    pub fn reconcile_service_from(&mut self, before: &CartState) -> UiResult<()> {
+        let Some(service) = &before.account.service_cart else { return Ok(()); };
+        if self.order_id() != before.order_id()
+            || self.account.sources != before.account.sources
+            || self.origin != before.origin
+            || self.account.service_cart != before.account.service_cart
+            || self.account.service_kitchen != before.account.service_kitchen
+        { return Ok(()); }
+
+        let invalid = || UiError::new("merge.source_items", "Only this table's items can be changed here; the other tables' items must stay on the combined bill.");
+        let quantity_error = |e: mb_core::QtyError| UiError::new("cart.quantity", "That quantity is too large.").with_detail(e.to_string());
+        let mut shapes: Vec<&mb_core::CartLine> = Vec::new();
+        for line in before.cart.lines().iter().chain(self.cart.lines()) {
+            if !shapes.iter().any(|known| same_service_line(known, line)) { shapes.push(line); }
+        }
+        let total = |lines: &[mb_core::CartLine], shape: &mb_core::CartLine| {
+            lines.iter().filter(|line| same_service_line(line, shape))
+                .try_fold(mb_core::Qty::ZERO, |sum, line| sum.add(line.qty))
+                .map_err(quantity_error)
+        };
+        let mut lines = service.lines().to_vec();
+        for shape in shapes {
+            let change = total(self.cart.lines(), shape)?.sub(total(before.cart.lines(), shape)?).map_err(quantity_error)?;
+            if change.is_zero() { continue; }
+            let remaining = total(&lines, shape)?.add(change).map_err(quantity_error)?;
+            if remaining.is_negative() { return Err(invalid()); }
+            let template = lines.iter().find(|line| same_service_line(line, shape)).unwrap_or(shape).clone();
+            lines.retain(|line| !same_service_line(line, shape));
+            if remaining.is_positive() {
+                lines.push(mb_core::CartLine { qty: remaining, ..template });
+            }
+        }
+        let mut ledger = before.account.service_kitchen.clone().unwrap_or_default();
+        let mut identities = Vec::new();
+        for (identity, _) in before.kitchen.told().iter().chain(self.kitchen.told()) {
+            if !identities.contains(identity) { identities.push(identity.clone()); }
+        }
+        for identity in identities {
+            let change = self.kitchen.quantity_told(&identity).sub(before.kitchen.quantity_told(&identity)).map_err(quantity_error)?;
+            let remaining = ledger.quantity_told(&identity).add(change).map_err(quantity_error)?;
+            if remaining.is_negative() { return Err(invalid()); }
+            ledger.set_told(&identity, remaining);
+        }
+        self.account.service_cart = Some(Cart::from_lines(lines).map_err(|e| UiError::new("cart.quantity", e.to_string()))?);
+        self.account.service_kitchen = Some(ledger);
+        Ok(())
     }
 
     /// Recompute from scratch. There is no incremental path and there must not be one.
@@ -223,6 +329,126 @@ impl CartState {
             config,
         )
     }
+}
+
+fn same_service_line(left: &mb_core::CartLine, right: &mb_core::CartLine) -> bool {
+    if left.snapshot != right.snapshot || left.note != right.note { return false; }
+    let mut left_modifiers = left.modifiers.clone();
+    let mut right_modifiers = right.modifiers.clone();
+    let key = |modifier: &mb_core::Modifier| (modifier.modifier_id.as_str().to_owned(), modifier.name.clone(), modifier.price_delta.paise());
+    left_modifiers.sort_unstable_by_key(key);
+    right_modifiers.sort_unstable_by_key(key);
+    left_modifiers == right_modifiers
+}
+
+pub(crate) fn order_conflict() -> UiError {
+    UiError::new("order.changed", "This order has conflicting changes at the counter and on another device. Your edits are still here. Undo the conflicting edit, or reload the saved order to discard your unsaved edits.")
+}
+
+/// An opaque reference to the exact line the cashier saw, including its order.
+pub(crate) fn line_edit_token(state: &CartState, line: &mb_core::CartLine) -> String {
+    serde_json::to_string(&(state.order_id(), line)).unwrap_or_default()
+}
+
+pub(crate) fn check_line_edit(state: &CartState, index: usize, expected: Option<&str>) -> UiResult<()> {
+    if let Some(expected) = expected {
+        let line = state.cart.lines().get(index).ok_or_else(order_conflict)?;
+        if line_edit_token(state, line) != expected { return Err(order_conflict()); }
+    }
+    Ok(())
+}
+
+/// Quantity reductions keep a whole item count. Fractional quantities can still be
+/// added or increased; removing the entire line is a separate, explicit operation.
+pub(crate) fn validate_reduced_quantity(before: mb_core::Qty, after: mb_core::Qty) -> UiResult<()> {
+    if after < before && (!after.is_positive() || after.thousandths() % mb_core::Qty::ONE.thousandths() != 0) {
+        return Err(UiError::new("cart.qty_whole", "Use a whole quantity of 1 or more when reducing an item. To remove it completely, use Remove."));
+    }
+    Ok(())
+}
+
+fn merge_value<T: Clone + PartialEq>(base: &T, local: &T, remote: &T) -> UiResult<T> {
+    if local == base || local == remote { Ok(remote.clone()) }
+    else if remote == base { Ok(local.clone()) }
+    else { Err(order_conflict()) }
+}
+
+fn merge_cart(base: &Cart, local: &Cart, remote: &Cart) -> UiResult<Cart> {
+    if local == base { return Ok(remote.clone()); }
+    if remote == base { return Ok(local.clone()); }
+    let same = |a: &mb_core::CartLine, b: &mb_core::CartLine| {
+        same_service_line(a, b) && a.line_discount == b.line_discount
+    };
+    let mut shapes = Vec::new();
+    for cart in [base, local, remote] {
+        for (index, line) in cart.lines().iter().enumerate() {
+            // Without a stable line ID, duplicate identical rows cannot be matched safely.
+            if cart.lines()[..index].iter().any(|other| same(other, line)) {
+                return Err(order_conflict());
+            }
+            if !shapes.iter().any(|other| same(other, line)) { shapes.push(line.clone()); }
+        }
+    }
+    let mut lines = Vec::new();
+    for mut shape in shapes {
+        let qty = |cart: &Cart| cart.lines().iter().find(|line| same(line, &shape)).map(|line| line.qty);
+        let (before, ours, theirs) = (qty(base), qty(local), qty(remote));
+        // Two simultaneous adds or quantity edits cannot be inferred from their final
+        // numbers; even equal results might represent two separate additions.
+        if ours != before && theirs != before { return Err(order_conflict()); }
+        if let Some(quantity) = merge_value(&before, &ours, &theirs)? {
+            shape.qty = quantity;
+            lines.push(shape);
+        }
+    }
+    Cart::from_lines(lines).map_err(|e| UiError::new("cart.quantity", e.to_string()))
+}
+
+fn merge_kitchen(base: &mb_core::KitchenLedger, local: &mb_core::KitchenLedger, remote: &mb_core::KitchenLedger) -> UiResult<mb_core::KitchenLedger> {
+    if local == base { return Ok(remote.clone()); }
+    if remote == base { return Ok(local.clone()); }
+    let mut identities = Vec::new();
+    for (identity, _) in base.told().iter().chain(local.told()).chain(remote.told()) {
+        if !identities.contains(identity) { identities.push(identity.clone()); }
+    }
+    let mut merged = mb_core::KitchenLedger::new();
+    for identity in identities {
+        let quantity = merge_value(&base.quantity_told(&identity), &local.quantity_told(&identity), &remote.quantity_told(&identity))?;
+        merged.set_told(&identity, quantity);
+    }
+    Ok(merged)
+}
+
+fn merge_order_core(base: &OrderCore, local: &OrderCore, remote: &OrderCore) -> UiResult<OrderCore> {
+    if local == base { return Ok(remote.clone()); }
+    if remote == base { return Ok(local.clone()); }
+    // A concurrent combine/correction changes which bill owns money and food. It needs
+    // explicit review rather than attaching this counter's edits to a different account.
+    if remote.billing.revision != base.billing.revision
+        || remote.billing.sources != base.billing.sources
+        || remote.billing.billed_into != base.billing.billed_into
+    { return Err(order_conflict()); }
+    if local.billing.settlement != base.billing.settlement
+        && remote.billing.settlement != base.billing.settlement
+    { return Err(order_conflict()); }
+    let mut merged = remote.clone();
+    merged.cart = merge_cart(&base.cart, &local.cart, &remote.cart)?;
+    merged.kitchen = merge_kitchen(&base.kitchen, &local.kitchen, &remote.kitchen)?;
+    merged.placement = merge_value(&base.placement, &local.placement, &remote.placement)?;
+    merged.covers = merge_value(&base.covers, &local.covers, &remote.covers)?;
+    merged.note = merge_value(&base.note, &local.note, &remote.note)?;
+    macro_rules! account_field {
+        ($($field:ident),+ $(,)?) => { $(
+            merged.billing.$field = merge_value(&base.billing.$field, &local.billing.$field, &remote.billing.$field)?;
+        )+ };
+    }
+    account_field!(discount, settlement, revision, sources, source_labels, serving,
+        billed_into, service_cart, service_kitchen, service_token, refund, refunds);
+    // A remote kitchen send plus a local removal must not silently forget cooked food.
+    let excess = merged.kitchen.over_told(&merged.cart)
+        .map_err(|e| UiError::new("cart.quantity", e.to_string()))?;
+    if !excess.is_empty() { return Err(order_conflict()); }
+    Ok(merged)
 }
 
 /// The one way a cart becomes a bill, for the counter, the tile, the phone and the paper.
@@ -312,6 +538,9 @@ pub struct CartView {
 #[serde(rename_all = "camelCase")]
 pub struct CartLineView {
     pub index: usize,
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edit_token: Option<String>,
     pub name: String,
     pub note: Option<String>,
     /// Written as a shopkeeper writes it: "2", "0.5", "1.333".
@@ -394,6 +623,8 @@ pub struct PaymentView {
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct TableView {
+    #[ts(optional)]
+    pub billed_into: Option<String>,
     pub id: String,
     pub label: String,
     /// The section's name, or `None` for the "No table" group that holds open parcel and
@@ -477,6 +708,7 @@ pub(crate) fn bill_lines(bill: &Bill) -> Vec<CartLineView> {
         .enumerate()
         .map(|(index, billed)| CartLineView {
             index,
+            edit_token: None,
             name: billed.snapshot.name.clone(),
             note: billed.note.clone(),
             qty: billed.qty.to_string(),
@@ -514,7 +746,10 @@ pub(crate) fn payment_views(settlement: &Settlement) -> Vec<PaymentView> {
 
 pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiResult<CartView> {
     let bill = state.bill(config)?;
-    let lines = bill_lines(&bill);
+    let mut lines = bill_lines(&bill);
+    for (view, line) in lines.iter_mut().zip(state.cart.lines()) {
+        view.edit_token = Some(line_edit_token(state, line));
+    }
 
     let paid = state.settlement.total_paid().map_err(money_error)?;
     // `balance`, not `amount_due`. `amount_due` is what the bill ASKS for (the total plus any
@@ -827,6 +1062,7 @@ fn free_tile(
 ) -> TableView {
     TableView {
         id: table_id.to_owned(),
+        billed_into: None,
         label,
         section: section.name.clone(),
         section_order: section.order,
@@ -882,6 +1118,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
 
     TableView {
         // Being selected no longer costs the table its state.
+        billed_into: core.billing.billed_into.as_ref().map(|id| id.as_str().to_owned()),
         state: if minutes >= late_after {
             TableState::Late
         } else if minutes >= warn_after {
@@ -995,7 +1232,7 @@ pub(crate) fn running_total(
     config: &crate::settings::ShopConfig,
 ) -> Option<MoneyView> {
     let core = order.core();
-    bill_for(&core.cart, core.order_type(), None, config)
+    bill_for(&core.cart, core.order_type(), core.billing.discount.clone(), config)
         .ok()
         .map(|bill| bill.grand_total.into())
 }

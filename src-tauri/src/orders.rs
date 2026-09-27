@@ -11,7 +11,7 @@ use ts_rs::TS;
 use crate::flows::{now, today};
 use crate::guard;
 use crate::state::{App, OUTLET};
-use crate::words::{self, UiResult};
+use crate::words::{self, UiError, UiResult};
 
 /// How old a queued intent may be before a person has to release it.
 pub const HOLD_AFTER_HOURS: i64 = 12;
@@ -57,6 +57,8 @@ pub fn apply(
     permissions: &mb_auth::PermissionSet,
     intent: &Intent,
 ) -> UiResult<Applied> {
+    // Mobile edits and counter settlement share the same action boundary.
+    let _one_at_a_time = app.begin_action();
     let at = now();
     let day = today(at);
 
@@ -157,6 +159,17 @@ pub fn apply(
             .map_err(|e| words::from_db(&e))
     })?;
 
+    if let Some(change) = &applied.tell_the_cashier {
+        app.note_floor_change(change.clone());
+    }
+    if matches!(applied.outcome, Outcome::Ok { .. }) {
+        // An acknowledged phone edit stays committed even if an overlapping local edit
+        // needs the cashier's decision. The unchanged local draft remains available.
+        if let Err(error) = app.refresh_open_cart() {
+            crate::log_info!("a saved floor change needs the cashier's review: {}", error.message);
+        }
+    }
+
     // The paper, after the outcome is durably on disk — the same road as the counter's own
     // ticket (`flows::queue_kitchen_lines`): grouped by station, one KOT number per roll.
     // A shop that switched the kitchen ticket off still gets the event and the kitchen
@@ -210,6 +223,7 @@ pub const fn is_audited(what: &What) -> bool {
             | What::RequestBill
             | What::CancelOrder { .. }
             | What::VoidItem { .. }
+            | What::ReduceQty { .. }
             | What::RequestDiscount { .. }
     )
 }
@@ -232,6 +246,7 @@ pub fn is_stale(typed_at_ms: i64, sent_at_ms: Option<i64>) -> bool {
 const fn needs(what: &What) -> Option<Permission> {
     match what {
         What::OpenOrder { .. }
+        | What::OpenParty { .. }
         | What::AddItem { .. }
         | What::SetQty { .. }
         | What::SetOrderNote { .. }
@@ -241,7 +256,7 @@ const fn needs(what: &What) -> Option<Permission> {
         | What::RequestSettle { .. } => Some(Permission::BillCreate),
         // Taking something back is the permission the counter uses for the same act, and for
         // the same reason.
-        What::VoidItem { .. } => Some(Permission::OrderItemVoid),
+        What::VoidItem { .. } | What::ReduceQty { .. } => Some(Permission::OrderItemVoid),
         What::CancelOrder { .. } => Some(Permission::OrderCancel),
         What::RequestDiscount { line: Some(_), .. } => Some(Permission::BillDiscountLine),
         What::RequestDiscount { line: None, .. } => Some(Permission::BillDiscountBill),
@@ -306,6 +321,7 @@ fn do_it(
             repos,
             order_type,
             table_id.as_deref(),
+            false,
             *covers,
             staff,
             at,
@@ -315,12 +331,38 @@ fn do_it(
         );
     }
 
-    let Some(order_id) = intent.order_id.as_deref() else {
+    if let What::OpenParty { table_id, covers } = &intent.what {
+        return open_order(repos, "dine_in", Some(table_id), true, *covers, staff, at, day, till, config);
+    }
+
+    // Resolve the dependency from the same durable event ledger used for idempotency.
+    // Never infer another group's order after a failed open, or after a partial reply.
+    let dependency = match &intent.open_intent_id {
+        Some(id) => match repos.events().recall(id)?.and_then(|json| serde_json::from_str::<Outcome>(&json).ok()) {
+            Some(Outcome::Ok { order_id, .. }) => Some(order_id),
+            _ => return Ok(refused("This order could not be opened, so its dishes were not sent. Open the queue to check it.")),
+        },
+        None => None,
+    };
+    if dependency.as_ref().zip(intent.order_id.as_ref()).is_some_and(|(a, b)| a != b) {
+        return Ok(refused("This request names two different orders. Open the order again."));
+    }
+    let Some(order_id) = dependency.as_deref().or(intent.order_id.as_deref()) else {
         return Ok(refused(
             "The phone did not say which order this is about. Open the table again.",
         ));
     };
     let found = repos.orders().find(&OrderId::new(order_id))?;
+    let working = repos.orders().find_working(&OrderId::new(order_id))?;
+    // The phone edits the issued order directly. A correction or combined account must
+    // instead be changed at the counter, where all source payments and drafts are held.
+    if working.as_ref().is_some_and(|order| order.core().billing.billed_into.is_some()
+        || !order.core().billing.sources.is_empty()) {
+        return Ok(refused("This order belongs to a combined bill. Ask the counter to change it."));
+    }
+    if working != found {
+        return Ok(refused("This bill is being corrected at the counter. Ask the cashier to finish the correction first."));
+    }
 
     // Conflict (e): the counter has already finished with it.
     let mut open = match found {
@@ -359,7 +401,7 @@ fn do_it(
     let mut kitchen_delta = None;
 
     match &intent.what {
-        What::OpenOrder { .. } => unreachable!("handled above"),
+        What::OpenOrder { .. } | What::OpenParty { .. } => unreachable!("handled above"),
 
         What::AddItem {
             item_id,
@@ -415,6 +457,9 @@ fn do_it(
             };
             // Conflict (c): the kitchen has already cooked some of it.
             if let Some(cart_line) = open.core.cart.lines().get(*line) {
+                if let Err(error) = crate::billing::validate_reduced_quantity(cart_line.qty, qty) {
+                    return Ok(refused(error.message));
+                }
                 let told = open.core.kitchen.quantity_told(&cart_line.identity());
                 if qty < told {
                     return Ok(refused(format!(
@@ -426,6 +471,47 @@ fn do_it(
             if open.core.cart.set_qty(*line, qty).is_err() {
                 return Ok(refused("That line is not on the order any more."));
             }
+        }
+
+        What::ReduceQty { expected, qty, reason } => {
+            if reason.trim().is_empty() {
+                return Ok(refused("Cancelling part of an item needs a reason."));
+            }
+            let Ok(qty) = Qty::parse(qty) else {
+                return Ok(refused("That quantity could not be read."));
+            };
+            let Outcome::Ok { lines, .. } = view_of(&open, None, config) else {
+                unreachable!("an open order always has a view");
+            };
+            if lines.get(expected.line) != Some(expected) {
+                return Ok(refused("This item changed at the counter. Open the order again before reducing it."));
+            }
+            let cart_line = open.core.cart.lines()[expected.line].clone();
+            if qty == Qty::ZERO || qty >= cart_line.qty || qty.thousandths() % 1_000 != 0 {
+                return Ok(refused("Choose a smaller whole-number quantity of at least 1, or take the whole item off the order."));
+            }
+            let before = open.core.cart.clone();
+            open.core.cart.set_qty(expected.line, qty)
+                .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
+            let stop = open.core.kitchen.over_told(&open.core.cart)
+                .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
+            let name = &cart_line.snapshot.name;
+            note = Some(format!("{name} changed from {} to {qty}.", cart_line.qty));
+            if !stop.is_empty() {
+                open.core.kitchen.mark_cancelled(&stop)
+                    .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
+                note = Some(format!("{name} changed from {} to {qty}. The kitchen is being told to cancel the extra quantity.", cart_line.qty));
+                kitchen_delta = Some((TicketKind::Cancellation, crate::flows::ticket_lines(&before, &stop)));
+            }
+            repos.audit().append(
+                OUTLET,
+                &AuditEntry::new(at, day, Some(staff.clone()), action::ITEM_VOIDED, "order")
+                    .about(order_id.to_owned())
+                    .changed(
+                        serde_json::json!({ "item": name, "qty": cart_line.qty.to_string() }),
+                        serde_json::json!({ "item": name, "qty": qty.to_string(), "reason": reason.trim() }),
+                    ),
+            )?;
         }
 
         What::VoidItem { line, reason } => {
@@ -659,6 +745,7 @@ fn open_order(
     repos: &mb_db::Repos<'_>,
     order_type: &str,
     table_id: Option<&str>,
+    new_party: bool,
     covers: Option<u32>,
     staff: &StaffId,
     at: Timestamp,
@@ -669,7 +756,7 @@ fn open_order(
     let Ok(order_type) = mb_db::encode::order_type_from_sql(order_type) else {
         return Ok(refused("That is not an order type this counter knows."));
     };
-    let placement = match mb_core::Placement::new(
+    let mut placement = match mb_core::Placement::new(
         order_type,
         table_id.map(|t| mb_core::TableId::new(t.to_owned())),
         None,
@@ -691,7 +778,7 @@ fn open_order(
             .floor()
             .list_tables(OUTLET)?
             .iter()
-            .any(|t| t.id.as_str() == table)
+            .any(|t| t.id.as_str() == table && t.is_active)
     {
         return Ok(refused(
             "That table is not on this shop's floor any more. Pull down to \
@@ -700,12 +787,12 @@ fn open_order(
     }
 
     // Conflict (a): two waiters open the same table at once.
-    if let Some(table) = table_id {
+    if let Some(table) = table_id.filter(|_| !new_party) {
         let existing = repos
             .orders()
             .list_open(OUTLET)?
             .into_iter()
-            .find(|o| o.core().table().is_some_and(|t| t.as_str() == table));
+            .find(|o| o.core().table().is_some_and(|t| t.as_str() == table) && o.core().seat().is_none());
         if let Some(AnyOrder::Open(open)) = existing {
             let till = on_which_till(repos, &open.core.id);
             let says = match till {
@@ -723,6 +810,14 @@ fn open_order(
                 kitchen_paper: None,
             });
         }
+    }
+
+    if new_party && let mb_core::Placement::DineIn { table, seat } = &mut placement {
+        let open = repos.orders().list_open(OUTLET)?;
+        *seat = Some(match crate::floor::next_free_seat(&open, table) {
+            Some(letter) => letter,
+            None => return Ok(refused("All party letters on that table are in use.")),
+        });
     }
 
     let mut draft = mb_core::DraftOrder::new(
@@ -822,6 +917,7 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
             .read_transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let tables = repos.floor().list_tables(OUTLET)?;
+                let sections = repos.floor().list_sections(OUTLET)?;
                 let open = repos.orders().list_open(OUTLET)?;
                 // Which orders asked for their bill, and who opened each — the phones show
                 // both, and the words are the counter's.
@@ -844,11 +940,14 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                         .find(|p| &p.id == id)
                         .map(|p| p.name.clone())
                 };
-                let label_of = |id: &mb_core::TableId| {
+                let label_of = |id: &mb_core::TableId, seat: Option<&mb_core::SubTable>| {
                     tables
                         .iter()
                         .find(|t| &t.id == id)
-                        .map(|t| t.label.clone())
+                        .map(|t| mb_core::table::printed_seat(
+                            sections.iter().find(|s| Some(&s.id) == t.section_id.as_ref()).map(|s| s.name.as_str()),
+                            &t.label, seat,
+                        ))
                 };
                 let on_table = |id: &mb_core::TableId| {
                     open.iter()
@@ -856,17 +955,20 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                         .map(|o| o.core().id.as_str().to_owned())
                 };
                 let bill_asked = |order_id: &str| asked.iter().any(|(id, _)| id == order_id);
-                let table_rows: Vec<serde_json::Value> = tables
+                let table_rows: Vec<serde_json::Value> = phone_tables(&tables, &sections)
                     .iter()
                     .map(|t| {
-                        let order_id = on_table(&t.id);
+                        let order_id = on_table(&mb_core::TableId::new(t.id.clone()));
                         let state = match &order_id {
                             Some(id) if bill_asked(id) => "bill_asked",
                             Some(_) => "taken",
                             None => "free",
                         };
                         serde_json::json!({
-                            "id": t.id.as_str(),
+                            "id": t.id,
+                            "label": t.label,
+                            "section": t.section,
+                            "seats": t.seats,
                             "state": state,
                             "order_id": order_id,
                         })
@@ -880,7 +982,7 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                     })
                     .map(|open| {
                         let table_id = open.core.table().map(|t| t.as_str().to_owned());
-                        let table_label = open.core.table().and_then(label_of);
+                        let table_label = open.core.table().and_then(|id| label_of(id, open.core.seat()));
                         let order_type = serde_json::to_value(open.core.order_type())
                             .ok()
                             .and_then(|v| v.as_str().map(ToOwned::to_owned))
@@ -896,6 +998,7 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                                 "order_id": order_id,
                                 "table_id": table_id,
                                 "table_label": table_label,
+                                "seat": open.core.seat().map(mb_core::SubTable::as_str),
                                 "order_type": order_type,
                                 "total": total,
                                 "token": token,
@@ -916,6 +1019,9 @@ pub fn floor_body(app: &App) -> UiResult<serde_json::Value> {
                     .collect();
                 Ok(serde_json::json!({
                     "tables": table_rows,
+                    "tables_complete": true,
+                    "party_orders": true,
+                    "partial_item_cancellation": true,
                     "orders": order_rows,
                     "warn_minutes": warn_minutes,
                     "late_minutes": late_minutes,
@@ -945,14 +1051,19 @@ pub fn apply_batch(
     let mut opened: Option<String> = None;
 
     for intent in &batch.intents {
+        let opens = matches!(intent.what, What::OpenOrder { .. } | What::OpenParty { .. });
+        // Compatibility for older phones: an unsuccessful open ends the previous group too.
+        if opens { opened = None; }
         let borrowed;
         let intent = if intent.order_id.is_none()
-            && !matches!(intent.what, mb_lan::intent::What::OpenOrder { .. })
+            && intent.open_intent_id.is_none()
+            && !opens
             && opened.is_some()
         {
             borrowed = mb_lan::Intent {
                 id: intent.id.clone(),
                 order_id: opened.clone(),
+                open_intent_id: None,
                 at: intent.at,
                 sent_at: intent.sent_at,
                 what: intent.what.clone(),
@@ -962,7 +1073,7 @@ pub fn apply_batch(
             intent
         };
         let applied = apply(app, device_id, staff, permissions, intent)?;
-        if matches!(intent.what, mb_lan::intent::What::OpenOrder { .. })
+        if opens
             && let Outcome::Ok { order_id, .. } = &applied.outcome
         {
             opened = Some(order_id.clone());
@@ -971,9 +1082,6 @@ pub fn apply_batch(
             Outcome::Ok { .. } => ok += 1,
             Outcome::Refused { .. } => refused_count += 1,
             Outcome::Held { .. } => held += 1,
-        }
-        if let Some(change) = applied.tell_the_cashier {
-            app.note_floor_change(change);
         }
         outcomes.push((intent.id.clone(), applied.outcome));
     }
@@ -1039,11 +1147,10 @@ pub fn catalogue(app: &App) -> UiResult<mb_lan::Catalogue> {
             .map_err(|e| words::from_db(&e))
     })?;
 
-    let mut fingerprint = String::new();
     let list: Vec<mb_lan::intent::CatalogueItem> = items
         .iter()
         .map(|item| {
-            let one = mb_lan::intent::CatalogueItem {
+            mb_lan::intent::CatalogueItem {
                 id: item.id.as_str().to_owned(),
                 name: item.name.clone(),
                 // The category's NAME — a waiter reads "Tiffin", never an id. A dish whose
@@ -1056,23 +1163,24 @@ pub fn catalogue(app: &App) -> UiResult<mb_lan::Catalogue> {
                     .unwrap_or_default(),
                 price: item.unit_price.to_plain_string(),
                 is_available: item.is_available,
-            };
-            fingerprint.push_str(&one.id);
-            fingerprint.push_str(&one.name);
-            // The category is part of what a phone can SEE, so renaming one must change the
-            // version — or every paired phone keeps showing the old grouping for ever.
-            fingerprint.push_str(&one.category);
-            fingerprint.push_str(&one.price);
-            fingerprint.push(if one.is_available { 'y' } else { 'n' });
-            one
+            }
         })
         .collect();
 
-    let mut rooms = Vec::new();
-    for table in &tables {
-        fingerprint.push_str(table.id.as_str());
-        fingerprint.push_str(&table.label);
-        rooms.push(mb_lan::intent::CatalogueTable {
+    let rooms = phone_tables(&tables, &sections);
+    // Hash exactly what the phone receives; no separately maintained list of visible fields.
+    let fingerprint = serde_json::to_vec(&(&list, &rooms))
+        .map_err(|e| UiError::new("catalogue.encode", "The menu could not be read.").with_detail(e.to_string()))?;
+    let digest = mb_auth::sha256(&fingerprint);
+    let version: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+
+    Ok(mb_lan::Catalogue { version, items: list, tables: rooms })
+}
+
+/// The same active table descriptions in the catalogue and every authoritative floor snapshot.
+fn phone_tables(tables: &[mb_db::repo::floor::DiningTable], sections: &[mb_db::repo::floor::Section]) -> Vec<mb_lan::intent::CatalogueTable> {
+    tables.iter().filter(|t| t.is_active).map(|table| {
+        mb_lan::intent::CatalogueTable {
             id: table.id.as_str().to_owned(),
             label: table.label.clone(),
             section: sections
@@ -1084,17 +1192,8 @@ pub fn catalogue(app: &App) -> UiResult<mb_lan::Catalogue> {
             // The floor screen owns what a table IS doing; the catalogue only says what tables
             // EXIST.
             state: "free".to_owned(),
-        });
-    }
-
-    let digest = mb_auth::sha256(fingerprint.as_bytes());
-    let version: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
-
-    Ok(mb_lan::Catalogue {
-        version,
-        items: list,
-        tables: rooms,
-    })
+        }
+    }).collect()
 }
 
 // The cashier's side of a floor change.
@@ -1104,44 +1203,7 @@ pub fn take_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartView>
     // One counter action at a time — see `App::begin_action`.
     let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
-    let changes = app.with_cart(|state| Ok(state.from_the_floor.clone()))?;
-
-    // Every menu lookup FIRST, outside the cart lock — `find_menu_item` takes the shop lock,
-    // and taking two locks in two orders in one product is how a till freezes at eight o'clock
-    // on a Saturday.
-    let config = app.shop_config();
-    let mut resolved = Vec::new();
-    for change in &changes {
-        let item = app.find_menu_item(&change.item_id)?;
-        let qty = Qty::parse(&change.qty).unwrap_or(Qty::ZERO);
-        resolved.push((
-            crate::billing::snapshot_for(&item, &config.tax)?,
-            qty,
-            change.note.clone(),
-        ));
-    }
-
-    app.with_cart_mut(|state| {
-        for (snapshot, qty, note) in resolved {
-            state
-                .cart
-                .add(snapshot, qty, note, vec![])
-                .map_err(|e| {
-                    crate::words::UiError::new(
-                        "cart.add",
-                        "The floor's items could not be added to this bill.",
-                    )
-                    .with_detail(e.to_string())
-                })?;
-        }
-        state.from_the_floor.clear();
-        crate::billing::cart_view(state, &app.shop_config())
-    })
-}
-
-/// The cashier looked and decided not to take them.
-pub fn dismiss_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartView> {
-    guard::require(app, Permission::BillCreate)?;
+    app.refresh_open_cart()?;
     app.with_cart_mut(|state| {
         state.from_the_floor.clear();
         crate::billing::cart_view(state, &app.shop_config())
@@ -1151,11 +1213,6 @@ pub fn dismiss_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartVi
 #[tauri::command]
 pub fn take_the_floors_items(app: tauri::State<'_, App>) -> UiResult<crate::billing::CartView> {
     take_the_floors_items_on(&app)
-}
-
-#[tauri::command]
-pub fn dismiss_the_floors_items(app: tauri::State<'_, App>) -> UiResult<crate::billing::CartView> {
-    dismiss_the_floors_items_on(&app)
 }
 
 #[cfg(test)]

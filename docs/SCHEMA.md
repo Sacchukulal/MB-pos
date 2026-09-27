@@ -498,6 +498,8 @@ Scope 14.4. Filled at P14.
 
 ### orders
 
+The billing account persists discounts, received payments, revision and source-order links.
+
 One row per order in **every** state. `state` is `AnyOrder`'s serde
 discriminator, spelled identically, so the counter, the phone and the cloud
 agree on what a cancelled order is called without a translation layer.
@@ -528,6 +530,7 @@ unchanged.
 | outlet_id | TEXT | no | |
 | terminal_id | TEXT | no | Scope 11.1. |
 | state | TEXT | no | `draft` / `open` / `settled` / `cancelled` / `voided`. |
+| billing_account | TEXT | no | Persisted billing state, source links and revision. |
 | business_day | INTEGER | no | **Stamped once, at creation** (D5). |
 | created_at | INTEGER | no | |
 | created_by | TEXT | no | |
@@ -580,7 +583,7 @@ constraint bites on history, not on housekeeping.
 |---|---|---|---|
 | id | TEXT | no | |
 | order_id | TEXT | no | |
-| seq | INTEGER | no | The sequence the waiter called items in. The kitchen ticket reads in it and the cart rebuilds in it. |
+| seq | INTEGER | no | Nonnegative positions rebuild the current cart in call order. Negative positions retain earlier issued line snapshots referenced by stock movements. Corrected revisions use distinct line ids. |
 | item_id | TEXT | yes | A reference for reporting only. Never read to print a line. |
 | variant_id | TEXT | yes | Scope 6.1. |
 | name | TEXT | no | Snapshot. |
@@ -824,8 +827,9 @@ later is the cheap direction).
 `mode` is deliberately **not** the payment-mode enum: money can go back in cash
 that came in on a card, and the drawer count needs to see that.
 
-Only ever against a voided order, and never for more than was taken. Both rules
-live in the repository, because both need to read the order.
+Ordinary refunds are against a voided order and never exceed the remaining payments.
+Correction returns commit with the replacement bill and already reduce its payment
+projection; the flag below prevents subtracting those returns again on a later void.
 
 | column | type | null | notes |
 |---|---|---|---|
@@ -838,6 +842,27 @@ live in the repository, because both need to read the order.
 | refunded_at | INTEGER | no | |
 | refunded_by | TEXT | yes | |
 | business_day | INTEGER | no | D5, denormalised like every other money row. |
+| is_adjustment | INTEGER | no | 0/1. A correction return already reflected in the current payments. |
+
+### order_edits
+
+Durable working copies. The issued order stays in the books until the edit commits.
+
+| column | type | null | notes |
+|---|---|---|---|
+| order_id | TEXT | no | Primary key, references orders. |
+| snapshot | TEXT | no | Complete working order. |
+
+### bill_versions
+
+Append-only snapshots of issued bills before replacement.
+
+| column | type | null | notes |
+|---|---|---|---|
+| id | TEXT | no | Primary key. |
+| order_id | TEXT | no | References orders. |
+| revision | INTEGER | no | Unique within the order. |
+| snapshot | TEXT | no | Complete issued order, bill and payments. |
 
 ### bill_reverts
 

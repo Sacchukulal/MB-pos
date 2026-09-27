@@ -1,7 +1,7 @@
 import { render, renderHook, screen, cleanup, within, act, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { PaymentModes, paymentAnswer } from '../src/billing/Billing';
+import { PaymentModes, paymentAnswer, ReturnAmounts } from '../src/billing/Billing';
 import { Suggestions } from '../src/billing/Keys';
 import { Processing, ProcessingHead, processingOrders } from '../src/billing/Processing';
 import { TableGrid } from '../src/billing/TableGrid';
@@ -14,6 +14,31 @@ import type { MoneyView } from '../src/ipc/generated/MoneyView';
 import type { TableView } from '../src/ipc/generated/TableView';
 
 afterEach(cleanup);
+
+describe('corrected bill returns', () => {
+  it('keeps exact typed amounts for Rust and preserves them for a retry', () => {
+    const confirm = vi.fn();
+    const cart = {
+      change: money(7900, '79.00'),
+      payments: [
+        { mode: 'Cash', amount: money(5000, '50.00') },
+        { mode: 'Card', amount: money(5500, '55.00') },
+        { mode: 'Cash', amount: money(100, '1.00') },
+      ],
+    } as Pick<CartView, 'change' | 'payments'>;
+    const { rerender } = render(<ReturnAmounts cart={cart} busy={false} onClose={vi.fn()} onConfirm={confirm} />);
+    fireEvent.change(screen.getByLabelText('Return by Cash'), { target: { value: '50.00' } });
+    fireEvent.change(screen.getByLabelText('Return by Card'), { target: { value: '29.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm return' }));
+    expect(confirm).toHaveBeenLastCalledWith([['Cash', '50.00'], ['Card', '29.00']]);
+    rerender(<ReturnAmounts cart={cart} busy onClose={vi.fn()} onConfirm={confirm} />);
+    expect(screen.getByRole('button', { name: 'Confirm return' })).toBeDisabled();
+    rerender(<ReturnAmounts cart={cart} busy={false} onClose={vi.fn()} onConfirm={confirm} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm return' }));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(confirm).toHaveBeenLastCalledWith([['Cash', '50.00'], ['Card', '29.00']]);
+  });
+});
 
 function money(paise: number, text: string): MoneyView {
   return { paise: BigInt(paise), text };

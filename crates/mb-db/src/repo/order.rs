@@ -18,6 +18,56 @@ pub struct OrderRepo<'a> {
 }
 
 impl<'a> OrderRepo<'a> {
+    /// A durable editing draft takes precedence only on the billing/floor path.
+    /// Reports continue reading the issued order until the replacement commits.
+    pub fn find_working(&self, id: &OrderId) -> Result<Option<AnyOrder>, DbError> {
+        let draft: Option<String> = self
+            .tx
+            .query_row(
+                "SELECT snapshot FROM order_edits WHERE order_id = ?1",
+                [id.as_str()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match draft {
+            Some(value) => serde_json::from_str(&value)
+                .map(Some)
+                .map_err(|e| DbError::invariant(e.to_string())),
+            None => self.find(id),
+        }
+    }
+
+    pub fn save_working(
+        &self,
+        outlet: &str,
+        terminal: &str,
+        order: &AnyOrder,
+    ) -> Result<(), DbError> {
+        if matches!(self.find(&order.core().id)?, Some(AnyOrder::Settled(_))) {
+            let snapshot =
+                serde_json::to_string(order).map_err(|e| DbError::invariant(e.to_string()))?;
+            self.tx.execute("INSERT INTO order_edits (order_id, snapshot) VALUES (?1, ?2) ON CONFLICT(order_id) DO UPDATE SET snapshot = excluded.snapshot",
+                rusqlite::params![order.core().id.as_str(), snapshot])?;
+            Ok(())
+        } else {
+            self.save(outlet, terminal, order)
+        }
+    }
+
+    pub fn finish_edit(&self, id: &OrderId) -> Result<(), DbError> {
+        self.tx
+            .execute("DELETE FROM order_edits WHERE order_id = ?1", [id.as_str()])?;
+        Ok(())
+    }
+
+    pub fn assert_working(&self, expected: &AnyOrder) -> Result<(), DbError> {
+        if self.find_working(&expected.core().id)?.as_ref() != Some(expected) {
+            return Err(DbError::invariant(
+                "This order changed on another counter; open it again.",
+            ));
+        }
+        Ok(())
+    }
     #[must_use]
     pub(crate) fn new(tx: &'a Transaction<'a>) -> Self {
         OrderRepo { tx }
@@ -27,6 +77,16 @@ impl<'a> OrderRepo<'a> {
     pub fn save(&self, outlet: &str, terminal: &str, order: &AnyOrder) -> Result<(), DbError> {
         let core = order.core();
         let id = core.id.as_str();
+
+        // The relational rows are the current projection. Issued versions are append-only.
+        if let Some(old @ AnyOrder::Settled(_)) = self.find(&core.id)? {
+            let snapshot =
+                serde_json::to_string(&old).map_err(|e| DbError::invariant(e.to_string()))?;
+            self.tx.execute(
+                "INSERT INTO bill_versions (id, order_id, revision, snapshot) VALUES (?1, ?2, ?3, ?4) ON CONFLICT DO NOTHING",
+                rusqlite::params![format!("{id}_v{}", old.core().billing.revision), id, old.core().billing.revision, snapshot],
+            )?;
+        }
 
         // Replace rather than accumulate.
         self.delete_children(id)?;
@@ -111,12 +171,20 @@ impl<'a> OrderRepo<'a> {
             ],
         )?;
 
-        self.save_lines(id, &core.cart)?;
+        self.save_lines(id, &core.cart, core.billing.revision)?;
+        let account =
+            serde_json::to_string(&core.billing).map_err(|e| DbError::invariant(e.to_string()))?;
+        self.tx.execute(
+            "UPDATE orders SET billing_account = ?2 WHERE id = ?1",
+            rusqlite::params![id, account],
+        )?;
         self.save_kitchen(id, &core.kitchen, core.created_at)?;
 
         if let Some((bill, settlement)) = bill_and_settlement(order) {
             self.save_bill(id, bill, core)?;
             self.save_payments(id, settlement, core)?;
+        } else if matches!(order, AnyOrder::Open(_)) && core.billing.billed_into.is_none() {
+            self.save_payments(id, &core.billing.settlement, core)?;
         }
 
         // The outbox entry is written HERE, in the same transaction as the row it describes.
@@ -132,7 +200,13 @@ impl<'a> OrderRepo<'a> {
         {
             let day = encode::business_day_to_sql(core.business_day).to_string();
             for table in crate::repo::wire::TOTALS_TABLES {
-                OutboxRepo::new(self.tx).enqueue(outlet, table, &day, Op::Upsert, core.created_at)?;
+                OutboxRepo::new(self.tx).enqueue(
+                    outlet,
+                    table,
+                    &day,
+                    Op::Upsert,
+                    core.created_at,
+                )?;
             }
             let at = voided
                 .as_ref()
@@ -149,7 +223,11 @@ impl<'a> OrderRepo<'a> {
                 mb_core::PaymentMode::Credit(customer) => Some(customer),
                 _ => None,
             }) {
-                crate::repo::money::MoneyRepo::new(self.tx).queue_customer(outlet, customer.as_str(), core.created_at)?;
+                crate::repo::money::MoneyRepo::new(self.tx).queue_customer(
+                    outlet,
+                    customer.as_str(),
+                    core.created_at,
+                )?;
             }
         }
         Ok(())
@@ -185,6 +263,7 @@ impl<'a> OrderRepo<'a> {
             created_by: header.created_by.clone(),
             note: header.note.clone(),
             kitchen,
+            billing: self.read_account(id.as_str())?,
         };
 
         let order = match header.state.as_str() {
@@ -253,10 +332,21 @@ impl<'a> OrderRepo<'a> {
 
     /// Everything on the floor right now.
     pub fn list_open(&self, outlet: &str) -> Result<Vec<AnyOrder>, DbError> {
-        self.list_where(
+        let mut orders = self.list_where(
             "outlet_id = ?1 AND state IN ('draft', 'open') ORDER BY created_at",
             rusqlite::params![outlet],
-        )
+        )?;
+        let ids: Vec<String> = self.tx.prepare("SELECT e.order_id FROM order_edits e JOIN orders o ON o.id = e.order_id WHERE o.outlet_id = ?1")?
+            .query_map([outlet], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        for id in ids {
+            if let Some(order) = self.find_working(&OrderId::new(id))? {
+                orders.retain(|o| o.core().id != order.core().id);
+                if matches!(order, AnyOrder::Open(_) | AnyOrder::Draft(_)) {
+                    orders.push(order);
+                }
+            }
+        }
+        Ok(orders)
     }
 
     /// One business day, every state — what the day report and the Z-report read.
@@ -324,7 +414,9 @@ impl<'a> OrderRepo<'a> {
         // go, and it is deliberate: the delete is spelled out here where somebody can read it.
         self.tx.execute(
             "DELETE FROM order_line_modifiers
-              WHERE order_line_id IN (SELECT id FROM order_lines WHERE order_id = ?1)",
+              WHERE order_line_id IN (SELECT id FROM order_lines l WHERE order_id = ?1
+                  AND NOT EXISTS (SELECT 1 FROM stock_movements s
+                                   WHERE s.order_id = ?1 AND s.order_line_id = l.id))",
             [id],
         )?;
         self.tx
@@ -337,16 +429,31 @@ impl<'a> OrderRepo<'a> {
             .execute("DELETE FROM payments WHERE order_id = ?1", [id])?;
         self.tx
             .execute("DELETE FROM kitchen_ledger WHERE order_id = ?1", [id])?;
-        self.tx
-            .execute("DELETE FROM order_lines WHERE order_id = ?1", [id])?;
+        self.tx.execute(
+            "DELETE FROM order_lines AS l WHERE order_id = ?1
+                       AND NOT EXISTS (SELECT 1 FROM stock_movements s
+                                       WHERE s.order_id = ?1 AND s.order_line_id = l.id)",
+            [id],
+        )?;
+        // Retain original snapshots referenced by stock. Nonnegative positions are current;
+        // negative positions are historical, allocated below every existing position.
+        let oldest: i64 = self.tx.query_row(
+            "SELECT MIN(0, COALESCE(MIN(seq), 0)) FROM order_lines WHERE order_id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        self.tx.execute(
+            "UPDATE order_lines SET seq = ?2 - seq - 1 WHERE order_id = ?1 AND seq >= 0",
+            rusqlite::params![id, oldest],
+        )?;
         self.tx
             .execute("DELETE FROM bills WHERE order_id = ?1", [id])?;
         Ok(())
     }
 
-    fn save_lines(&self, order_id: &str, cart: &Cart) -> Result<(), DbError> {
+    fn save_lines(&self, order_id: &str, cart: &Cart, revision: u32) -> Result<(), DbError> {
         for (seq, line) in cart.lines().iter().enumerate() {
-            let line_id = line_id(order_id, seq);
+            let line_id = line_id(order_id, revision, seq);
             let seq_sql = i64::try_from(seq).unwrap_or(i64::MAX);
             let discount = line.line_discount.as_ref();
             let (kind, value) = match discount {
@@ -364,7 +471,16 @@ impl<'a> OrderRepo<'a> {
                                           discount_kind, discount_value, discount_reason,
                                           discount_by, was_discount_capped)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?19, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                         ?16, ?17, ?18, 0)",
+                         ?16, ?17, ?18, 0)
+                 ON CONFLICT(id) DO UPDATE SET
+                    seq = excluded.seq, item_id = excluded.item_id, name = excluded.name,
+                    unit_price = excluded.unit_price, tax_rate_bp = excluded.tax_rate_bp,
+                    tax_kind = excluded.tax_kind, tax_basis = excluded.tax_basis,
+                    hsn = excluded.hsn, category_id = excluded.category_id, qty = excluded.qty,
+                    note = excluded.note, course = excluded.course, prep_minutes = excluded.prep_minutes,
+                    discount_kind = excluded.discount_kind, discount_value = excluded.discount_value,
+                    discount_reason = excluded.discount_reason, discount_by = excluded.discount_by,
+                    discount_applied = NULL, discount_requested = NULL, was_discount_capped = 0",
                 rusqlite::params![
                     line_id,
                     order_id,
@@ -390,6 +506,10 @@ impl<'a> OrderRepo<'a> {
                 ],
             )?;
 
+            self.tx.execute(
+                "DELETE FROM order_line_modifiers WHERE order_line_id = ?1",
+                [&line_id],
+            )?;
             for (mseq, modifier) in line.modifiers.iter().enumerate() {
                 self.tx.execute(
                     "INSERT INTO order_line_modifiers (order_line_id, seq, modifier_id, name,
@@ -493,7 +613,7 @@ impl<'a> OrderRepo<'a> {
                                          gross_including_tax, rate_bp, tax_kind, tax_basis)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?14, ?11, ?12, ?13, ?15)",
                 rusqlite::params![
-                    line_id(order_id, seq),
+                    line_id(order_id, core.billing.revision, seq),
                     order_id,
                     encode::money_to_sql(line.gross),
                     encode::money_to_sql(line.line_discount),
@@ -610,6 +730,16 @@ impl<'a> OrderRepo<'a> {
 
     // Reading — the private-field wall.
 
+    fn read_account(&self, id: &str) -> Result<mb_core::BillingAccount, DbError> {
+        let value: String = self.tx.query_row(
+            "SELECT billing_account FROM orders WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        serde_json::from_str(&value)
+            .map_err(|e| DbError::invariant(format!("billing account: {e}")))
+    }
+
     fn read_header(&self, id: &str) -> Result<Option<Header>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             // New columns go on the END of this list, never in the middle: the reader below
@@ -662,7 +792,7 @@ impl<'a> OrderRepo<'a> {
     /// Replays `Cart::add` in stored `seq` order.
     fn read_cart(&self, order_id: &str) -> Result<Cart, DbError> {
         let lines = self.read_line_rows(order_id)?;
-        let mut cart = Cart::new();
+        let mut restored = Vec::new();
 
         for line in &lines {
             let modifiers = self.read_modifiers(&line.id)?;
@@ -690,20 +820,7 @@ impl<'a> OrderRepo<'a> {
             snapshot.course = line.course.clone();
             snapshot.prep_minutes = line.prep_minutes.and_then(|m| u32::try_from(m).ok());
 
-            let index = cart
-                .add(
-                    snapshot,
-                    encode::qty_from_sql(line.qty),
-                    line.note.clone(),
-                    modifiers,
-                )
-                .map_err(|e| {
-                    DbError::invariant(format!(
-                        "order {order_id} line {} will not go back into a cart: {e}",
-                        line.seq
-                    ))
-                })?;
-
+            let mut line_discount = None;
             if let Some(kind) = &line.discount_kind {
                 let value = line.discount_value.ok_or_else(|| {
                     DbError::invariant(format!(
@@ -719,11 +836,17 @@ impl<'a> OrderRepo<'a> {
                 if let Some(by) = &line.discount_by {
                     entry = entry.authorised_by(StaffId::new(by.clone()));
                 }
-                cart.set_line_discount(index, Some(entry))
-                    .map_err(|e| DbError::invariant(format!("order {order_id}: {e}")))?;
+                line_discount = Some(entry);
             }
+            restored.push(mb_core::CartLine {
+                snapshot,
+                qty: encode::qty_from_sql(line.qty),
+                note: line.note.clone(),
+                modifiers,
+                line_discount,
+            });
         }
-        Ok(cart)
+        Cart::from_lines(restored).map_err(|e| DbError::invariant(format!("order {order_id}: {e}")))
     }
 
     fn read_line_rows(&self, order_id: &str) -> Result<Vec<LineRow>, DbError> {
@@ -731,7 +854,7 @@ impl<'a> OrderRepo<'a> {
             "SELECT id, seq, item_id, name, unit_price, tax_rate_bp, tax_kind, hsn,
                     category_id, qty, note, course, prep_minutes,
                     discount_kind, discount_value, discount_reason, discount_by, tax_basis
-               FROM order_lines WHERE order_id = ?1 ORDER BY seq",
+               FROM order_lines WHERE order_id = ?1 AND seq >= 0 ORDER BY seq",
         )?;
         let rows = stmt.query_map([order_id], |row| {
             Ok(LineRow {
@@ -880,7 +1003,10 @@ impl<'a> OrderRepo<'a> {
         )?;
 
         // The bill-level discount as given, when one was.
-        let bill_discount = match (row.get::<_, Option<String>>(20)?, row.get::<_, Option<i64>>(21)?) {
+        let bill_discount = match (
+            row.get::<_, Option<String>>(20)?,
+            row.get::<_, Option<i64>>(21)?,
+        ) {
             (Some(kind), Some(value)) => Some(mb_core::DiscountEntry {
                 discount: encode::discount_from_sql(&kind, value, "bills.bill_discount_kind")?,
                 reason: row.get(22)?,
@@ -1232,8 +1358,12 @@ struct LineRow {
 }
 
 /// The id of one order line, derived rather than generated.
-pub(crate) fn line_id(order_id: &str, seq: usize) -> String {
-    format!("{order_id}_ln_{seq}")
+pub(crate) fn line_id(order_id: &str, revision: u32, seq: usize) -> String {
+    if revision == 0 {
+        format!("{order_id}_ln_{seq}")
+    } else {
+        format!("{order_id}_v{revision}_ln_{seq}")
+    }
 }
 
 fn state_tag(order: &AnyOrder) -> &'static str {

@@ -53,6 +53,24 @@ impl CartLine {
             modifier_ids,
         }
     }
+    /// Frozen prices matter, but the order in which modifiers were tapped does not.
+    fn same_pricing(&self, other: &Self) -> bool {
+        if self.snapshot != other.snapshot || self.modifiers.len() != other.modifiers.len() {
+            return false;
+        }
+        let mut left: Vec<_> = self.modifiers.iter().collect();
+        let mut right: Vec<_> = other.modifiers.iter().collect();
+        let key = |m: &&Modifier| {
+            (
+                m.modifier_id.as_str().to_owned(),
+                m.name.clone(),
+                m.price_delta.paise(),
+            )
+        };
+        left.sort_unstable_by_key(key);
+        right.sort_unstable_by_key(key);
+        left == right
+    }
 }
 
 /// What makes two lines "the same thing".
@@ -77,6 +95,13 @@ pub struct Cart {
 }
 
 impl Cart {
+    /// Restore authoritative rows without coalescing separately priced or discounted lines.
+    pub fn from_lines(lines: Vec<CartLine>) -> Result<Self> {
+        if lines.iter().any(|line| !line.qty.is_positive()) {
+            return Err(CartError::NonPositiveQty);
+        }
+        Ok(Self { lines })
+    }
     #[must_use]
     pub fn new() -> Self {
         Cart::default()
@@ -103,7 +128,11 @@ impl Cart {
         };
 
         let key = candidate.identity();
-        if let Some(index) = self.lines.iter().position(|line| line.identity() == key) {
+        if let Some(index) = self
+            .lines
+            .iter()
+            .position(|line| line.identity() == key && line.same_pricing(&candidate))
+        {
             // Adding the same thing again increases the quantity.
             let merged = self.lines[index]
                 .qty
@@ -147,11 +176,16 @@ impl Cart {
         self.lines[index].note = normalise_note(note);
 
         let key = self.lines[index].identity();
-        let twin = self
-            .lines
-            .iter()
-            .position(|line| line.identity() == key)
-            .filter(|found| *found != index);
+        let twin = self.lines.iter().enumerate().position(|(found, line)| {
+            found != index
+                && line.identity() == key
+                && line.same_pricing(&self.lines[index])
+                && line.line_discount == self.lines[index].line_discount
+                && !matches!(
+                    line.line_discount.as_ref().map(|d| d.discount),
+                    Some(crate::discount::Discount::Amount(_))
+                )
+        });
 
         match twin {
             Some(target) => {
@@ -177,7 +211,13 @@ impl Cart {
         }
         let key = line.identity();
         let twin = self.lines.iter().position(|existing| {
-            existing.identity() == key && existing.line_discount == line.line_discount
+            existing.identity() == key
+                && existing.line_discount == line.line_discount
+                && existing.same_pricing(&line)
+                && !matches!(
+                    line.line_discount.as_ref().map(|d| d.discount),
+                    Some(crate::discount::Discount::Amount(_))
+                )
         });
 
         match twin {
@@ -374,6 +414,43 @@ mod tests {
         cart.add(item("itm_1", "Paneer Tikka", 22_000), Qty::ONE, None, c)
             .expect("adds");
         assert_eq!(cart.len(), 2);
+    }
+
+    #[test]
+    fn transfers_compare_modifier_prices_without_relying_on_tap_order() {
+        let mut cart = cart_with_one(None, vec![modifier("a"), modifier("b")]);
+        let mut incoming = cart.lines()[0].clone();
+        incoming.modifiers.reverse();
+        cart.push(incoming.clone()).expect("same prices merge");
+        assert_eq!(cart.len(), 1);
+        incoming.modifiers[0].price_delta = Money::from_paise(2_000);
+        cart.push(incoming)
+            .expect("changed modifier keeps its price");
+        assert_eq!(cart.len(), 2);
+        cart.set_note(1, None).expect("note edit");
+        assert_eq!(
+            cart.len(),
+            2,
+            "a note edit must not erase a different price"
+        );
+    }
+
+    #[test]
+    fn a_note_edit_keeps_separately_priced_or_discounted_lines() {
+        let mut cart = cart_with_one(None, vec![]);
+        cart.add(
+            item("itm_1", "Paneer Tikka", 25_000),
+            Qty::ONE,
+            Some("crispy".to_owned()),
+            vec![],
+        )
+        .expect("different price");
+        cart.set_note(1, None).expect("clear note");
+        assert_eq!(cart.len(), 2);
+        assert_eq!(
+            cart.lines()[1].snapshot.unit_price,
+            Money::from_paise(25_000)
+        );
     }
 
     #[test]

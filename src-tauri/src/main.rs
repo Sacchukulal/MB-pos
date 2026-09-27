@@ -8,6 +8,8 @@
 #[cfg(test)]
 mod acceptance_tests;
 mod billing;
+#[cfg(test)]
+mod cart_sync_tests;
 /// Suppliers, the paper, the supplier ledger and purchase orders — and one rupee, one row.
 mod buying;
 /// The cloud, over HTTP — the one file that opens a socket to Magic Bill.
@@ -16,6 +18,8 @@ mod cloud;
 mod buying_tests;
 mod config;
 mod corrections;
+#[cfg(test)]
+mod correction_tests;
 /// The physical stock count, which freezes the book and posts a delta rather than setting the
 /// balance.
 mod counting;

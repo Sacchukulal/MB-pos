@@ -125,6 +125,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the floor (scope 14.1–14.3)', () => {
+  it('releases a combined serving table and reloads the floor', async () => {
+    answers(floor({ tiles: [tile({ id: 'tbl_2', label: '2', state: 'occupied', orderId: 'ord_2', billedInto: 'ord_root' })] }));
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Release table 2' }));
+    await screen.findByText('Table released.');
+    expect(call).toHaveBeenCalledWith('release_serving_table', { orderId: 'ord_2' });
+    expect(call).not.toHaveBeenCalledWith('print_open_bill', expect.anything());
+    expect(call.mock.calls.filter(([name]) => name === 'floor_plan')).toHaveLength(2);
+  });
+
   it('tells all FIVE states apart without colour', async () => {
     call.mockResolvedValue(floor());
     const { container } = show();

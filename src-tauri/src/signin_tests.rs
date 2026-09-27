@@ -100,6 +100,49 @@ fn with_status(id: &str, name: &str, role: RolePreset, status: &str) -> StaffEdi
     edit
 }
 
+/// An older database or a synced role cannot restrict the built-in Owner.
+#[test]
+fn owner_access_survives_missing_saved_grants_and_discount_caps() {
+    let scratch = Scratch::new("owner_effective_access");
+    let app = a_shop(&scratch);
+    hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
+    app.with_shop(|shop| {
+        shop.db
+            .transaction(|tx| {
+                tx.execute("DELETE FROM role_permissions WHERE role_id = 'role_owner'", [])?;
+                tx.execute(
+                    "UPDATE roles SET max_discount_bp = 0, max_discount_paise = 0 WHERE id = 'role_owner'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .map_err(|e| crate::words::from_db(&e))
+    })
+    .expect("simulate an older or restricted saved role");
+
+    lock_now_on(&app).expect("locked");
+    let state = login_on(&app, "staff_owner".to_owned(), "2468".to_owned())
+        .expect("the existing owner signs in");
+    for permission in Permission::ALL {
+        assert!(state.permissions.iter().any(|code| code == permission.code()));
+        crate::guard::require(&app, *permission).expect("owner command access");
+    }
+    let owner = state.people.iter().find(|p| p.id == "staff_owner").expect("owner");
+    assert_eq!(owner.permissions.len(), Permission::ALL.len());
+    assert_eq!(owner.max_discount_bp, None);
+    assert_eq!(owner.max_discount, None);
+    let roles = crate::ipc::list_roles_on(&app).expect("roles");
+    let owner_role = roles.iter().find(|r| r.is_owner).expect("owner role");
+    assert_eq!(owner_role.permissions.len(), Permission::ALL.len());
+    assert_eq!(owner_role.max_discount_percent, None);
+    assert_eq!(owner_role.max_discount, None);
+    let bills = bills_on(&app, BillFilter::default()).expect("bills screen");
+    assert!(bills.can_revert, "Edit bill must be available");
+    assert!(bills.can_approve, "corrected bills can be approved");
+    let session = app.sessions().current().expect("signed in");
+    assert_eq!(session.actor.discount_policy(), mb_core::DiscountPolicy::unrestricted());
+}
+
 /// The whole first day of a shop, in order.
 #[test]
 fn a_shop_starts_open_can_be_locked_once_somebody_has_a_pin_and_lets_the_right_person_in() {
@@ -582,6 +625,7 @@ fn locking_and_switching_user_do_not_touch_the_cart() {
     app.with_cart_mut(|state| {
         state.place_on(mb_core::TableId::new("tbl_7"), "7".to_owned(), None);
         state.origin = Some(crate::billing::Origin {
+            baseline: None,
             id: mb_core::OrderId::new("ord_open"),
             created_at: crate::flows::now(),
             business_day: crate::flows::today(crate::flows::now()),
@@ -809,7 +853,7 @@ use crate::corrections::{
 };
 
 /// A shop with a menu and an owner, ready to trade.
-fn a_trading_shop(scratch: &Scratch) -> App {
+pub(crate) fn a_trading_shop(scratch: &Scratch) -> App {
     let app = a_shop(scratch);
     hire(&app, "staff_owner", "Sachin", RolePreset::Owner, "2468");
     app.with_shop(|shop| {
@@ -851,7 +895,7 @@ fn a_trading_shop(scratch: &Scratch) -> App {
 }
 
 /// Put `qty` teas in the cart, the way the billing screen does.
-fn order_teas(app: &App, qty: u32) {
+pub(crate) fn order_teas(app: &App, qty: u32) {
     let item = app.find_menu_item("itm_tea").expect("on the menu");
     app.with_cart_mut(|state| {
         *state = crate::billing::CartState::new_order(mb_core::OrderType::Parcel);
@@ -968,6 +1012,267 @@ fn a_bill_can_be_voided_and_the_days_figures_still_tie() {
     assert_eq!(again.code, "void.not_settled");
 }
 
+#[test]
+fn an_unchanged_correction_retains_the_payment_and_the_issued_sale_until_commit() {
+    let scratch = Scratch::new("correction_keeps_payment");
+    let app = a_trading_shop(&scratch);
+    order_teas(&app, 2);
+    let number = settle_the_cart(&app);
+    let original = list_bills_on(&app).expect("bills")[0].clone();
+    revert_bill_on(&app, original.order_id.clone(), "Check items".to_owned(), None, None).expect("edit");
+    assert_eq!(list_bills_on(&app).expect("issued")[0].total, original.total);
+    let pending = bill_detail_on(&app, original.order_id.clone()).expect("pending detail");
+    assert!(!pending.can_approve, "unfinished changes cannot be signed off");
+    assert_eq!(pending.edits[0].changes, vec!["Not billed again yet"]);
+    approve_revert_on(&app, pending.edits[0].id.clone()).expect_err("draft cannot be approved");
+    assert!(bill_detail_on(&app, original.order_id.clone()).expect("still pending").edits[0].approved_at.is_none());
+    app.with_cart(|s| { assert_eq!(s.settlement.total_paid().expect("paid").paise(), original.total.paise); Ok(()) }).expect("cart");
+    assert_eq!(crate::flows::complete_bill_on(&app, None).expect("no extra payment"), number);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let count: i64 = tx.query_row("SELECT COUNT(*) FROM bill_versions WHERE order_id = ?1", [&original.order_id], |r| r.get(0))?;
+        assert_eq!(count, 1);
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("history");
+}
+
+#[test]
+fn two_paid_bills_combine_without_collecting_the_money_again() {
+    let scratch = Scratch::new("combine_paid");
+    let app = a_trading_shop(&scratch);
+    order_teas(&app, 2);
+    settle_the_cart(&app);
+    let first = list_bills_on(&app).expect("bills")[0].clone();
+    order_teas(&app, 2);
+    settle_the_cart(&app);
+    let second = list_bills_on(&app).expect("bills").into_iter().find(|b| b.order_id != first.order_id).expect("second");
+    crate::floor::merge_orders_on(&app, second.order_id.clone(), first.order_id.clone()).expect("combine");
+    assert_eq!(list_bills_on(&app).expect("issued until completion").iter().filter(|b| b.state == "settled").count(), 2);
+    crate::ipc::open_order_on(&app, first.order_id.clone()).expect("combined cart");
+    app.with_cart(|s| { assert_eq!(s.settlement.total_paid().expect("paid").paise(), first.total.paise + second.total.paise); Ok(()) }).expect("cart");
+    // Rounding the combined total may differ from rounding each original bill.
+    crate::flows::complete_bill_with_return_on(&app, Some("Cash".to_owned()), Some("Cash".to_owned())).expect("complete");
+    let rows = list_bills_on(&app).expect("bills");
+    assert_eq!(rows.iter().filter(|b| b.state == "settled").count(), 1);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let count: i64 = tx.query_row("SELECT COUNT(*) FROM bill_versions", [], |r| r.get(0))?;
+        assert_eq!(count, 2);
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("originals retained");
+}
+
+#[test]
+fn mixed_mode_correction_returns_are_exact_atomic_and_retryable() {
+    let scratch = Scratch::new("mixed_correction_return");
+    let app = a_trading_shop(&scratch);
+    order_teas(&app, 4);
+    app.with_cart_mut(|state| {
+        state.settlement.add(mb_core::Payment::new(mb_core::PaymentMode::Cash, mb_core::Money::from_paise(5_000)).expect("cash")).expect("payment");
+        state.settlement.add(mb_core::Payment::new(mb_core::PaymentMode::Card, mb_core::Money::from_paise(5_500)).expect("card")).expect("payment");
+        Ok(())
+    }).expect("split payment");
+    let number = crate::flows::complete_bill_on(&app, None).expect("issued");
+    let order_id = list_bills_on(&app).expect("bills")[0].order_id.clone();
+    revert_bill_on(&app, order_id.clone(), "Wrong quantity".to_owned(), None, None).expect("edit");
+    app.with_cart_mut(|state| {
+        state.cart.set_qty(0, mb_core::Qty::from_whole(1).expect("quantity")).expect("change");
+        Ok(())
+    }).expect("corrected");
+    let finish = |amounts: Vec<(&str, &str)>| crate::flows::complete_bill_with_returns_on(
+        &app, None, None, Some(amounts.into_iter().map(|(mode, amount)| (mode.to_owned(), amount.to_owned())).collect()));
+    assert_eq!(finish(vec![("Cash", "50.00"), ("Card", "28.99")]).expect_err("exact sum required").code, "bill.return_amount");
+    assert_eq!(finish(vec![("Cash", "60.00"), ("Card", "19.00")]).expect_err("mode cap required").code, "bill.return_mode");
+    app.with_cart(|state| {
+        assert_eq!(state.settlement.total_paid().expect("paid").paise(), 10_500);
+        assert!(state.account.refunds.is_empty());
+        Ok(())
+    }).expect("receipts unchanged");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        tx.execute_batch("CREATE TRIGGER fail_card_return BEFORE INSERT ON refunds WHEN NEW.mode = 'Card' BEGIN SELECT RAISE(ABORT, 'test failure'); END;")?;
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("fail second allocation");
+    finish(vec![("Cash", "50.00"), ("Card", "29.00")]).expect_err("failed commit");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let count: i64 = tx.query_row("SELECT COUNT(*) FROM refunds", [], |row| row.get(0))?;
+        assert_eq!(count, 0, "first allocation rolls back with the second");
+        tx.execute_batch("DROP TRIGGER fail_card_return;")?;
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("rollback");
+    app.with_cart_mut(|state| { *state = crate::billing::CartState::new_order(mb_core::OrderType::Parcel); Ok(()) }).expect("leave counter");
+    crate::ipc::open_order_on(&app, order_id.clone()).expect("resume persisted correction");
+    app.with_cart(|state| {
+        assert_eq!(state.settlement.total_paid().expect("paid").paise(), 10_500);
+        Ok(())
+    }).expect("resume original receipts");
+    assert_eq!(finish(vec![("Cash", "50.00"), ("Card", "29.00")]).expect("retry"), number);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let count: i64 = tx.query_row("SELECT COUNT(*) FROM refunds WHERE order_id = ?1", [&order_id], |row| row.get(0))?;
+        let total: i64 = tx.query_row("SELECT SUM(amount) FROM refunds WHERE order_id = ?1", [&order_id], |row| row.get(0))?;
+        assert_eq!((count, total), (2, 7_900));
+        let paid: i64 = tx.query_row("SELECT SUM(amount) FROM payments WHERE order_id = ?1", [&order_id], |row| row.get(0))?;
+        assert_eq!(paid, 2_600);
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("one set of refunds and correct remaining allocation");
+}
+
+#[test]
+fn a_corrections_extra_payment_survives_a_failed_settlement_and_reopen() {
+    let scratch = Scratch::new("correction_payment_retry");
+    let app = a_trading_shop(&scratch);
+    order_teas(&app, 2);
+    let number = settle_the_cart(&app);
+    let order_id = list_bills_on(&app).expect("bills")[0].order_id.clone();
+    revert_bill_on(&app, order_id.clone(), "Missing quantity".to_owned(), None, None).expect("edit");
+    app.with_cart_mut(|state| {
+        state.cart.set_qty(0, mb_core::Qty::from_whole(4).expect("quantity")).expect("change");
+        Ok(())
+    }).expect("corrected");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        tx.execute_batch("CREATE TRIGGER fail_corrected_settle BEFORE UPDATE ON orders WHEN NEW.state = 'settled' BEGIN SELECT RAISE(ABORT, 'test failure'); END;")?;
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("fail settle");
+    crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect_err("settlement failed after receipt");
+    // This is the same reset used by cart_clear_payments on the still-open counter.
+    app.with_cart_mut(|state| {
+        state.settlement = state.account.settlement.clone();
+        assert_eq!(state.settlement.total_paid().expect("durable receipt").paise(), 10_500);
+        Ok(())
+    }).expect("clearing an unfinished entry retains the saved payment");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        tx.execute_batch("DROP TRIGGER fail_corrected_settle;")?;
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("allow retry");
+    app.with_cart_mut(|state| { *state = crate::billing::CartState::new_order(mb_core::OrderType::Parcel); Ok(()) }).expect("leave counter");
+    crate::ipc::open_order_on(&app, order_id).expect("reopen");
+    app.with_cart(|state| {
+        assert_eq!(state.settlement.total_paid().expect("paid").paise(), 10_500);
+        assert_eq!(state.settlement.payments().len(), 2);
+        Ok(())
+    }).expect("receipt was saved before failed commit");
+    assert_eq!(crate::flows::complete_bill_on(&app, None).expect("no payment taken twice"), number);
+}
+
+#[test]
+fn combined_bill_edits_update_only_the_main_tables_kitchen_portion() {
+    let scratch = Scratch::new("combined_service_edit");
+    let app = a_trading_shop(&scratch);
+    let mut config = app.shop_config();
+    config.billing.kitchen_screen = true;
+    app.publish_shop_config(config);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        for label in ["2", "3"] {
+            Repos::new(tx).floor().save_table(OUTLET, &mb_db::repo::floor::DiningTable {
+                id: mb_core::TableId::new(format!("tbl_{label}")), section_id: None,
+                label: label.to_owned(), seats: 4, pos: None, sort_order: 0, is_active: true,
+            }, crate::flows::now())?;
+        }
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("tables");
+    let seat_teas = |qty| {
+        order_teas(&app, qty);
+        app.with_cart_mut(|state| {
+            state.place_on(mb_core::TableId::new(format!("tbl_{qty}")), qty.to_string(), None);
+            let delta = state.kitchen.pending(&state.cart).expect("pending");
+            state.kitchen.mark_printed(&delta).expect("told");
+            Ok(())
+        }).expect("ledger");
+        let open = crate::flows::park_open_order(&app).expect("park");
+        app.with_shop(|shop| shop.db.transaction(|tx| {
+            crate::kitchen::send_in(&Repos::new(tx), &app.shop_config(), open.core.id.as_str(), None, crate::flows::now())?;
+            Ok(())
+        }).map_err(|e| crate::words::from_db(&e))).expect("kitchen card");
+        open.core.id
+    };
+    let main = seat_teas(2);
+    let source = seat_teas(3);
+    crate::floor::merge_orders_on(&app, source.as_str().to_owned(), main.as_str().to_owned()).expect("combine");
+    crate::ipc::open_order_on(&app, main.as_str().to_owned()).expect("open combined bill");
+    app.with_cart_mut(|state| {
+        state.cart.set_qty(0, mb_core::Qty::from_whole(7).expect("qty")).expect("add two to main table");
+        Ok(())
+    }).expect("main addition");
+    crate::flows::park_open_order(&app).expect("save updated service");
+    let kitchen = crate::kitchen::look_on(&app, None).expect("kitchen");
+    let main_ticket = kitchen.tickets.iter().find(|ticket| ticket.order_id == main.as_str()).expect("main ticket");
+    assert_eq!(main_ticket.lines[0].qty, "4");
+    assert!(main_ticket.lines[0].is_new, "source's told quantity cannot hide the main addition");
+    let source_ticket = kitchen.tickets.iter().find(|ticket| ticket.order_id == source.as_str()).expect("source ticket");
+    assert_eq!(source_ticket.lines[0].qty, "3");
+    app.with_cart_mut(|state| {
+        let delta = state.kitchen.pending(&state.cart).expect("pending addition");
+        state.kitchen.mark_printed(&delta).expect("tell main addition");
+        state.cart.set_qty(0, mb_core::Qty::from_whole(4).expect("qty")).expect("reduce main to one");
+        let cancel = state.kitchen.over_told(&state.cart).expect("cancellation");
+        state.kitchen.mark_cancelled(&cancel).expect("cancel main only");
+        Ok(())
+    }).expect("main reduction");
+    let refused = app.with_cart_mut(|state| {
+        state.cart.set_qty(0, mb_core::Qty::from_whole(2).expect("qty")).expect("would consume source");
+        Ok(())
+    }).expect_err("source portion protected");
+    assert_eq!(refused.code, "merge.source_items");
+    app.with_cart(|state| {
+        assert_eq!(state.cart.lines()[0].qty.to_string(), "4");
+        let service = state.account.service_cart.as_ref().expect("service portion");
+        assert_eq!(service.lines()[0].qty.to_string(), "1");
+        assert_eq!(state.account.service_kitchen.as_ref().expect("service ledger").quantity_told(&service.lines()[0].identity()).to_string(), "1");
+        Ok(())
+    }).expect("failed change rolled back");
+    crate::flows::park_open_order(&app).expect("save reduction");
+    let kitchen = crate::kitchen::look_on(&app, None).expect("kitchen after reduction");
+    assert_eq!(kitchen.tickets.iter().find(|ticket| ticket.order_id == main.as_str()).expect("main").lines[0].qty, "1");
+    assert_eq!(kitchen.tickets.iter().find(|ticket| ticket.order_id == source.as_str()).expect("source").lines[0].qty, "3");
+    crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("pay combined bill");
+    let issued = list_bills_on(&app).expect("issued bills").into_iter().find(|bill| bill.order_id == main.as_str()).expect("issued root");
+    revert_bill_on(&app, main.as_str().to_owned(), "Add one tea".to_owned(), None, None).expect("correct paid root");
+    app.with_cart_mut(|state| {
+        state.cart.set_qty(0, mb_core::Qty::from_whole(5).expect("qty")).expect("main addition on correction");
+        Ok(())
+    }).expect("draft addition");
+    crate::flows::park_open_order(&app).expect("save correction without issuing it");
+    let kitchen = crate::kitchen::look_on(&app, None).expect("live correction kitchen");
+    let service_id = format!("{main}_service");
+    let ticket = kitchen.tickets.iter().find(|ticket| ticket.order_id == service_id).expect("existing main service ticket");
+    assert_eq!(ticket.lines[0].qty, "2", "the kitchen sees working service while the bill remains issued");
+    assert!(ticket.lines[0].is_new);
+    assert_eq!(kitchen.tickets.iter().find(|ticket| ticket.order_id == source.as_str()).expect("source unchanged").lines[0].qty, "3");
+    assert_eq!(list_bills_on(&app).expect("issued stays").into_iter().find(|bill| bill.order_id == main.as_str()).expect("root").total, issued.total);
+    crate::kitchen::send(&app, main.as_str(), None).expect("send correction to service ticket");
+    let kitchen = crate::kitchen::look_on(&app, None).expect("new firing");
+    assert!(!kitchen.tickets.iter().any(|ticket| ticket.order_id == main.as_str()), "new firings retain the serving order identity");
+}
+
+#[test]
+fn combined_main_kitchen_ticket_does_not_send_the_sources_unsent_food() {
+    let scratch = Scratch::new("combined_unsent_source");
+    let app = a_trading_shop(&scratch);
+    let mut config = app.shop_config();
+    config.billing.kitchen_ticket_off = true;
+    app.publish_shop_config(config);
+    order_teas(&app, 2);
+    app.with_cart_mut(|state| {
+        state.kitchen.mark_printed(&state.kitchen.pending(&state.cart).expect("main pending")).expect("main told");
+        Ok(())
+    }).expect("main sent");
+    let main = crate::flows::park_open_order(&app).expect("main").core.id;
+    order_teas(&app, 3);
+    let source = crate::flows::park_open_order(&app).expect("source unsent").core.id;
+    crate::floor::merge_orders_on(&app, source.as_str().to_owned(), main.as_str().to_owned()).expect("combine");
+    crate::ipc::open_order_on(&app, main.as_str().to_owned()).expect("main bill");
+    app.with_cart_mut(|state| {
+        state.cart.set_qty(0, mb_core::Qty::from_whole(6).expect("qty")).expect("one more on main");
+        Ok(())
+    }).expect("addition");
+    crate::flows::print_kitchen_ticket_on(&app).expect("main addition saved as sent");
+    app.with_cart(|state| {
+        let identity = state.cart.lines()[0].identity();
+        assert_eq!(state.kitchen.quantity_told(&identity).to_string(), "3");
+        assert_eq!(state.account.service_kitchen.as_ref().expect("main ledger").quantity_told(&identity).to_string(), "3");
+        Ok(())
+    }).expect("only main quantity was sent");
+    assert!(crate::flows::find_order(&app, &source).expect("source").expect("exists").core().kitchen.is_empty());
+    assert_eq!(crate::flows::print_kitchen_ticket_on(&app).expect_err("source food must not print at main table").code, "kitchen.nothing");
+}
+
 /// A wrong bill comes back to the counter under the SAME number, is fixed and billed again,
 /// and the register says who, why and what changed — signed off by a manager later.
 #[test]
@@ -1019,10 +1324,8 @@ fn a_wrong_bill_is_reverted_fixed_and_billed_again_under_the_same_number() {
     assert_eq!(lines, 1);
     assert_eq!(on_counter.as_deref(), Some(number.as_str()));
     assert_eq!(id_on_counter.as_deref(), Some(order_id.as_str()));
-    assert!(
-        list_bills_on(&app).expect("bills").is_empty(),
-        "a bill on the counter is still listed as a bill"
-    );
+    assert_eq!(list_bills_on(&app).expect("bills").len(), 1,
+        "the issued sale stays in the books while its correction is a draft");
 
     // Fix it and bill it again.
     app.with_cart_mut(|state| {
@@ -1032,7 +1335,7 @@ fn a_wrong_bill_is_reverted_fixed_and_billed_again_under_the_same_number() {
             .map_err(|e| crate::words::UiError::new("test", e.to_string()))
     })
     .expect("fixed");
-    let again = settle_the_cart(&app);
+    let again = crate::flows::complete_bill_with_return_on(&app, None, Some("Cash".to_owned())).expect("return the difference and finish");
     assert_eq!(again, number, "the number changed on the way back");
 
     // The list: one bill, paid, marked as edited and waiting.

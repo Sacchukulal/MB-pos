@@ -115,12 +115,18 @@ export function Floor() {
     async (tile: TableView) => {
       if (!tile.orderId) return;
       try {
-        toast.show('ok', await call('print_open_bill', { orderId: tile.orderId }));
+        if (tile.billedInto) {
+          await call('release_serving_table', { orderId: tile.orderId });
+          toast.show('ok', 'Table released.');
+          load();
+        } else {
+          toast.show('ok', await call('print_open_bill', { orderId: tile.orderId }));
+        }
       } catch (cause) {
         report(cause);
       }
     },
-    [report, toast],
+    [load, report, toast],
   );
 
   const shown = useMemo(() => {
@@ -771,8 +777,8 @@ function Picked({
       {tile && tile.orderId ? (
         <>
           <Button size="sm" onClick={() => onPrint(tile)}>
-            <Icon name="printer" size="sm" />
-            Print the bill
+            <Icon name={tile.billedInto ? 'check' : 'printer'} size="sm" />
+            {tile.billedInto ? 'Release table' : 'Print the bill'}
           </Button>
           <Button size="sm" onClick={() => onOrder(tile)}>
             Move or merge

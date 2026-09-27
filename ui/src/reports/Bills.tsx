@@ -624,10 +624,10 @@ function Correction({
   // Rust decides whether a manager is needed; the screen finds out by asking.
   const [needsApproval, setNeedsApproval] = useState(false);
 
-  // A revert is a void and a fresh bill, so it offers the void reasons.
+  // Editing a settled bill uses the shop's existing correction reasons.
   const kind: ReasonKind = pending.kind === 'reprint' ? 'reprint' : 'void';
   const what = {
-    revert: `Edit bill ${bill.number} — ${bill.total.text}. It goes back to the counter under the same number, to be changed and billed again.`,
+    revert: `Edit bill ${bill.number} — ${bill.total.text}`,
     void: `Void bill ${bill.number} — ${bill.total.text}`,
     reprint: `Reprint bill ${bill.number}`,
     refund: `Give back ${bill.total.text} on bill ${bill.number}`,
@@ -686,6 +686,9 @@ function Correction({
     <ReasonDialog
       kind={kind}
       what={what}
+      description={pending.kind === 'revert'
+        ? 'It goes back to the counter under the same number, to be changed and billed again.'
+        : undefined}
       confirmLabel={confirmLabel}
       needsApproval={needsApproval}
       approvers={approvers}

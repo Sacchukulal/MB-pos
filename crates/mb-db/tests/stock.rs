@@ -527,6 +527,147 @@ fn t4_deduction_is_idempotent() {
 
 /// A void reverses to the base unit, by negating the ROWS.
 #[test]
+fn repeated_bill_corrections_deduct_the_current_revision_exactly_once() {
+    let scratch = Scratch::new("stock_revisions");
+    let db = scratch.open();
+    shop::build(&db);
+    save(&db, &[rice()]);
+    put_recipe(&db, &recipe_for("itm_dosa", vec![("mat_rice", 180)]));
+    receive(
+        &db,
+        "mat_rice",
+        grams(10_000),
+        grams(10),
+        "kg",
+        UnitCost::ZERO,
+        5,
+    );
+    let mut settled = settle_one(&db, "ord_revision", dosa(), 5, vec![]);
+    for qty in [3, 7] {
+        let mut open = settled.reopen();
+        open.core
+            .cart
+            .set_qty(0, Qty::from_whole(qty).expect("qty"))
+            .expect("changed");
+        let bill = compute_bill(
+            BillInput::new(&open.core.cart, Registration::Regular)
+                .with_order_type(open.core.order_type()),
+        )
+        .expect("bill");
+        let mut payment = Settlement::new();
+        payment
+            .add(Payment::new(PaymentMode::Cash, bill.grand_total).expect("payment"))
+            .expect("paid");
+        settled = mb_db::settle(
+            &db,
+            mb_db::Till::new(OUTLET, TERMINAL),
+            open,
+            bill,
+            payment,
+            at(9),
+            StaffId::new("staff_1"),
+        )
+        .expect("corrected");
+        assert_eq!(balance(&db, "mat_rice"), grams(10_000 - qty * 180));
+        db.transaction(|tx| {
+            Repos::new(tx)
+                .stock()
+                .deduct_for_bill(OUTLET, &settled, at(9))
+        })
+        .expect("retry");
+        assert_eq!(balance(&db, "mat_rice"), grams(10_000 - qty * 180));
+        let retried = mb_db::settle(
+            &db,
+            mb_db::Till::new(OUTLET, TERMINAL),
+            mb_core::OpenOrder {
+                core: settled.core.clone(),
+                token: settled.token.clone(),
+                bill_number: Some(settled.bill_number.clone()),
+            },
+            settled.bill.clone(),
+            settled.settlement.clone(),
+            at(10),
+            StaffId::new("staff_1"),
+        )
+        .expect("retry complete settlement");
+        assert_eq!(retried.settled_at, settled.settled_at);
+        assert_eq!(
+            balance(&db, "mat_rice"),
+            grams(10_000 - qty * 180),
+            "a retried correction cannot reverse its own stock"
+        );
+    }
+}
+
+#[test]
+fn corrected_line_removal_keeps_stock_history_and_only_reports_current_food() {
+    let scratch = Scratch::new("stock_removed_revision");
+    let db = scratch.open();
+    shop::build(&db);
+    save(&db, &[rice()]);
+    put_recipe(&db, &recipe_for("itm_dosa", vec![("mat_rice", 180)]));
+    receive(
+        &db,
+        "mat_rice",
+        grams(10_000),
+        grams(10),
+        "kg",
+        UnitCost::ZERO,
+        5,
+    );
+    let first = settle_one(&db, "ord_removed", dosa(), 5, vec![]);
+    let mut open = first.reopen();
+    open.core
+        .cart
+        .add(
+            dosa(),
+            Qty::from_thousandths(2_000),
+            Some("crispy".to_owned()),
+            vec![],
+        )
+        .expect("second dish");
+    let settle_revision = |open: mb_core::OpenOrder| {
+        let bill = compute_bill(
+            BillInput::new(&open.core.cart, Registration::Regular)
+                .with_order_type(open.core.order_type()),
+        )
+        .expect("bill");
+        let mut payment = Settlement::new();
+        payment
+            .add(Payment::new(PaymentMode::Cash, bill.grand_total).expect("payment"))
+            .expect("paid");
+        mb_db::settle(
+            &db,
+            mb_db::Till::new(OUTLET, TERMINAL),
+            open,
+            bill,
+            payment,
+            at(9),
+            StaffId::new("staff_1"),
+        )
+        .expect("corrected")
+    };
+    let second = settle_revision(open);
+    let mut open = second.reopen();
+    open.core.cart.remove(0).expect("remove original dish");
+    let third = settle_revision(open);
+    assert_eq!(balance(&db, "mat_rice"), grams(10_000 - 2 * 180));
+    db.transaction(|tx| {
+        let loaded = Repos::new(tx).orders().find(&third.core.id)?.expect("reloaded bill");
+        assert_eq!(loaded.core().cart, third.core.cart);
+        let original_qty: i64 = tx.query_row("SELECT qty FROM order_lines WHERE id = 'ord_removed_ln_0'", [], |row| row.get(0))?;
+        assert_eq!(original_qty, 5_000, "stock still references the original frozen snapshot");
+        let current_qty: i64 = tx.query_row("SELECT SUM(l.qty) FROM order_lines l JOIN bill_lines b ON b.order_line_id = l.id WHERE l.order_id = 'ord_removed'", [], |row| row.get(0))?;
+        assert_eq!(current_qty, 2_000, "reports only count the replacement bill");
+        let broken: i64 = tx.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get(0))?;
+        assert_eq!(broken, 0);
+        // Re-saving a settled/voided revision must also preserve stock references.
+        Repos::new(tx).orders().save(OUTLET, TERMINAL, &loaded)?;
+        Ok(())
+    }).expect("history, reporting and save invariants");
+}
+
+#[test]
 fn t5_a_void_puts_back_what_was_actually_taken() {
     let scratch = Scratch::new("stock_t5");
     let db = scratch.open();

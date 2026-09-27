@@ -257,7 +257,7 @@ impl<'a> CorrectionsRepo<'a> {
             |row| row.get(0),
         )?;
         let already: i64 = self.tx.query_row(
-            "SELECT COALESCE(SUM(amount), 0) FROM refunds WHERE order_id = ?1",
+            "SELECT COALESCE(SUM(amount), 0) FROM refunds WHERE order_id = ?1 AND is_adjustment = 0",
             [refund.order_id.as_str()],
             |row| row.get(0),
         )?;
@@ -299,14 +299,43 @@ impl<'a> CorrectionsRepo<'a> {
     }
 
     /// The day of the bill this row belongs to is dirty from `at`: its file goes up again.
-    fn mark_bill_day_dirty(&self, outlet: &str, order_id: &OrderId, at: Timestamp) -> Result<(), DbError> {
+    pub fn record_adjustment_refund(
+        &self,
+        outlet: &str,
+        refund: &Refund,
+        day: BusinessDay,
+    ) -> Result<(), DbError> {
+        if !refund.amount.is_positive() {
+            return Err(DbError::invariant("a refund must be positive"));
+        }
+        self.tx.execute("INSERT INTO refunds (id, outlet_id, order_id, amount, mode, reason, refunded_at, refunded_by, business_day, is_adjustment) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+            rusqlite::params![refund.id, outlet, refund.order_id.as_str(), refund.amount.paise(), refund.mode, refund.reason, refund.refunded_at.millis(), refund.refunded_by.as_ref().map(StaffId::as_str), day.days_since_epoch()])?;
+        OutboxRepo::new(self.tx).enqueue(
+            outlet,
+            "refunds",
+            &refund.id,
+            Op::Upsert,
+            refund.refunded_at,
+        )?;
+        self.mark_bill_day_dirty(outlet, &refund.order_id, refund.refunded_at)
+    }
+
+    fn mark_bill_day_dirty(
+        &self,
+        outlet: &str,
+        order_id: &OrderId,
+        at: Timestamp,
+    ) -> Result<(), DbError> {
         let day: i64 = self.tx.query_row(
             "SELECT business_day FROM orders WHERE id = ?1",
             [order_id.as_str()],
             |row| row.get(0),
         )?;
-        crate::archive::ArchiveRepo::new(self.tx)
-            .mark_dirty(outlet, encode::business_day_from_sql(day, "orders.business_day")?, at)
+        crate::archive::ArchiveRepo::new(self.tx).mark_dirty(
+            outlet,
+            encode::business_day_from_sql(day, "orders.business_day")?,
+            at,
+        )
     }
 
     /// Every refund against one bill, oldest first.
@@ -352,7 +381,12 @@ impl<'a> CorrectionsRepo<'a> {
                 |row| row.get(0),
             )
             .ok();
-        if state.as_deref() != Some("open") {
+        let editing: bool = self.tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM order_edits WHERE order_id = ?1)",
+            [revert.order_id.as_str()],
+            |r| r.get(0),
+        )?;
+        if state.as_deref() != Some("open") && !editing {
             return Err(DbError::invariant(
                 "a bill is taken back by reopening it first, and this one is not open",
             ));
@@ -405,7 +439,13 @@ impl<'a> CorrectionsRepo<'a> {
         }
         // The register travels with the bill: to the cloud's box now, and in the bill's day
         // file with its lines and payments.
-        OutboxRepo::new(self.tx).enqueue(outlet, "bill_reverts", &revert.id, Op::Upsert, revert.reverted_at)?;
+        OutboxRepo::new(self.tx).enqueue(
+            outlet,
+            "bill_reverts",
+            &revert.id,
+            Op::Upsert,
+            revert.reverted_at,
+        )?;
         self.mark_bill_day_dirty(outlet, &revert.order_id, revert.reverted_at)
     }
 
@@ -492,7 +532,7 @@ impl<'a> CorrectionsRepo<'a> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT DISTINCT o.bill_number_formatted
                FROM bill_reverts r JOIN orders o ON o.id = r.order_id
-              WHERE r.outlet_id = ?1 AND o.state IN ('open', 'draft')
+              WHERE r.outlet_id = ?1 AND (o.state IN ('open', 'draft') OR EXISTS (SELECT 1 FROM order_edits e WHERE e.order_id = o.id))
               ORDER BY o.bill_number_formatted",
         )?;
         let rows = stmt.query_map([outlet], |row| row.get::<_, Option<String>>(0))?;

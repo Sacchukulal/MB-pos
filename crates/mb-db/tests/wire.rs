@@ -77,6 +77,48 @@ fn count(db: &mb_db::Db, table: &str) -> i64 {
 }
 
 #[test]
+fn issued_duplicate_lines_survive_cloud_restore_without_repricing() {
+    use mb_core::{AnyOrder, BillInput, Cart, Discount, DiscountEntry, Money, Payment, PaymentMode, Qty, Settlement, compute_bill};
+
+    let scratch = Scratch::new("wire_duplicate_lines");
+    let db = scratch.open();
+    let built = shop::build(&db);
+    let original = db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let mut paid = built.orders.iter().find_map(|id| {
+            match repos.orders().find(id).expect("read fixture") {
+                Some(AnyOrder::Settled(paid)) => Some(paid),
+                _ => None,
+            }
+        }).expect("issued fixture");
+        let mut line = paid.core.cart.lines()[0].clone();
+        line.qty = Qty::ONE;
+        line.snapshot.unit_price = Money::from_paise(101);
+        line.line_discount = Some(DiscountEntry::new(Discount::Percent(5_000)));
+        paid.core.cart = Cart::from_lines(vec![line.clone(), line]).expect("separate issued lines");
+        paid.bill = compute_bill(BillInput::new(&paid.core.cart, paid.bill.registration)
+            .with_order_type(paid.bill.order_type)
+            .with_place_of_supply(paid.bill.place_of_supply)
+            .with_rounding(paid.bill.rounding)).expect("issued bill");
+        paid.settlement = Settlement::new();
+        paid.settlement.add(Payment::new(PaymentMode::Cash, paid.bill.grand_total).expect("payment")).expect("paid");
+        paid.core.billing.revision += 1;
+        repos.orders().save(OUTLET, TERMINAL, &AnyOrder::Settled(paid.clone()))?;
+        Ok(paid)
+    }).expect("save separate lines");
+
+    let other = Scratch::new("wire_duplicate_lines_down");
+    let down = other.open();
+    bring_down(&everything_on_the_wire(&db), &down);
+    let restored = down.read_transaction(|tx| Repos::new(tx).orders().find(&original.core.id))
+        .expect("restore").expect("issued order");
+    let AnyOrder::Settled(restored) = restored else { panic!("restored state changed"); };
+    assert_eq!(restored.core.cart, original.core.cart);
+    assert_eq!(restored.bill, original.bill);
+    assert_eq!(restored.settlement, original.settlement);
+}
+
+#[test]
 fn every_queued_row_of_a_whole_shop_can_be_shaped_for_the_cloud() {
     let scratch = Scratch::new("wire_up");
     let db = scratch.open();

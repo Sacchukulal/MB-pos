@@ -152,15 +152,15 @@ export interface Commands {
 
   // The billing screen.
   current_cart: { args: void; returns: CartView };
+  reload_current_order: { args: void; returns: CartView };
   // The floor added lines to the order this cart has open.
   take_the_floors_items: { args: void; returns: CartView };
-  dismiss_the_floors_items: { args: void; returns: CartView };
   cart_add: {
     args: { itemId: string; qty: string | null; note: string | null };
     returns: CartView;
   };
-  cart_set_qty: { args: { index: number; qty: string }; returns: CartView };
-  cart_remove: { args: { index: number }; returns: CartView };
+  cart_set_qty: { args: { index: number; qty: string; reason?: string; expectedLine?: string }; returns: CartView };
+  cart_remove: { args: { index: number; expectedLine?: string }; returns: CartView };
   cart_clear: { args: { keepType: boolean }; returns: CartView };
   cart_set_order_type: { args: { orderType: string }; returns: CartView };
   cart_clear_payments: { args: void; returns: CartView };
@@ -168,10 +168,10 @@ export interface Commands {
   /** Money off this bill. */
   /** `line` is one line of the bill; without it the discount is the whole bill's. */
   cart_set_discount: {
-    args: { kind: string; value: string; reason: string | null; line: number | null };
+    args: { kind: string; value: string; reason: string | null; line: number | null; expectedLine?: string };
     returns: CartView;
   };
-  cart_clear_discount: { args: { line: number | null }; returns: CartView };
+  cart_clear_discount: { args: { line: number | null; expectedLine?: string }; returns: CartView };
   open_orders: { args: void; returns: TableView[] };
   menu_items: { args: void; returns: MenuItemView[] };
   /** Ranked search — the rule lives in Rust. */
@@ -187,7 +187,7 @@ export interface Commands {
   /** The cook lost the paper. */
   reprint_kitchen_ticket: { args: void; returns: string };
   /** settle() — one transaction — and THEN the print. */
-  complete_bill: { args: { mode: string | null }; returns: string };
+  complete_bill: { args: { mode: string | null; refundMode?: string; refundAmounts?: [string, string][] }; returns: string };
   /** The bill a waiter carries to the table, before anybody has paid. */
   print_open_bill: { args: { orderId: string }; returns: string };
   /** The settle desk: what the phones asked the counter to settle, oldest first. */
@@ -253,7 +253,7 @@ export interface Commands {
     returns: BillRowView[];
   };
   cancel_order: { args: { orderId: string; reason: string }; returns: void };
-  void_line: { args: { index: number; reason: string }; returns: CartView };
+  void_line: { args: { index: number; reason: string; expectedLine?: string }; returns: CartView };
   reprint_bill: { args: { orderId: string; reason: string }; returns: string };
   bill_pdf: { args: { orderId: string }; returns: SavedFileView };
   refund_bill: {
@@ -360,6 +360,8 @@ export interface Commands {
   save_floor_thresholds: { args: { warn: number; late: number }; returns: FloorView };
   move_order: { args: { orderId: string; toTable: string }; returns: FloorView };
   merge_orders: { args: { fromOrder: string; intoOrder: string }; returns: FloorView };
+  combine_candidates: { args: undefined; returns: TableView[] };
+  release_serving_table: { args: { orderId: string }; returns: void };
   split_order: { args: { request: SplitRequest }; returns: FloorView };
   /** Answers "what do we each owe?" — it does not create n bills. */
 

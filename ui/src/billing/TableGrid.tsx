@@ -193,7 +193,7 @@ export function Tile({
         {/* The second row: the money and the token, or how big the table is. */}
         {busy ? (
           <span className="mb-tile__row">
-            {table.total ? <span className="mb-tile__amount">{table.total.text}</span> : null}
+            {table.billedInto ? <span className="mb-tile__amount">Combined bill</span> : table.total ? <span className="mb-tile__amount">{table.total.text}</span> : null}
             {/* The token: the number the kitchen ticket and the bill both carry. */}
             {table.token ? (
               <span className="mb-tile__token" title={`Token ${table.token}`}>
@@ -304,9 +304,9 @@ export function Tile({
           iconOnly
           className="mb-tile__print"
           onClick={onPrintBill}
-          title={`Print the bill for table ${table.label}`}
-          aria-label={`Print the bill for table ${table.label}`}
-          icon={<Icon name="printer" size="lg" />}
+          title={table.billedInto ? `Release table ${table.label}` : `Print the bill for table ${table.label}`}
+          aria-label={table.billedInto ? `Release table ${table.label}` : `Print the bill for table ${table.label}`}
+          icon={<Icon name={table.billedInto ? 'check' : 'printer'} size="lg" />}
         />
       ) : null}
 

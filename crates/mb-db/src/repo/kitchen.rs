@@ -63,6 +63,15 @@ impl<'a> KitchenRepo<'a> {
         KitchenRepo { tx }
     }
 
+    /// Keep the same kitchen tickets and course history when billing creates a serving order.
+    pub fn transfer_order(&self, from: &str, to: &str) -> Result<(), DbError> {
+        self.tx.execute(
+            "UPDATE kitchen_deliveries SET order_id = ?2 WHERE order_id = ?1",
+            rusqlite::params![from, to],
+        )?;
+        Ok(())
+    }
+
     /// Send a ticket to a station.
     pub fn send(
         &self,
@@ -137,6 +146,19 @@ impl<'a> KitchenRepo<'a> {
         ))?;
         let mut rows = stmt.query(rusqlite::params![id])?;
         rows.next()?.map(read).transpose()
+    }
+
+    /// Every firing for an order, including completed courses whose state must follow a split.
+    pub fn for_order(&self, order_id: &str) -> Result<Vec<Ticket>, DbError> {
+        let mut stmt = self.tx.prepare(&format!(
+            "SELECT {COLUMNS} FROM kitchen_deliveries WHERE order_id = ?1 ORDER BY sent_at, id"
+        ))?;
+        let mut rows = stmt.query(rusqlite::params![order_id])?;
+        let mut tickets = Vec::new();
+        while let Some(row) = rows.next()? {
+            tickets.push(read(row)?);
+        }
+        Ok(tickets)
     }
 
     /// Everything still outstanding at a station, oldest first.

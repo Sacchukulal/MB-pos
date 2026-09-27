@@ -129,7 +129,7 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
                     let mut orders = BTreeMap::new();
                     for ticket in &tickets {
                         let id = OrderId::new(ticket.delivery.order_id.clone());
-                        if let Some(order) = repos.orders().find(&id)? {
+                        if let Some(order) = working_order(&repos, &id)? {
                             orders.insert(ticket.delivery.order_id.clone(), order);
                         }
                     }
@@ -138,6 +138,9 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
                     let tables = repos.floor().list_tables(OUTLET)?;
                     let mut waiting = Vec::new();
                     for order in repos.orders().list_open(OUTLET)? {
+                        let core = order.core();
+                        if serving_id(&repos, &core.id)? != core.id { continue; }
+                        let order = working_order(&repos, &core.id)?.unwrap_or(order);
                         let core = order.core();
                         let already = repos.kitchen().courses_fired(core.id.as_str())?;
                         for (course, count) in courses_of(&order) {
@@ -157,9 +160,7 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
                     // bring back.
                     let cleared = repos.kitchen().last_bumped(OUTLET, station)?;
                     let cleared_order = match &cleared {
-                        Some(t) => repos
-                            .orders()
-                            .find(&OrderId::new(t.delivery.order_id.clone()))?,
+                        Some(t) => working_order(&repos, &OrderId::new(t.delivery.order_id.clone()))?,
                         None => None,
                     };
                     Ok((
@@ -232,8 +233,8 @@ pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
                 .map_or_else(String::new, |o| place_of(o, &tables));
             let token = order
                 .as_ref()
-                .and_then(AnyOrder::token)
-                .map_or_else(String::new, |t| format!(" #{}", t.formatted));
+                .and_then(service_token)
+                .map_or_else(String::new, |token| format!(" #{token}"));
             Cleared {
                 id: ticket.delivery.id.clone(),
                 // "Table 5 #12", or just the number if the order has gone — enough to know it
@@ -267,16 +268,46 @@ pub(crate) fn place_and_token(
     order: &AnyOrder,
     tables: &[mb_db::repo::floor::DiningTable],
 ) -> String {
-    match order.token() {
-        Some(t) => format!("{} #{}", place_of(order, tables), t.formatted),
+    match service_token(order) {
+        Some(token) => format!("{} #{token}", place_of(order, tables)),
         None => place_of(order, tables),
     }
+}
+
+/// A service-only row gets its own database token, but the cook keeps the token
+/// already printed on the party's tickets before its bill was combined.
+fn service_token(order: &AnyOrder) -> Option<&str> {
+    order.core().billing.service_token.as_deref()
+        .or_else(|| order.token().map(|token| token.formatted.as_str()))
+}
+
+/// A paid combined bill keeps using its separate main-table service ticket.
+fn serving_id(repos: &mb_db::Repos<'_>, id: &OrderId) -> Result<OrderId, mb_db::DbError> {
+    let service_id = OrderId::new(format!("{id}_service"));
+    if let Some(AnyOrder::Open(service)) = repos.orders().find_working(&service_id)?
+        && service.core.billing.billed_into.as_ref() == Some(id)
+    { return Ok(service_id); }
+    Ok(id.clone())
+}
+
+/// Kitchen changes follow the correction immediately; its issued financial rows stay put.
+fn working_order(repos: &mb_db::Repos<'_>, id: &OrderId) -> Result<Option<AnyOrder>, mb_db::DbError> {
+    let Some(mut order) = repos.orders().find_working(id)? else { return Ok(None); };
+    if let Some(root_id) = &order.core().billing.billed_into
+        && id.as_str() == format!("{root_id}_service")
+        && let Some(AnyOrder::Open(root)) = repos.orders().find_working(root_id)?
+        && let Some(service) = root.core.billing.service_cart
+    {
+        order.core_mut().cart = service;
+        if let Some(ledger) = root.core.billing.service_kitchen { order.core_mut().kitchen = ledger; }
+    }
+    Ok(Some(order))
 }
 
 /// Each course on an order, and how many dishes are in it.
 fn courses_of(order: &AnyOrder) -> Vec<(String, i64)> {
     let mut counts: BTreeMap<String, i64> = BTreeMap::new();
-    for line in order.core().cart.lines() {
+    for line in order.core().billing.service_cart.as_ref().unwrap_or(&order.core().cart).lines() {
         let course = line.snapshot.course.clone().unwrap_or_default();
         *counts.entry(course).or_insert(0) += 1;
     }
@@ -317,8 +348,8 @@ fn card(
     // went out, which is what makes an addition obvious.
     let lines = order.map_or_else(Vec::new, |order| {
         let core = order.core();
-        let told = core.kitchen.told();
-        core.cart
+        let told = core.billing.service_kitchen.as_ref().unwrap_or(&core.kitchen).told();
+        core.billing.service_cart.as_ref().unwrap_or(&core.cart)
             .lines()
             .iter()
             .filter(|line| {
@@ -356,10 +387,7 @@ fn card(
             let core = order.core();
             (
                 place_of(order, tables),
-                order
-                    .token()
-                    .map(|t| t.formatted.clone())
-                    .unwrap_or_default(),
+                service_token(order).unwrap_or_default().to_owned(),
                 staff
                     .iter()
                     .find(|s| s.id == core.created_by)
@@ -551,6 +579,49 @@ pub fn send(app: &App, order_id: &str, course: Option<&str>) -> UiResult<String>
     })
 }
 
+/// Keep already-sent food visible under both serving orders without firing it again.
+pub(crate) fn split_in(
+    repos: &mb_db::Repos<'_>,
+    from: &str,
+    into: &str,
+    kept: &mb_core::Portion,
+    moved: &mb_core::Portion,
+    day: mb_core::BusinessDay,
+) -> Result<(), mb_db::DbError> {
+    let categories = repos.menu().list_categories(OUTLET)?;
+    for mut ticket in repos.kitchen().for_order(from)? {
+        let keys_for = |portion: &mb_core::Portion| {
+            portion.cart.lines().iter().filter(|line| {
+                let station = line.snapshot.station.as_deref().or_else(|| {
+                    categories.iter().find(|category| Some(&category.id) == line.snapshot.category_id.as_ref())
+                        .and_then(|category| category.station.as_deref())
+                }).filter(|station| !station.trim().is_empty()).unwrap_or(DEFAULT_STATION);
+                station == ticket.delivery.station
+                    && ticket.course.as_deref().filter(|course| !course.is_empty())
+                        .is_none_or(|course| line.snapshot.course.as_deref() == Some(course))
+            }).map(|line| line_key(&line.identity())).collect::<Vec<_>>()
+        };
+        let kept_keys = keys_for(kept);
+        let moved_keys = keys_for(moved);
+        if !moved_keys.is_empty() {
+            // The existing work changes serving order, retaining acknowledgment, completion
+            // and timing. A split is not another instruction to cook or print the food.
+            let mut copy = ticket.clone();
+            copy.delivery.id = format!("{}_split_{into}", ticket.delivery.id);
+            copy.delivery.order_id = into.to_owned();
+            copy.bumped_lines.retain(|key| moved_keys.contains(key));
+            repos.kitchen().send(OUTLET, &copy.delivery, copy.course.as_deref(), copy.expected_minutes, day)?;
+            repos.kitchen().save(&copy)?;
+        }
+        ticket.bumped_lines.retain(|key| kept_keys.contains(key));
+        if kept_keys.is_empty() && !matches!(ticket.delivery.state, State::Bumped | State::Closed) {
+            ticket.delivery.state = State::Closed;
+        }
+        repos.kitchen().save(&ticket)?;
+    }
+    Ok(())
+}
+
 /// The same, inside a transaction somebody else opened. A shop with no screen gets no
 /// screen ticket: the paper the counter printed is the whole story.
 pub fn send_in(
@@ -563,14 +634,16 @@ pub fn send_in(
     if !config.billing.kitchen_screen {
         return Ok(DEFAULT_STATION.to_owned());
     }
+    let target = serving_id(repos, &OrderId::new(order_id.to_owned()))?;
+    let order_id = target.as_str();
     let id = format!("{}_{order_id}", crate::newid::fresh_at("kds", at));
-    let order = repos.orders().find(&OrderId::new(order_id.to_owned()))?;
+    let order = working_order(repos, &target)?;
     let categories = repos.menu().list_categories(OUTLET)?;
 
     // The station comes from the CATEGORY of the food.
     let mut by_station: BTreeMap<String, Option<u32>> = BTreeMap::new();
     if let Some(order) = &order {
-        for line in order.core().cart.lines() {
+        for line in order.core().billing.service_cart.as_ref().unwrap_or(&order.core().cart).lines() {
             if let Some(wanted) = course
                 && line.snapshot.course.as_deref() != Some(wanted)
             {

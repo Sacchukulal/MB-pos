@@ -20,4 +20,4 @@ pub use error::AuthError;
 pub use lockout::{LOCKOUT_FREE_ATTEMPTS, lockout_after};
 pub use permission::{Permission, PermissionGroup, PermissionSet};
 pub use pin::{PIN_DIGITS, Pin, PinHash, hash_pin, hash_secret, verify_pin, verify_secret};
-pub use role::{RolePreset, RoleShape};
+pub use role::{RolePreset, RoleShape, is_owner_role};

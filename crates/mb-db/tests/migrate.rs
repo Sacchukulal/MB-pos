@@ -666,6 +666,39 @@ fn run_single(conn: &mut Connection, m: &mb_db::Migration) -> Result<(), DbError
     Ok(())
 }
 
+#[test]
+fn billing_accounts_upgrade_keeps_existing_orders_and_refunds() {
+    let scratch = Scratch::new("billing_accounts_upgrade");
+    let mut conn = Connection::open(scratch.db_path()).expect("open");
+    conn.execute_batch("CREATE TABLE schema_version (
+        version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL,
+        applied_at INTEGER NOT NULL, run_ms INTEGER NOT NULL) STRICT;")
+        .expect("ledger");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 20) {
+        run_single(&mut conn, migration).expect("previous released schema");
+    }
+    conn.execute_batch("INSERT INTO staff (id, outlet_id, name, created_at, updated_at)
+        VALUES ('staff_upgrade', 'outlet_default', 'Owner', 1, 1);
+        INSERT INTO orders (id, outlet_id, terminal_id, state, business_day,
+            created_at, created_by, order_type, token_value, token_formatted)
+        VALUES ('ord_upgrade', 'outlet_default', 'terminal_default', 'open', 20600,
+            1, 'staff_upgrade', 'parcel', 7, '007');
+        INSERT INTO refunds (id, outlet_id, order_id, amount, mode, reason,
+            refunded_at, business_day)
+        VALUES ('refund_upgrade', 'outlet_default', 'ord_upgrade', 1234, 'Cash',
+            'Legacy refund', 2, 20600);")
+        .expect("previous version's rows");
+    assert_eq!(migrate::apply_all(&mut conn).expect("upgrade").ran, from_version(20));
+    check(&conn, "orders", "ord_upgrade", &[
+        ("state", txt("open")), ("token_formatted", txt("007")),
+        ("billing_account", txt("{}")),
+    ]);
+    check(&conn, "refunds", "refund_upgrade", &[
+        ("amount", num(1234)), ("is_adjustment", num(0)),
+    ]);
+    assert!(migrate::apply_all(&mut conn).expect("restart after upgrade").ran.is_empty());
+}
+
 fn ledger(conn: &Connection) -> Vec<(i64, String)> {
     conn.prepare("SELECT version, checksum FROM schema_version ORDER BY version")
         .expect("prepare")

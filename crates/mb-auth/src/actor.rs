@@ -4,6 +4,7 @@ use mb_core::{DiscountPolicy, Money, StaffId};
 
 use crate::error::AuthError;
 use crate::permission::{Permission, PermissionSet};
+use crate::role::is_owner_role;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Actor {
@@ -21,7 +22,17 @@ pub struct Actor {
 impl Actor {
     #[must_use]
     pub fn can(&self, permission: Permission) -> bool {
-        self.permissions.has(permission)
+        is_owner_role(self.role_id.as_deref()) || self.permissions.has(permission)
+    }
+
+    /// The permissions to expose to clients, including this build's Owner rights.
+    #[must_use]
+    pub fn effective_permissions(&self) -> PermissionSet {
+        if is_owner_role(self.role_id.as_deref()) {
+            PermissionSet::everything()
+        } else {
+            self.permissions.clone()
+        }
     }
 
     /// The refusal, as a `Result` so a command reads `actor.must(Permission::BillVoid)?;` and
@@ -39,6 +50,9 @@ impl Actor {
 
     #[must_use]
     pub fn discount_policy(&self) -> DiscountPolicy {
+        if is_owner_role(self.role_id.as_deref()) {
+            return DiscountPolicy::unrestricted();
+        }
         // Someone who may not discount at all gets a policy of zero rather than no policy — "no
         // policy" reads as "unrestricted" everywhere else, and that is the wrong way round to
         // be wrong.
@@ -111,11 +125,26 @@ mod tests {
 
     #[test]
     fn the_owner_is_unrestricted() {
-        let owner = actor(PermissionSet::everything());
-        let policy = owner.discount_policy();
-        assert_eq!(
-            policy.max_percent_bp,
-            DiscountPolicy::unrestricted().max_percent_bp
-        );
+        let mut owner = actor(PermissionSet::new());
+        owner.role_id = Some(crate::RolePreset::Owner.id().to_owned());
+        owner.role_name = Some("Renamed owner".to_owned());
+        owner.max_discount_bp = Some(0);
+        owner.max_discount = Some(Money::ZERO);
+        for permission in Permission::ALL {
+            assert!(owner.can(*permission));
+            assert!(owner.must(*permission).is_ok());
+        }
+        assert_eq!(owner.effective_permissions(), PermissionSet::everything());
+        assert_eq!(owner.discount_policy(), DiscountPolicy::unrestricted());
+    }
+
+    #[test]
+    fn an_owner_display_name_does_not_grant_owner_authority() {
+        let mut cashier = actor([Permission::BillCreate].into_iter().collect());
+        cashier.role_name = Some("Owner".to_owned());
+        assert!(!cashier.can(Permission::BillRevert));
+        assert!(cashier.must(Permission::StaffManage).is_err());
+        assert_eq!(cashier.effective_permissions(), cashier.permissions);
+        assert_eq!(cashier.discount_policy().max_percent_bp, 0);
     }
 }

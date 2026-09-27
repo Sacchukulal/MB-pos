@@ -121,6 +121,20 @@ pub fn import_all(
     db.transaction(|tx| {
         tx.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
 
+        // Whole-shop replacement is the exception to immutable history. Suspend these
+        // guards inside this transaction only; rollback also restores their definitions.
+        let guards: Vec<(String, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'
+                 AND tbl_name IN ('audit_log', 'bill_versions') ORDER BY name",
+            )?;
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<_, _>>()?
+        };
+        for (name, _) in &guards {
+            tx.execute_batch(&format!("DROP TRIGGER \"{}\"", name.replace('"', "\"\"")))?;
+        }
+
         // Children first, so the deletes do not trip a constraint either.
         for (table, _, _) in sheets.iter().rev() {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
@@ -145,6 +159,9 @@ pub fn import_all(
                 let params: Vec<Option<&str>> = row.iter().map(|f| f.as_deref()).collect();
                 stmt.execute(rusqlite::params_from_iter(params))?;
             }
+        }
+        for (_, definition) in &guards {
+            tx.execute_batch(definition)?;
         }
         Ok(())
     })?;

@@ -70,9 +70,21 @@ pub(crate) fn queue_kitchen_lines(
     if lines.is_empty() {
         return Ok(String::new());
     }
+    // The financial bill keeps its issued placement. All kitchen slips follow the
+    // main serving order if that party has moved since the combined bill was paid.
+    let serving = match order.filter(|order| !order.core().billing.sources.is_empty()) {
+        Some(root) => find_order(app, &OrderId::new(format!("{}_service", root.core().id)))?
+            .filter(|service| matches!(service, AnyOrder::Open(_))
+                && service.core().billing.billed_into.as_ref() == Some(&root.core().id)),
+        None => None,
+    };
+    let order_type = serving.as_ref().map_or(order_type, |service| service.core().order_type());
+    let table = serving.as_ref().map_or(table, |service| service.core().table());
     let at = now();
     let table = table.and_then(|id| table_name(app, id));
-    let token = order.and_then(|o| o.token().map(|t| t.formatted.clone()));
+    let token = serving.as_ref().and_then(|service| service.core().billing.service_token.clone())
+        .or_else(|| order.and_then(|o| o.core().billing.service_token.clone()))
+        .or_else(|| order.and_then(|o| o.token().map(|t| t.formatted.clone())));
     let bill_number = order.and_then(|o| o.bill_number().map(|b| b.formatted.clone()));
     let waiter = order.and_then(|o| staff_name(app, &o.core().created_by));
     let note = order.and_then(|o| o.core().note.clone());
@@ -262,8 +274,16 @@ pub fn print_kitchen_ticket_for(app: &App, order_id: &str) -> UiResult<String> {
         ));
     };
 
+    let serving_place = order.core().placement.clone();
+    if let Some(root_id) = &order.core().billing.billed_into
+        && id.as_str() == format!("{root_id}_service")
+        && let Some(root @ AnyOrder::Open(_)) = find_order(app, root_id)?
+    { order = root; }
+
     let core = order.core();
-    let delta = core.kitchen.pending(&core.cart).map_err(|e| {
+    let service_cart = core.billing.service_cart.as_ref().unwrap_or(&core.cart);
+    let service_kitchen = core.billing.service_kitchen.as_ref().unwrap_or(&core.kitchen);
+    let delta = service_kitchen.pending(service_cart).map_err(|e| {
         UiError::new(
             "kitchen.pending",
             "What the kitchen still needs could not be worked out. Nothing has been sent.",
@@ -274,13 +294,15 @@ pub fn print_kitchen_ticket_for(app: &App, order_id: &str) -> UiResult<String> {
         return Ok(String::new());
     }
 
+    let mut paper_order = order.clone();
+    paper_order.core_mut().placement = serving_place;
     let queued = queue_kitchen_lines(
         app,
         mb_print::template::TicketKind::New,
-        core.order_type(),
-        core.table(),
-        Some(&order),
-        ticket_lines(&core.cart, &delta),
+        paper_order.core().order_type(),
+        paper_order.core().table(),
+        Some(&paper_order),
+        ticket_lines(service_cart, &delta),
         false,
         "no kitchen screen drew this in time".to_owned(),
     )?;
@@ -294,6 +316,9 @@ pub fn print_kitchen_ticket_for(app: &App, order_id: &str) -> UiResult<String> {
         )
         .with_detail(e.to_string())
     })?;
+    if let Some(service) = &mut order.core_mut().billing.service_kitchen {
+        service.mark_printed(&delta).map_err(|e| UiError::new("kitchen.record", e.to_string()))?;
+    }
     save_order(app, &order)?;
     Ok(queued)
 }
@@ -325,7 +350,9 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
     // The order goes on disk BEFORE the paper.
     let open = park_open_order(app)?;
     let core = open.core.clone();
-    let delta = core.kitchen.pending(&core.cart).map_err(|e| {
+    let service_cart = core.billing.service_cart.as_ref().unwrap_or(&core.cart);
+    let service_kitchen = core.billing.service_kitchen.as_ref().unwrap_or(&core.kitchen);
+    let delta = service_kitchen.pending(service_cart).map_err(|e| {
         UiError::new(
             "kitchen.delta",
             "What the kitchen still needs could not be worked out. Nothing has been sent.",
@@ -356,7 +383,7 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
             core.order_type(),
             core.table(),
             Some(&order),
-            ticket_lines(&core.cart, &delta),
+            ticket_lines(service_cart, &delta),
             false,
             reason,
         )?
@@ -385,6 +412,7 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
         UiError::new("kitchen.record", "The ticket could not be recorded.")
             .with_detail(e.to_string())
     })?;
+    open.core.billing.service_kitchen = app.with_cart(|state| Ok(state.account.service_kitchen.clone()))?;
     let order_id = open.core.id.as_str().to_owned();
     let day = open.core.business_day;
     let saved = app.with_shop(|shop| {
@@ -393,7 +421,7 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
                 let repos = mb_db::Repos::new(tx);
                 repos
                     .orders()
-                    .save(OUTLET, app.terminal_id(), &AnyOrder::Open(open.clone()))?;
+                    .save_working(OUTLET, app.terminal_id(), &AnyOrder::Open(open.clone()))?;
                 repos.events().record(
                     &order_id,
                     at,
@@ -412,6 +440,7 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
         log_warn!("order={order_id} the kitchen ticket was printed but not recorded: {e}");
         return Err(e);
     }
+    app.with_cart_mut(|state| { state.adopt(&open.core); Ok(()) })?;
 
     log_info!("the kitchen was told about {} line(s)", delta.len());
     Ok(id)
@@ -425,7 +454,7 @@ pub fn reprint_kitchen_ticket_on(app: &App) -> UiResult<String> {
 
     let (lines, order_type, table) = app.with_cart(|state| {
         let lines: Vec<(mb_core::ItemId, mb_print::template::TicketLine)> = state
-            .cart
+            .account.service_cart.as_ref().unwrap_or(&state.cart)
             .lines()
             .iter()
             .map(|line| {
@@ -471,11 +500,58 @@ pub fn reprint_kitchen_ticket_on(app: &App) -> UiResult<String> {
 /// Settle the bill. Whatever is still owed is taken in `mode` first, so the cashier's one press
 /// is one command.
 pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
+    complete_bill_with_return_on(app, mode, None)
+}
+
+pub fn complete_bill_with_return_on(app: &App, mode: Option<String>, refund_mode: Option<String>) -> UiResult<String> {
+    complete_bill_with_returns_on(app, mode, refund_mode, None)
+}
+
+pub fn complete_bill_with_returns_on(
+    app: &App,
+    mode: Option<String>,
+    refund_mode: Option<String>,
+    refund_amounts: Option<Vec<(String, String)>>,
+) -> UiResult<String> {
     let _one_at_a_time = app.begin_action();
     let who = crate::guard::require(app, mb_auth::Permission::BillCreate)?;
+    park_current(app)?;
     let at = now();
     let settled_by = who.staff_id.clone();
     let config = app.shop_config();
+
+    let return_due = app.with_cart(|state| {
+        let corrected = state.account.revision > 0 || !state.account.sources.is_empty();
+        let bill = state.bill(&config)?;
+        Ok(if corrected { state.settlement.change_due(bill.grand_total).map_err(|e| UiError::new("bill.money", e.to_string()))? } else { mb_core::Money::ZERO })
+    })?;
+    let mut returns = Vec::new();
+    if return_due.is_positive() {
+        crate::guard::require(app, mb_auth::Permission::BillRevert)?;
+        if let Some(amounts) = refund_amounts {
+            for (mode, typed) in amounts {
+                if typed.trim().is_empty() { continue; }
+                let amount = mb_core::Money::parse(typed.trim()).map_err(|e| {
+                    UiError::new("bill.return_amount", "Enter a valid amount to return.").with_detail(e.to_string())
+                })?;
+                if !amount.is_positive() {
+                    return Err(UiError::new("bill.return_amount", "Each return must be more than zero."));
+                }
+                returns.push((mode, amount));
+            }
+        } else if let Some(mode) = refund_mode {
+            returns.push((mode, return_due));
+        } else {
+            return Err(UiError::new("bill.return_due", format!("Return {} before completing this correction.", return_due.to_plain_string())));
+        }
+        let total = mb_core::Money::try_sum(returns.iter().map(|(_, amount)| *amount))
+            .map_err(|e| UiError::new("bill.return_amount", "The return amount is too large.").with_detail(e.to_string()))?;
+        if total != return_due {
+            return Err(UiError::new("bill.return_amount", format!("The returns must add up to {}.", return_due.to_plain_string())));
+        }
+    } else if refund_amounts.is_some_and(|amounts| amounts.iter().any(|(_, typed)| !typed.trim().is_empty())) {
+        return Err(UiError::new("bill.return_amount", "There is no difference to return on this bill."));
+    }
 
     if let Some(mode) = mode {
         let balance = app.with_cart(|state| {
@@ -488,6 +564,9 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
         if balance.is_positive() {
             // Not `cart_add_payment_on`: this thread already holds the counter.
             crate::ipc::take_payment(app, mode, balance.paise(), None)?;
+            // Retain the receipt in the working draft if the final settlement fails, so
+            // reopening the correction cannot collect the same balance a second time.
+            park_current(app)?;
         }
     }
 
@@ -510,11 +589,20 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
                 format!("{} is still to pay on this bill.", left.to_plain_string()),
             ));
         }
-        Ok((
-            state.to_core(at, &settled_by, app.terminal_id())?,
-            bill,
-            state.settlement.clone(),
-        ))
+        // The allocation and its refund rows commit together. Failed validation or a failed
+        // database transaction must leave the live draft's original receipts available.
+        let mut core = state.to_core(at, &settled_by, app.terminal_id())?;
+        let mut settlement = state.settlement.clone();
+        for (mode, amount) in &returns {
+            settlement.return_to(mode, *amount).map_err(|e| {
+                UiError::new("bill.return_mode", "The return exceeds the amount received through that payment mode.")
+                    .with_detail(e.to_string())
+            })?;
+        }
+        core.billing.settlement = settlement.clone();
+        core.billing.refund = None;
+        core.billing.refunds = returns.clone();
+        Ok((core, bill, settlement))
     })?;
 
     let (number, settled) = app.with_shop(|shop| {
@@ -524,7 +612,7 @@ pub fn complete_bill_on(app: &App, mode: Option<String>) -> UiResult<String> {
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 Ok((
-                    repos.orders().find(&core.id)?,
+                    repos.orders().find_working(&core.id)?,
                     crate::dayclose::day_refusal(
                         app,
                         &repos,
@@ -697,6 +785,9 @@ pub fn print_open_bill_on(app: &App, order_id: String) -> UiResult<String> {
     let _one_at_a_time = app.begin_action();
     let who = crate::guard::require(app, mb_auth::Permission::BillCreate)?;
     let id = OrderId::new(order_id);
+    if app.with_cart(|s| Ok(s.order_id() == Some(id.as_str())))? {
+        park_open_order(app)?;
+    }
 
     let open = match find_order(app, &id)? {
         Some(AnyOrder::Open(open)) => open,
@@ -873,7 +964,7 @@ pub(crate) fn bill_of(app: &App, order: &AnyOrder) -> UiResult<mb_core::Bill> {
         return Ok(voided.bill.clone());
     }
     let core = order.core();
-    bill_for(&core.cart, core.order_type(), None, &app.shop_config())
+    bill_for(&core.cart, core.order_type(), core.billing.discount.clone(), &app.shop_config())
 }
 
 // Printers, names, the clock.
@@ -1013,10 +1104,20 @@ pub fn clock_stamp(at: Timestamp) -> String {
 
 // Orders on disk.
 
+/// Save the active order before leaving it; an issued correction stays a draft.
+pub(crate) fn park_current(app: &App) -> UiResult<()> {
+    app.refresh_open_cart()?;
+    let id = app.with_cart(|s| Ok(s.order_id().map(str::to_owned)))?;
+    if let Some(id) = id
+        && matches!(find_order(app, &OrderId::new(id))?, Some(AnyOrder::Open(_)))
+    { park_open_order(app)?; }
+    Ok(())
+}
+
 pub(crate) fn find_order(app: &App, id: &OrderId) -> UiResult<Option<AnyOrder>> {
     app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).orders().find(id))
+            .transaction(|tx| mb_db::Repos::new(tx).orders().find_working(id))
             .map_err(|e| words::from_db(&e))
     })
 }
@@ -1027,7 +1128,7 @@ pub(crate) fn save_order(app: &App, order: &AnyOrder) -> UiResult<()> {
             .transaction(|tx| {
                 mb_db::Repos::new(tx)
                     .orders()
-                    .save(OUTLET, app.terminal_id(), order)
+                    .save_working(OUTLET, app.terminal_id(), order)
             })
             .map_err(|e| words::from_db(&e))
     })
@@ -1061,51 +1162,43 @@ fn claim_kot_number(app: &App, day: BusinessDay) -> Option<String> {
 /// Put the open order on disk, and give the cart its identity if it had none. The numbers,
 /// the time and the day are claimed once and never move.
 pub(crate) fn park_open_order(app: &App) -> UiResult<mb_core::OpenOrder> {
+    app.refresh_open_cart()?;
     let at = now();
     let staff = staff_now(app);
     let core = app.with_cart(|state| state.to_core(at, &staff, app.terminal_id()))?;
+    let baseline = app.with_cart(|state| Ok(state.origin.as_ref().and_then(|o| o.baseline.clone())))?;
 
     let open = app.with_shop(|shop| {
         let till = mb_db::Till::new(OUTLET, app.terminal_id());
-        let (found, refusal) = shop
+        let saved = shop
             .db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                Ok((
-                    repos.orders().find(&core.id)?,
-                    crate::dayclose::day_refusal(
+                if let Some(refusal) = crate::dayclose::day_refusal(
                         app,
                         &repos,
                         core.business_day,
                         "order.day_closed",
                         "take this order",
-                    )?,
-                ))
+                    )? {
+                    return Ok(Err(refusal));
+                }
+                match repos.orders().find_working(&core.id)? {
+                    Some(AnyOrder::Open(mut open)) => {
+                        if baseline.as_ref().is_some_and(|old| old != &open.core) {
+                            return Ok(Err(crate::billing::order_conflict()));
+                        }
+                        open.core = core.clone();
+                        repos.orders().save_working(OUTLET, app.terminal_id(), &AnyOrder::Open(open.clone()))?;
+                        Ok(Ok(Some(open)))
+                    }
+                    Some(_) => Ok(Err(UiError::new("order.finished", "This order has already been finished. Start a new one."))),
+                    None => Ok(Ok(None)),
+                }
             })
-            .map_err(|e| words::from_db(&e))?;
-        // Before the kitchen, not after it: a day the till will refuse to settle is a day the
-        // kitchen must not cook for, and this is the last moment nothing has been cooked.
-        if let Some(refusal) = refusal {
-            return Err(refusal);
-        }
-        match found {
-            Some(AnyOrder::Open(mut open)) => {
-                open.core = core.clone();
-                shop.db
-                    .transaction(|tx| {
-                        mb_db::Repos::new(tx).orders().save(
-                            OUTLET,
-                            app.terminal_id(),
-                            &AnyOrder::Open(open.clone()),
-                        )
-                    })
-                    .map_err(|e| words::from_db(&e))?;
-                Ok(open)
-            }
-            Some(_) => Err(UiError::new(
-                "order.finished",
-                "This order has already been finished. Start a new one.",
-            )),
+            .map_err(|e| words::from_db(&e))??;
+        match saved {
+            Some(open) => Ok(open),
             None => mb_db::open_draft(&shop.db, till, mb_core::DraftOrder { core: core.clone() })
                 .map_err(|e| words::from_db(&e)),
         }
@@ -1136,8 +1229,8 @@ pub fn bill_pdf(app: State<'_, App>, order_id: String) -> UiResult<crate::report
 }
 
 #[tauri::command]
-pub fn complete_bill(app: State<'_, App>, mode: Option<String>) -> UiResult<String> {
-    complete_bill_on(&app, mode)
+pub fn complete_bill(app: State<'_, App>, mode: Option<String>, refund_mode: Option<String>, refund_amounts: Option<Vec<(String, String)>>) -> UiResult<String> {
+    complete_bill_with_returns_on(&app, mode, refund_mode, refund_amounts)
 }
 
 #[tauri::command]

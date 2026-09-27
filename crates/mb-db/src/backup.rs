@@ -22,6 +22,7 @@ pub const COUNTED: &[&str] = &[
     "bill_revert_payments",
     "bill_reverts",
     "bill_tax_rows",
+    "bill_versions",
     "bills",
     "business_days",
     "cash_movements",
@@ -54,6 +55,7 @@ pub const COUNTED: &[&str] = &[
     "materials",
     "modifier_groups",
     "modifiers",
+    "order_edits",
     "order_events",
     "order_line_modifiers",
     "order_lines",
@@ -301,10 +303,7 @@ fn move_pieces(from: &Path, to: &Path) -> Result<(), DbError> {
     remove_pieces(to)?;
     let rename = |a: &Path, b: &Path| {
         std::fs::rename(a, b).map_err(|e| {
-            DbError::invariant(format!(
-                "could not move {} into place: {e}",
-                a.display()
-            ))
+            DbError::invariant(format!("could not move {} into place: {e}", a.display()))
         })
     };
     rename(from, to)?;

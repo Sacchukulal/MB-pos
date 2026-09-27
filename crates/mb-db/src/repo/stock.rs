@@ -996,7 +996,12 @@ impl<'a> StockRepo<'a> {
             return Ok(());
         }
         // The id, the effect and the outcome in one transaction.
-        let event = format!("stock:{}", order.core.id);
+        let stock_key = if order.core.billing.revision == 0 {
+            order.core.id.to_string()
+        } else {
+            format!("{}_v{}", order.core.id, order.core.billing.revision)
+        };
+        let event = format!("stock:{stock_key}");
         let claimed = self.tx.execute(
             "INSERT INTO applied_events (event_id, outlet_id, applied_at, source, result)
              VALUES (?1, ?2, ?3, 'stock', 'deducted')
@@ -1027,7 +1032,7 @@ impl<'a> StockRepo<'a> {
 
         for (seq, draw) in inputs.enumerate() {
             let mut movement = Movement::new(
-                format!("stk_{}_i{seq}", order.core.id),
+                format!("stk_{stock_key}_i{seq}"),
                 draw.material.clone(),
                 MovementKind::ProductionOut,
                 draw.base_qty,
@@ -1047,7 +1052,7 @@ impl<'a> StockRepo<'a> {
             // The made material's cost is what its inputs cost.
             let unit_cost = self.production_cost(outlet, made, &recipes)?;
             let mut movement = Movement::new(
-                format!("stk_{}_p{seq}", order.core.id),
+                format!("stk_{stock_key}_p{seq}"),
                 made.material.clone(),
                 MovementKind::ProductionIn,
                 made.base_qty,
@@ -1066,7 +1071,7 @@ impl<'a> StockRepo<'a> {
 
         for (seq, draw) in sales.enumerate() {
             let mut movement = Movement::new(
-                format!("stk_{}_{seq}", order.core.id),
+                format!("stk_{stock_key}_{seq}"),
                 draw.material.clone(),
                 MovementKind::Sale,
                 draw.base_qty,
@@ -1411,7 +1416,8 @@ fn sold_from(order: &SettledOrder) -> Vec<Sold> {
         if line.snapshot.item_id.is_empty() {
             continue;
         }
-        let key = crate::repo::order::line_id(order.core.id.as_str(), seq);
+        let key =
+            crate::repo::order::line_id(order.core.id.as_str(), order.core.billing.revision, seq);
         out.push(Sold {
             line_key: key.clone(),
             name: line.snapshot.name.clone(),

@@ -100,6 +100,7 @@ fn intent(id: &str, order: Option<&str>, what: What) -> Intent {
     Intent {
         id: id.to_owned(),
         order_id: order.map(ToOwned::to_owned),
+        open_intent_id: None,
         at: crate::flows::now().millis(),
         sent_at: None,
         what,
@@ -438,7 +439,7 @@ fn every_conflict_resolves_the_way_the_protocol_says() {
             Some(&first),
             What::AddItem {
                 item_id: "itm_dosa".to_owned(),
-                qty: "1".to_owned(),
+                qty: "2".to_owned(),
                 note: None,
                 modifiers: vec![],
             },
@@ -452,7 +453,7 @@ fn every_conflict_resolves_the_way_the_protocol_says() {
             Some(&first),
             What::SetQty {
                 line: 0,
-                qty: "0".to_owned(),
+                qty: "1".to_owned(),
             },
         ),
     );
@@ -545,6 +546,7 @@ fn a_phone_cannot_wipe_what_the_cashier_is_typing() {
     // The cashier has that order open and has typed a payment into it.
     app.with_cart_mut(|state| {
         state.origin = Some(crate::billing::Origin {
+            baseline: None,
             id: mb_core::OrderId::new(order.clone()),
             created_at: crate::flows::now(),
             business_day: crate::flows::today(crate::flows::now()),
@@ -1011,7 +1013,7 @@ fn the_floor_body_says_what_every_phone_needs() {
     let open = &busy["orders"][0];
     assert_eq!(open["order_id"], order);
     assert_eq!(open["table_id"], "tbl_7");
-    assert_eq!(open["table_label"], "7");
+    assert_eq!(open["table_label"], "Main hall 7");
     assert_eq!(open["order_type"], "dine_in");
     assert_eq!(open["lines"][0]["name"], "Masala Dosa");
     assert_eq!(open["lines"][0]["qty"], "2");
@@ -1178,6 +1180,234 @@ fn a_phone_order_is_audited_once_not_per_tap() {
     assert!(orders::is_audited(&What::CancelOrder { reason: String::new() }));
     assert!(!orders::is_audited(&What::SendToKitchen));
     assert!(!orders::is_audited(&What::SetCovers { covers: Some(2) }));
+}
+
+fn two_sent_dosas(app: &App) -> (String, mb_lan::intent::LineView) {
+    let order = open_one(app, Some("tbl_7"));
+    go(app, &intent("reduction-add", Some(&order), What::AddItem {
+        item_id: "itm_dosa".into(), qty: "2".into(), note: Some("No onion".into()), modifiers: vec![],
+    }));
+    let Outcome::Ok { lines, .. } = go(app, &intent("reduction-send", Some(&order), What::SendToKitchen)) else {
+        panic!("the kitchen was not told");
+    };
+    (order, lines[0].clone())
+}
+
+#[test]
+fn phone_partial_cancellation_keeps_one_and_tells_the_kitchen_to_stop_only_one_once() {
+    let scratch = Scratch::new("phone_reduce");
+    let app = a_shop(&scratch, "reduce");
+    let (order, expected) = two_sent_dosas(&app);
+    let (staff, may) = waiter();
+    let request = intent("reduce-one", Some(&order), What::ReduceQty {
+        expected, qty: "1".into(), reason: "Customer changed mind".into(),
+    });
+    let before_audit = audit_rows(&app);
+    let applied = orders::apply(&app, "dev_test", &staff, &may, &request).expect("reduced");
+    let Outcome::Ok { lines, total, .. } = &applied.outcome else { panic!("{:?}", applied.outcome) };
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].qty, "1");
+    assert_eq!(lines[0].in_kitchen, "1");
+    assert!(lines[0].sent_to_kitchen);
+    assert_eq!(total, "126.00");
+    let paper = applied.kitchen_paper.expect("a cancellation KOT");
+    assert_eq!(paper.kind, mb_print::template::TicketKind::Cancellation);
+    assert_eq!(paper.lines.len(), 1);
+    assert_eq!(paper.lines[0].1.qty.to_string(), "1");
+    assert_eq!(paper.lines[0].1.name, "Masala Dosa");
+    assert_eq!(paper.lines[0].1.note.as_deref(), Some("No onion"));
+    let replay = orders::apply(&app, "dev_test", &staff, &may, &request).expect("replay");
+    assert_eq!(replay.outcome, applied.outcome);
+    assert!(replay.kitchen_paper.is_none());
+    assert_eq!(audit_rows(&app), before_audit + 1);
+    let resent = go(&app, &intent("reduction-resend", Some(&order), What::SendToKitchen));
+    assert!(resent.message().contains("already has everything"));
+    assert_eq!(orders::floor_body(&app).expect("floor")["partial_item_cancellation"], true);
+    let audit = app.with_shop(|shop| shop.db.read_transaction(|tx| {
+        Repos::new(tx).audit().list(OUTLET, &mb_db::repo::AuditFilter {
+            action: Some(mb_auth::audit::action::ITEM_VOIDED.into()), limit: 10, ..Default::default()
+        })
+    }).map_err(|e| crate::words::from_db(&e))).expect("audit");
+    assert_eq!(audit.len(), 1);
+    let saved = serde_json::to_string(&audit[0]).expect("audit JSON");
+    assert!(saved.contains("Customer changed mind"));
+}
+
+#[test]
+fn phone_partial_cancellation_validates_permission_reason_target_and_original_line() {
+    let scratch = Scratch::new("phone_reduce_guards");
+    let app = a_shop(&scratch, "guards");
+    let (order, expected) = two_sent_dosas(&app);
+    let (staff, _) = waiter();
+    let mut may = PermissionSet::new();
+    may.insert(Permission::BillCreate);
+    let what = What::ReduceQty { expected: expected.clone(), qty: "1".into(), reason: "Changed mind".into() };
+    let denied = orders::apply(&app, "dev_test", &staff, &may, &intent("denied", Some(&order), what)).expect("answer");
+    assert!(matches!(denied.outcome, Outcome::Refused { .. }));
+    assert!(denied.kitchen_paper.is_none());
+    for (id, qty, reason) in [("blank", "1", " "), ("zero", "0", "Reason"), ("half", "0.5", "Reason"), ("fraction", "1.5", "Reason"), ("raise", "3", "Reason"), ("same", "2", "Reason"), ("invalid", "bad", "Reason")] {
+        let result = go(&app, &intent(id, Some(&order), What::ReduceQty {
+            expected: expected.clone(), qty: qty.into(), reason: reason.into(),
+        }));
+        assert!(matches!(result, Outcome::Refused { .. }), "{id}: {result:?}");
+    }
+    // Another waiter changes this line while the phone holds its old snapshot.
+    go(&app, &intent("other-waiter", Some(&order), What::SetQty { line: 0, qty: "3".into() }));
+    let stale = go(&app, &intent("stale", Some(&order), What::ReduceQty {
+        expected, qty: "1".into(), reason: "Changed mind".into(),
+    }));
+    assert!(stale.message().contains("changed at the counter"));
+    let floor = orders::floor_body(&app).expect("floor");
+    assert_eq!(floor["orders"][0]["lines"][0]["qty"], "3");
+    assert_eq!(floor["orders"][0]["lines"][0]["in_kitchen"], "2");
+}
+
+#[test]
+fn phone_partial_cancellation_of_a_partly_sent_line_cancels_only_the_sent_excess() {
+    let scratch = Scratch::new("phone_reduce_partial");
+    let app = a_shop(&scratch, "partial");
+    let (order, _) = two_sent_dosas(&app);
+    let Outcome::Ok { lines, .. } = go(&app, &intent("raise", Some(&order), What::SetQty { line: 0, qty: "3".into() })) else { panic!("raised") };
+    let (staff, may) = waiter();
+    let applied = orders::apply(&app, "dev_test", &staff, &may, &intent("reduce", Some(&order), What::ReduceQty {
+        expected: lines[0].clone(), qty: "1".into(), reason: "Wrong quantity".into(),
+    })).expect("reduced");
+    assert_eq!(applied.kitchen_paper.expect("stop slip").lines[0].1.qty.to_string(), "1");
+    let Outcome::Ok { lines, .. } = applied.outcome else { panic!("reduced") };
+    assert_eq!(lines[0].qty, "1");
+    assert_eq!(lines[0].in_kitchen, "1");
+}
+
+#[test]
+fn phone_parties_have_distinct_orders_and_labels_and_retry_is_idempotent() {
+    let scratch = Scratch::new("phone_parties");
+    let app = a_shop(&scratch, "parties");
+    let first = open_one(&app, Some("tbl_7"));
+    let request = intent("party_b", None, What::OpenParty { table_id: "tbl_7".into(), covers: None });
+    let party = go(&app, &request);
+    assert_eq!(party, go(&app, &request));
+    let floor = orders::floor_body(&app).expect("floor");
+    let rows = floor["orders"].as_array().expect("orders");
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().any(|r| r["order_id"] == first && r["table_label"] == "Main hall 7"));
+    assert!(rows.iter().any(|r| r["seat"] == "B" && r["table_label"] == "Main hall 7B"));
+    assert_eq!(floor["tables_complete"], true);
+}
+
+#[test]
+fn phone_table_snapshot_and_version_follow_details_hiding_and_deletion() {
+    let scratch = Scratch::new("phone_tables");
+    let app = a_shop(&scratch, "tables");
+    let mut version = orders::catalogue(&app).expect("catalogue").version;
+    for sql in [
+        "UPDATE dining_tables SET seats = 8",
+        "UPDATE sections SET name = 'Garden'",
+        "UPDATE dining_tables SET section_id = NULL",
+        "UPDATE dining_tables SET is_active = 0",
+    ] {
+        app.with_shop(|shop| shop.db.transaction(|tx| { tx.execute(sql, [])?; Ok(()) }).map_err(|e| crate::words::from_db(&e))).expect("edit");
+        let next = orders::catalogue(&app).expect("catalogue");
+        assert_ne!(version, next.version, "{sql}");
+        version = next.version;
+    }
+    assert!(orders::catalogue(&app).expect("catalogue").tables.is_empty());
+    assert!(orders::floor_body(&app).expect("floor")["tables"].as_array().expect("tables").is_empty());
+    assert!(matches!(go(&app, &intent("hidden", None, What::OpenParty { table_id: "tbl_7".into(), covers: None })), Outcome::Refused { .. }));
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        tx.execute("UPDATE dining_tables SET is_active = 1", [])?;
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("restore");
+    let before_delete = orders::catalogue(&app).expect("catalogue");
+    app.with_shop(|shop| shop.db.transaction(|tx| Repos::new(tx).floor().delete_table(OUTLET, &mb_core::TableId::new("tbl_7"), crate::flows::now())).map_err(|e| crate::words::from_db(&e))).expect("delete");
+    let deleted = orders::catalogue(&app).expect("catalogue");
+    assert_ne!(before_delete.version, deleted.version);
+    assert!(deleted.tables.is_empty());
+}
+
+#[test]
+fn a_failed_open_never_routes_its_dishes_to_the_previous_order() {
+    for explicit in [false, true] {
+        let scratch = Scratch::new(if explicit { "phone_dependency" } else { "phone_legacy_batch" });
+        let app = a_shop(&scratch, "batch");
+        let (staff, may) = waiter();
+        let open = |id: &str, table: &str| intent(id, None, What::OpenOrder { order_type: "dine_in".into(), table_id: Some(table.into()), covers: None });
+        let mut dish = intent("dish_bad", None, What::AddItem { item_id: "itm_dosa".into(), qty: "1".into(), note: None, modifiers: vec![] });
+        if explicit { dish.open_intent_id = Some("open_bad".into()); }
+        let result = orders::apply_batch(&app, "dev_test", &staff, &may, &mb_lan::Batch {
+            intents: vec![open("open_good", "tbl_7"), open("open_bad", "deleted"), dish],
+        }).expect("batch");
+        assert!(matches!(result.outcomes[1].1, Outcome::Refused { .. }));
+        assert!(matches!(result.outcomes[2].1, Outcome::Refused { .. }));
+        let floor = orders::floor_body(&app).expect("floor");
+        assert!(floor["orders"][0]["lines"].as_array().expect("lines").is_empty());
+    }
+}
+
+#[test]
+fn a_dish_keeps_its_open_dependency_across_batches_and_replays() {
+    let scratch = Scratch::new("phone_dependency_replay");
+    let app = a_shop(&scratch, "retry");
+    let opening = intent("opening", None, What::OpenOrder { order_type: "parcel".into(), table_id: None, covers: None });
+    let opened = go(&app, &opening);
+    let mut dish = intent("dish", None, What::AddItem { item_id: "itm_dosa".into(), qty: "1".into(), note: None, modifiers: vec![] });
+    dish.open_intent_id = Some("opening".into());
+    let added = go(&app, &dish);
+    assert!(matches!((&opened, &added), (Outcome::Ok { order_id: a, .. }, Outcome::Ok { order_id: b, .. }) if a == b));
+    assert_eq!(added, go(&app, &dish));
+}
+
+#[test]
+fn phones_cannot_change_either_side_of_a_combined_bill() {
+    let scratch = Scratch::new("lan_combined");
+    let app = a_shop(&scratch, "combined");
+    let source = open_one(&app, None);
+    let root = open_one(&app, None);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let mut order = repos.orders().find(&mb_core::OrderId::new(&source))?.expect("source");
+        order.core_mut().billing.billed_into = Some(mb_core::OrderId::new(&root));
+        repos.orders().save(OUTLET, app.terminal_id(), &order)?;
+        let mut order = repos.orders().find(&mb_core::OrderId::new(&root))?.expect("root");
+        order.core_mut().billing.sources.push(mb_core::OrderId::new(&source));
+        repos.orders().save(OUTLET, app.terminal_id(), &order)
+    }).map_err(|error| crate::words::from_db(&error))).expect("linked");
+    for (id, order) in [("change_source", source), ("change_root", root)] {
+        let outcome = go(&app, &intent(id, Some(&order), What::SetOrderNote { note: Some("phone overwrite".to_owned()) }));
+        assert!(matches!(outcome, Outcome::Refused { .. }), "{outcome:?}");
+        app.with_shop(|shop| shop.db.transaction(|tx| {
+            let saved = Repos::new(tx).orders().find(&mb_core::OrderId::new(&order))?.expect("order");
+            assert!(saved.core().note.is_none());
+            Ok(())
+        }).map_err(|error| crate::words::from_db(&error))).expect("unchanged");
+    }
+}
+
+#[test]
+fn phones_leave_an_issued_bill_and_its_correction_draft_unchanged() {
+    let scratch = Scratch::new("lan_correction");
+    let app = a_shop(&scratch, "correction");
+    crate::signin_tests::hire(&app, "staff_owner", "Owner", mb_auth::RolePreset::Owner, "2468");
+    let id = open_one(&app, None);
+    let added = go(&app, &intent("draft_food", Some(&id), What::AddItem {
+        item_id: "itm_dosa".to_owned(), qty: "1".to_owned(), note: None, modifiers: vec![],
+    }));
+    assert!(matches!(added, Outcome::Ok { .. }));
+    crate::ipc::open_order_on(&app, id.clone()).expect("load");
+    crate::flows::complete_bill_on(&app, Some("cash".to_owned())).expect("paid");
+    crate::corrections::revert_bill_on(&app, id.clone(), "Correct items".to_owned(), None, None).expect("draft");
+    let outcome = go(&app, &intent("phone_during_edit", Some(&id), What::SetOrderNote { note: Some("overwrite".to_owned()) }));
+    assert!(matches!(outcome, Outcome::Refused { .. }));
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let id = mb_core::OrderId::new(&id);
+        let issued = repos.orders().find(&id)?.expect("issued");
+        let draft = repos.orders().find_working(&id)?.expect("draft");
+        assert!(matches!(issued, mb_core::AnyOrder::Settled(_)));
+        assert!(matches!(draft, mb_core::AnyOrder::Open(_)));
+        assert!(issued.core().note.is_none());
+        assert!(draft.core().note.is_none());
+        Ok(())
+    }).map_err(|error| crate::words::from_db(&error))).expect("unchanged");
 }
 
 fn audit_rows(app: &App) -> i64 {

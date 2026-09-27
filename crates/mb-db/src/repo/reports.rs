@@ -555,7 +555,7 @@ impl<'a> ReportsRepo<'a> {
                 AND o.state = 'settled'
                 AND COALESCE(l.item_id, l.name) NOT IN (
                         SELECT COALESCE(l2.item_id, l2.name)
-                          FROM orders o2 JOIN order_lines l2 ON l2.order_id = o2.id
+                          FROM orders o2 JOIN order_lines l2 ON l2.order_id = o2.id AND l2.seq >= 0
                          WHERE o2.outlet_id = ?1
                            AND o2.business_day BETWEEN ?4 AND ?5
                            AND o2.state = 'settled')

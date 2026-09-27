@@ -78,7 +78,14 @@ pub fn take_lines(from: &mut Portion, picks: &[Pick]) -> Result<Portion> {
         let identity = line.identity();
         let told = from.kitchen.quantity_told(&identity);
         // The rule, in one line: the origin keeps what it can, the rest moves.
-        let stays_told = if told < remaining { told } else { remaining };
+        let kept_qty = from
+            .cart
+            .lines()
+            .iter()
+            .filter(|l| l.identity() == identity)
+            .try_fold(Qty::ZERO, |sum, l| sum.add(l.qty))?
+            .sub(pick.qty)?;
+        let stays_told = if told < kept_qty { told } else { kept_qty };
         let moves_told = told.sub(stays_told)?;
 
         // The cart first — a failure here must not leave the ledger changed.
@@ -87,8 +94,22 @@ pub fn take_lines(from: &mut Portion, picks: &[Pick]) -> Result<Portion> {
         } else {
             from.cart.set_qty(pick.index, remaining)?;
         }
-        let mut going = line;
+        let mut going = line.clone();
         going.qty = pick.qty;
+        if remaining.is_positive()
+            && let Some(entry) = &line.line_discount
+            && let crate::discount::Discount::Amount(amount) = entry.discount
+        {
+            let leaving_share =
+                amount.mul_ratio_floor(pick.qty.thousandths(), line.qty.thousandths())?;
+            let shares = [amount.sub(leaving_share)?, leaving_share];
+            let mut staying = entry.clone();
+            staying.discount = crate::discount::Discount::Amount(shares[0]);
+            from.cart.set_line_discount(pick.index, Some(staying))?;
+            let mut leaving = entry.clone();
+            leaving.discount = crate::discount::Discount::Amount(shares[1]);
+            going.line_discount = Some(leaving);
+        }
         moved.cart.push(going)?;
 
         from.kitchen.set_told(&identity, stays_told);
@@ -173,6 +194,46 @@ mod tests {
             Money::from_paise(paise),
             TaxRate::from_basis_points(500).expect("5%"),
         )
+    }
+
+    #[test]
+    fn combining_preserves_each_sold_price() {
+        let mut first = portion(&[("tea", 2_000, 1)]);
+        let second = portion(&[("tea", 3_000, 1)]);
+        merge_into(&mut first, second).expect("merge");
+        assert_eq!(first.cart.len(), 2);
+        assert_eq!(first.cart.lines()[1].snapshot.unit_price.paise(), 3_000);
+    }
+
+    #[test]
+    fn a_fixed_line_discount_is_shared_when_quantity_moves() {
+        let mut first = portion(&[("tea", 2_000, 4), ("dosa", 5_000, 1)]);
+        first
+            .cart
+            .set_line_discount(
+                0,
+                Some(crate::discount::DiscountEntry::new(
+                    crate::discount::Discount::Amount(Money::from_paise(1_001)),
+                )),
+            )
+            .expect("discount");
+        let second = take_lines(
+            &mut first,
+            &[Pick {
+                index: 0,
+                qty: Qty::ONE,
+            }],
+        )
+        .expect("split");
+        let amount = |line: &CartLine| match line.line_discount.as_ref().expect("discount").discount
+        {
+            crate::discount::Discount::Amount(m) => m.paise(),
+            _ => panic!("amount"),
+        };
+        assert_eq!(
+            amount(&first.cart.lines()[0]) + amount(&second.cart.lines()[0]),
+            1_001
+        );
     }
 
     fn portion(items: &[(&str, i64, i64)]) -> Portion {

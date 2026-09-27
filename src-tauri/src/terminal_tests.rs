@@ -463,6 +463,7 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
     let open_table = |id: &str| Intent {
         id: id.to_owned(),
         order_id: None,
+        open_intent_id: None,
         at: crate::flows::now().millis(),
         sent_at: None,
         what: What::OpenOrder {
@@ -503,6 +504,7 @@ fn every_conflict_resolves_as_documented_and_names_the_till() {
     let add = |id: &str| Intent {
         id: id.to_owned(),
         order_id: Some(order_id.clone()),
+        open_intent_id: None,
         at: crate::flows::now().millis(),
         sent_at: None,
         what: What::AddItem {
@@ -583,6 +585,7 @@ fn a_table_opened_on_one_till_is_on_the_other_tills_floor() {
         &Intent {
             id: "i9".to_owned(),
             order_id: None,
+            open_intent_id: None,
             at: crate::flows::now().millis(),
             sent_at: None,
             what: What::OpenOrder {

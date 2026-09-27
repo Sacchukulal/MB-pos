@@ -11,6 +11,8 @@ pub enum PaymentError {
     NonPositiveAmount,
     #[error("a tip cannot be negative")]
     NegativeTip,
+    #[error("that is more than was received through this payment mode")]
+    RefundTooLarge,
     /// You cannot hand change back out of a card machine.
     #[error(
         "card, UPI and credit payments come to ₹{non_cash}, which is more than the ₹{due} owed — take the extra in cash or reduce the amount"
@@ -129,6 +131,46 @@ pub struct Settlement {
 }
 
 impl Settlement {
+    /// Adjust the current allocation after a separately recorded return. Issued versions
+    /// retain the original receipts; this projection says how much still pays this bill.
+    pub fn return_to(&mut self, mode: &str, amount: Money) -> Result<()> {
+        if !amount.is_positive() {
+            return Err(PaymentError::NonPositiveAmount);
+        }
+        let available = Money::try_sum(
+            self.payments
+                .iter()
+                .filter(|p| p.mode.report_label().eq_ignore_ascii_case(mode))
+                .map(|p| p.amount),
+        )?;
+        if amount > available {
+            return Err(PaymentError::RefundTooLarge);
+        }
+        let mut remaining = amount;
+        for payment in self
+            .payments
+            .iter_mut()
+            .filter(|p| p.mode.report_label().eq_ignore_ascii_case(mode))
+        {
+            let take = if payment.amount < remaining {
+                payment.amount
+            } else {
+                remaining
+            };
+            payment.amount = payment.amount.sub(take)?;
+            remaining = remaining.sub(take)?;
+        }
+        self.payments.retain(|p| p.amount.is_positive());
+        Ok(())
+    }
+
+    pub fn append(&mut self, other: &Settlement) -> Result<()> {
+        self.set_tip(self.tip.add(other.tip)?)?;
+        for payment in &other.payments {
+            self.add(payment.clone())?;
+        }
+        Ok(())
+    }
     #[must_use]
     pub fn new() -> Self {
         Settlement::default()

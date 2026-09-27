@@ -1,6 +1,6 @@
 //! Staff, roles and permissions.
 
-use mb_auth::{Permission, PermissionSet, PinHash, RoleShape};
+use mb_auth::{Permission, PermissionSet, PinHash, RoleShape, is_owner_role};
 use mb_core::{Money, StaffId, Timestamp};
 use rusqlite::Transaction;
 
@@ -163,11 +163,32 @@ impl<'a> PeopleRepo<'a> {
     /// row — so a phone's older copy cannot undo a counter's later edit, and the counter's own
     /// save (always freshly stamped) always lands.
     fn write_role(&self, outlet: &str, role: &CloudRole, unknown: UnknownCode) -> Result<bool, DbError> {
+        // A stale cloud catalogue must not turn the built-in Owner into a limited role.
+        // Normalize before persistence so future exports carry the same effective authority.
+        let owner;
+        let role = if is_owner_role(Some(&role.id)) {
+            owner = CloudRole {
+                is_builtin: true,
+                max_discount_bp: None,
+                max_discount_paise: None,
+                permissions: PermissionSet::everything()
+                    .codes()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+                ..role.clone()
+            };
+            &owner
+        } else {
+            role
+        };
         let n = self.tx.execute(
             "INSERT INTO roles (id, outlet_id, name, is_builtin, max_discount_bp,
                                 max_discount_paise, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT (id) DO UPDATE SET name               = excluded.name,
+                                            is_builtin         = CASE WHEN excluded.id = 'role_owner'
+                                                                      THEN 1 ELSE roles.is_builtin END,
                                             max_discount_bp    = excluded.max_discount_bp,
                                             max_discount_paise = excluded.max_discount_paise,
                                             updated_at         = excluded.updated_at
@@ -340,6 +361,7 @@ impl<'a> PeopleRepo<'a> {
         let mut staff = Vec::new();
         for row in rows {
             let (id, name, role_id, role_name, pin_hash, status, max_bp, max_paise) = row?;
+            let owner = is_owner_role(role_id.as_deref());
             let permissions = match &role_id {
                 Some(role) => self.permissions_for_role(role)?,
                 None => PermissionSet::new(),
@@ -352,8 +374,16 @@ impl<'a> PeopleRepo<'a> {
                 pin_hash,
                 status: StaffStatus::from_sql(&status)?,
                 permissions,
-                max_discount_bp: max_bp.map(|bp| u32::try_from(bp).unwrap_or(0)),
-                max_discount: max_paise.map(encode::money_from_sql),
+                max_discount_bp: if owner {
+                    None
+                } else {
+                    max_bp.map(|bp| u32::try_from(bp).unwrap_or(0))
+                },
+                max_discount: if owner {
+                    None
+                } else {
+                    max_paise.map(encode::money_from_sql)
+                },
             });
         }
         Ok(staff)
@@ -388,14 +418,17 @@ impl<'a> PeopleRepo<'a> {
         for row in rows {
             let (id, name, builtin, max_bp, max_paise) = row?;
             let permissions = self.permissions_for_role(&id)?;
-            roles.push(RoleShape {
-                id,
-                name,
-                is_builtin: encode::bool_from_sql(builtin, "roles.is_builtin")?,
-                permissions,
-                max_discount_bp: max_bp.map(|bp| u32::try_from(bp).unwrap_or(0)),
-                max_discount: max_paise.map(encode::money_from_sql),
-            });
+            roles.push(
+                RoleShape {
+                    id,
+                    name,
+                    is_builtin: encode::bool_from_sql(builtin, "roles.is_builtin")?,
+                    permissions,
+                    max_discount_bp: max_bp.map(|bp| u32::try_from(bp).unwrap_or(0)),
+                    max_discount: max_paise.map(encode::money_from_sql),
+                }
+                .effective(),
+            );
         }
         Ok(roles)
     }
@@ -413,6 +446,9 @@ impl<'a> PeopleRepo<'a> {
     }
 
     fn permissions_for_role(&self, role_id: &str) -> Result<PermissionSet, DbError> {
+        if is_owner_role(Some(role_id)) {
+            return Ok(PermissionSet::everything());
+        }
         let mut stmt = self.tx.prepare_cached(
             "SELECT permission_code FROM role_permissions WHERE role_id = ?1 ORDER BY 1",
         )?;

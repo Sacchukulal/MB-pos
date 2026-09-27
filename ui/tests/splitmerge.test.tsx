@@ -1,5 +1,5 @@
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CartView } from '../src/ipc/generated/CartView';
 import type { MoneyView } from '../src/ipc/generated/MoneyView';
@@ -19,6 +19,7 @@ afterEach(() => {
   cleanup();
   call.mockReset();
 });
+beforeEach(() => { call.mockResolvedValue([]); });
 
 function money(paise: number, text: string): MoneyView {
   return { paise: BigInt(paise), text };
@@ -133,7 +134,9 @@ describe('merge bill', () => {
   });
 
   it('merges the picked order INTO the one on the counter, and says who joined', async () => {
-    call.mockResolvedValue({});
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates'
+      ? [table({ id: '5', label: '5', orderId: 'ord_five', total: money(32_000, '320.00'), billNumber: 'A/0012' })]
+      : {}));
     const onMerged = vi.fn();
     render(
       <MergeBill

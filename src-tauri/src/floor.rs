@@ -610,7 +610,7 @@ fn open_order(app: &App, id: &str) -> UiResult<mb_core::AnyOrder> {
             .transaction(|tx| {
                 mb_db::Repos::new(tx)
                     .orders()
-                    .find(&mb_core::OrderId::new(id))?
+                    .find_working(&mb_core::OrderId::new(id))?
                     .ok_or_else(|| mb_db::DbError::invariant("that order is not here any more"))
             })
             .map_err(|e| words::from_db(&e))
@@ -618,11 +618,18 @@ fn open_order(app: &App, id: &str) -> UiResult<mb_core::AnyOrder> {
 }
 
 pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<FloorView> {
+    let _one_at_a_time = app.begin_action();
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
     let target = TableId::new(to_table.clone());
 
+    if app.with_cart(|state| Ok(state.order_id() == Some(order_id.as_str())))? {
+        crate::flows::park_open_order(app)?;
+    }
     let order = open_order(app, &order_id)?;
+    if !matches!(order, mb_core::AnyOrder::Open(_)) {
+        return Err(UiError::new("floor.finished", "Only an open order can move to another table."));
+    }
     let from = order.core().table().cloned();
     if from.as_ref() == Some(&target) {
         return Err(UiError::new(
@@ -634,14 +641,15 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
     // Asked before the write, and answered in words.
     if let Some(called) = app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).floor().open_order_at(&target))
+            .transaction(|tx| Ok(mb_db::Repos::new(tx).orders().list_open(OUTLET)?
+                .into_iter().find(|order| order.core().table() == Some(&target))))
             .map_err(|e| words::from_db(&e))
     })? {
         return Err(UiError::new(
             "floor.table_busy",
             format!(
                 "There is already an order on that table ({}) — merge the two instead.",
-                called.1
+                called.token().map_or("open order", |token| token.formatted.as_str())
             ),
         ));
     }
@@ -650,8 +658,12 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
+                repos.orders().assert_working(&order)?;
+                if repos.orders().list_open(OUTLET)?.iter().any(|order| order.core().table() == Some(&target)) {
+                    return Err(mb_db::DbError::invariant("That table already has an order. Merge the bills instead."));
+                }
                 let moved = with_table(order.clone(), target.clone());
-                repos.orders().save(OUTLET, app.terminal_id(), &moved)?;
+                repos.orders().save_working(OUTLET, app.terminal_id(), &moved)?;
                 repos.events().record(
                     &order_id,
                     at,
@@ -687,6 +699,9 @@ pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<
     app.with_cart_mut(|state| {
         if state.order_id() == Some(order_id.as_str()) {
             state.place_on(target.clone(), label, None);
+            if let Some(origin) = &mut state.origin {
+                origin.baseline = Some(with_table(order.clone(), target.clone()).core().clone());
+            }
         }
         Ok(())
     })?;
@@ -713,6 +728,7 @@ fn order_label(app: &App, order: &mb_core::AnyOrder) -> String {
 }
 
 pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiResult<FloorView> {
+    let _one_at_a_time = app.begin_action();
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
 
@@ -722,8 +738,28 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
             "Those are the same order.",
         ));
     }
-    let absorbed = open_order(app, &from_order)?;
-    let survivor = open_order(app, &into_order)?;
+    if app.with_cart(|s| Ok(s.order_id() == Some(from_order.as_str()) || s.order_id() == Some(into_order.as_str())))? {
+        crate::flows::park_open_order(app)?;
+    }
+    let absorbed_before = open_order(app, &from_order)?;
+    let survivor_before = open_order(app, &into_order)?;
+    for order in [&absorbed_before, &survivor_before] {
+        if order.core().billing.billed_into.is_some() {
+            return Err(UiError::new("merge.linked", "This order already belongs to a combined bill."));
+        }
+        if let Some(refusal) = crate::dayclose::day_refusal_on(app, order.core().business_day, "merge.closed", "combine these bills")? { return Err(refusal); }
+        if matches!(order, mb_core::AnyOrder::Settled(_)) { guard::require(app, Permission::BillRevert)?; }
+    }
+    if absorbed_before.core().business_day != survivor_before.core().business_day {
+        return Err(UiError::new("merge.day", "Choose bills from the same business day."));
+    }
+    let editable = |order: mb_core::AnyOrder| -> UiResult<mb_core::AnyOrder> { match order {
+        mb_core::AnyOrder::Settled(paid) => Ok(mb_core::AnyOrder::Open(paid.reopen())),
+        open @ mb_core::AnyOrder::Open(_) => Ok(open),
+        _ => Err(UiError::new("merge.finished", "Only open or paid bills can be combined.")),
+    }};
+    let absorbed = editable(absorbed_before.clone())?;
+    let survivor = editable(survivor_before.clone())?;
 
     let (mut survivor_portion, absorbed_portion) = (
         mb_core::Portion {
@@ -749,6 +785,8 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
                 let repos = mb_db::Repos::new(tx);
 
                 // The survivor takes the food.
+                repos.orders().assert_working(&absorbed_before)?;
+                repos.orders().assert_working(&survivor_before)?;
                 let mut merged = survivor.clone();
                 let (cart, kitchen) = survivor_portion.clone().into_parts();
                 match &mut merged {
@@ -766,28 +804,53 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
                         ));
                     }
                 }
-                repos.orders().save(OUTLET, app.terminal_id(), &merged)?;
+                let account = &mut merged.core_mut().billing;
+                if account.service_cart.is_none() {
+                    account.service_cart = Some(survivor.core().cart.clone());
+                    account.service_kitchen = Some(survivor.core().kitchen.clone());
+                }
+                account.settlement.append(&absorbed.core().billing.settlement).map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
+                account.sources.push(absorbed.core().id.clone());
+                account.source_labels.push(absorbed.bill_number().map_or_else(|| format!("Order {absorbed_label}"), |n| format!("Bill {}", n.formatted)));
+                account.source_labels.extend(absorbed.core().billing.source_labels.clone());
+                account.sources.extend(absorbed.core().billing.sources.clone());
+                account.serving.push(absorbed.core().placement.clone());
+                account.serving.extend(absorbed.core().billing.serving.clone());
+                // Preserve the money discounted on each source instead of expanding a
+                // percentage onto the other guest's food.
+                let discount = [&survivor, &absorbed].iter().try_fold(mb_core::Money::ZERO, |sum, order| {
+                    crate::flows::bill_of(app, order).map_err(|e| mb_db::DbError::invariant(e.message))
+                        .and_then(|b| sum.add(b.total_bill_discount).map_err(|e| mb_db::DbError::invariant(e.to_string())))
+                })?;
+                account.discount = discount.is_positive().then(|| mb_core::DiscountEntry::new(mb_core::Discount::Amount(discount)));
+                repos.orders().save_working(OUTLET, app.terminal_id(), &merged)?;
 
-                // And the absorbed one is closed with a link rather than a hole.
-                let closed = match absorbed.clone() {
-                    mb_core::AnyOrder::Open(o) => o
-                        .cancel(
-                            &format!("merged into {survivor_label}"),
-                            who.staff_id.clone(),
-                            at,
-                        )
-                        .map_err(|e| mb_db::DbError::invariant(e.to_string()))?,
-                    _ => {
-                        return Err(mb_db::DbError::invariant(
-                            "only an open order can be merged away",
-                        ));
+                // An open source keeps serving its table; an issued source is replaced only
+                // when the combined correction finishes.
+                let mut serving = absorbed.clone();
+                serving.core_mut().billing.billed_into = Some(merged.core().id.clone());
+                if matches!(absorbed_before, mb_core::AnyOrder::Settled(_))
+                    && let mb_core::AnyOrder::Open(open) = serving
+                {
+                    serving = mb_core::AnyOrder::Cancelled(open.cancel("Replaced by combined bill", who.staff_id.clone(), at).map_err(|e| mb_db::DbError::invariant(e.to_string()))?);
+                }
+                repos.orders().save_working(OUTLET, app.terminal_id(), &serving)?;
+                // A previously combined source can itself join another bill. Every original
+                // table must now point at the surviving account, including paid sources.
+                for source in &absorbed.core().billing.sources {
+                    let mut linked = repos.orders().find_working(source)?
+                        .ok_or_else(|| mb_db::DbError::invariant("A combined source order is missing."))?;
+                    linked.core_mut().billing.billed_into = Some(merged.core().id.clone());
+                    repos.orders().save_working(OUTLET, app.terminal_id(), &linked)?;
+                }
+                // Settling a combined bill also creates a service-only order for its own
+                // table. It carries no source payment, but must follow a later combination.
+                for mut linked in repos.orders().list_open(OUTLET)? {
+                    if linked.core().billing.billed_into.as_ref() == Some(&absorbed.core().id) {
+                        linked.core_mut().billing.billed_into = Some(merged.core().id.clone());
+                        repos.orders().save_working(OUTLET, app.terminal_id(), &linked)?;
                     }
-                };
-                repos.orders().save(
-                    OUTLET,
-                    app.terminal_id(),
-                    &mb_core::AnyOrder::Cancelled(closed),
-                )?;
+                }
                 repos.floor().record_merge(&from_order, &into_order)?;
                 repos.events().record(
                     &from_order,
@@ -833,6 +896,70 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
     floor_on(app)
 }
 
+/// The same order tiles the counter knows, including issued bills from today's book.
+#[tauri::command]
+pub fn combine_candidates(app: tauri::State<'_, App>) -> UiResult<Vec<crate::billing::TableView>> {
+    combine_candidates_on(&app)
+}
+
+pub fn combine_candidates_on(app: &App) -> UiResult<Vec<crate::billing::TableView>> {
+    guard::require(app, Permission::BillCreate)?;
+    let at = now();
+    let config = app.shop_config();
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        let mut orders = repos.orders().list_for_day(OUTLET, today(at))?;
+        // Paid sources can have a cancelled working draft while their issued sale remains
+        // in reports. Candidate selection follows that draft too, not just open drafts.
+        for order in &mut orders {
+            if let Some(working) = repos.orders().find_working(&order.core().id)? {
+                *order = working;
+            }
+        }
+        for open in repos.orders().list_open(OUTLET)? {
+            orders.retain(|o| o.core().id != open.core().id);
+            orders.push(open);
+        }
+        orders.retain(|o| matches!(o, mb_core::AnyOrder::Open(_) | mb_core::AnyOrder::Settled(_)) && o.core().billing.billed_into.is_none());
+        let mut tables = repos.floor().list_tables(OUTLET)?;
+        // An issued bill remains a candidate even after its old table is hidden.
+        for table in &mut tables { table.is_active = true; }
+        let sections = repos.floor().list_sections(OUTLET)?;
+        let mut tiles = Vec::with_capacity(orders.len());
+        for order in &orders {
+            let candidates = crate::billing::floor_view(&tables, &sections, std::slice::from_ref(order),
+                crate::billing::Room { cart_is_on: None, now: at, warn_after: 60, late_after: 120, config: &config });
+            for mut tile in candidates.into_iter().filter(|tile| tile.order_id.is_some()) {
+                // Multiple paid bills can have the same physical table. This is a list of
+                // orders, so its identity must also be the order.
+                tile.id = order.core().id.as_str().to_owned();
+                tiles.push(tile);
+            }
+        }
+        Ok(tiles)
+    }).map_err(|e| words::from_db(&e)))
+}
+
+#[tauri::command]
+pub fn release_serving_table(app: tauri::State<'_, App>, order_id: String) -> UiResult<()> {
+    release_serving_table_on(&app, order_id)
+}
+
+pub fn release_serving_table_on(app: &App, order_id: String) -> UiResult<()> {
+    let _one_at_a_time = app.begin_action();
+    let who = guard::require(app, Permission::BillCreate)?;
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        let Some(mb_core::AnyOrder::Open(open)) = repos.orders().find_working(&mb_core::OrderId::new(&order_id))? else { return Err(mb_db::DbError::invariant("This table is no longer occupied.")); };
+        let Some(root) = &open.core.billing.billed_into else { return Err(mb_db::DbError::invariant("Settle this table's bill first.")); };
+        if !matches!(repos.orders().find_working(root)?, Some(mb_core::AnyOrder::Settled(_))) { return Err(mb_db::DbError::invariant("The combined bill is still to be paid.")); }
+        let closed = open.cancel("Service complete; paid on combined bill", who.staff_id.clone(), now()).map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
+        repos.orders().save_working(OUTLET, app.terminal_id(), &mb_core::AnyOrder::Cancelled(closed))?;
+        repos.kitchen().close_order(&order_id)?;
+        Ok(())
+    }).map_err(|e| words::from_db(&e)))
+}
+
 /// What the screen sends to split an order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
@@ -847,11 +974,31 @@ pub struct SplitRequest {
     pub seat: Option<String>,
 }
 
+/// The unlettered party occupies A; subsequent parties take the first free letter.
+pub(crate) fn next_free_seat(open: &[mb_core::AnyOrder], table: &TableId) -> Option<mb_core::SubTable> {
+    ('B'..='Z').find_map(|letter| {
+        let seat = mb_core::SubTable::parse(&letter.to_string()).ok()?;
+        (!open.iter().any(|order| order.core().table() == Some(table)
+            && order.core().seat() == Some(&seat))).then_some(seat)
+    })
+}
+
 pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
+    let _one_at_a_time = app.begin_action();
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
 
+    if app.with_cart(|s| Ok(s.order_id() == Some(request.order_id.as_str())))? {
+        crate::flows::park_open_order(app)?;
+    }
     let order = open_order(app, &request.order_id)?;
+    if order.core().billing.billed_into.is_some() || !order.core().billing.sources.is_empty() {
+        return Err(UiError::new("split.combined", "Open the original orders before changing how this combined bill is split."));
+    }
+    if !order.core().billing.settlement.is_empty() {
+        return Err(UiError::new("split.paid", "This bill has payments; finish its correction before splitting it."));
+    }
+    if let Some(refusal) = crate::dayclose::day_refusal_on(app, order.core().business_day, "split.closed", "split this bill")? { return Err(refusal); }
     let mut origin = mb_core::Portion {
         cart: order.core().cart.clone(),
         kitchen: order.core().kitchen.clone(),
@@ -893,7 +1040,24 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
 
+                let mut placement = placement.clone();
+                if let mb_core::Placement::DineIn { table, seat } = &mut placement {
+                    let open = repos.orders().list_open(OUTLET)?;
+                    if !repos.floor().list_tables(OUTLET)?.iter().any(|row| &row.id == table && row.is_active) {
+                        return Err(mb_db::DbError::invariant("Choose an active table for the split."));
+                    }
+                    if seat.is_none() && (order.core().table() == Some(table)
+                        || open.iter().any(|order| order.core().table() == Some(table) && order.core().seat().is_none())) {
+                        *seat = Some(next_free_seat(&open, table)
+                            .ok_or_else(|| mb_db::DbError::invariant("All seat letters on that table are in use."))?);
+                    }
+                    if open.iter().any(|order| order.core().table() == Some(table) && order.core().seat() == seat.as_ref()) {
+                        return Err(mb_db::DbError::invariant("That seat already has an order. Choose another letter."));
+                    }
+                }
+
                 // What stays.
+                repos.orders().assert_working(&order)?;
                 let mut kept = order.clone();
                 let (cart, kitchen) = origin.clone().into_parts();
                 match &mut kept {
@@ -905,7 +1069,11 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                         return Err(mb_db::DbError::invariant("only an open order can be split"));
                     }
                 }
-                repos.orders().save(OUTLET, app.terminal_id(), &kept)?;
+                let discount = crate::flows::bill_of(app, &order).map_err(|e| mb_db::DbError::invariant(e.message))?.total_bill_discount;
+                let nets = [&origin.cart, &moved.cart].iter().map(|cart| crate::billing::bill_for(cart, order.core().order_type(), None, &app.shop_config()).map(|b| b.subtotal.sub(b.total_line_discount).unwrap_or(mb_core::Money::ZERO))).collect::<Result<Vec<_>, _>>().map_err(|e| mb_db::DbError::invariant(e.message))?;
+                let shares = mb_core::transfer::split_bill_discount(discount, &nets).map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
+                kept.core_mut().billing.discount = shares[0].is_positive().then(|| mb_core::DiscountEntry::new(mb_core::Discount::Amount(shares[0])));
+                repos.orders().save_working(OUTLET, app.terminal_id(), &kept)?;
 
                 // And what leaves: a new order with its own numbers, claimed against the
                 // ORIGINAL's business day so a split at 00:15 does not jump to tomorrow's
@@ -920,6 +1088,7 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                 );
                 fresh.core.cart = moved_cart;
                 fresh.core.kitchen = moved_kitchen;
+                fresh.core.billing.discount = shares[1].is_positive().then(|| mb_core::DiscountEntry::new(mb_core::Discount::Amount(shares[1])));
 
                 // Its own token, claimed in THIS transaction so a failure cannot consume one —
                 // the same rule `open_draft` follows, and claimed against the ORIGINAL order's
@@ -941,6 +1110,8 @@ pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
                 repos
                     .orders()
                     .save(OUTLET, app.terminal_id(), &mb_core::AnyOrder::Open(opened))?;
+
+                crate::kitchen::split_in(&repos, &request.order_id, &new_id, &origin, &moved, day)?;
 
                 repos.events().record(
                     &request.order_id,
@@ -1084,4 +1255,3 @@ pub fn merge_orders(
 pub fn split_order(app: tauri::State<'_, App>, request: SplitRequest) -> UiResult<FloorView> {
     split_order_on(&app, request)
 }
-

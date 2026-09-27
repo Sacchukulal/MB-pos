@@ -451,6 +451,7 @@ macro_rules! commands {
             $crate::ipc::preview_test_page,
             $crate::ipc::preview_order,
             $crate::ipc::current_cart,
+            $crate::ipc::reload_current_order,
             $crate::ipc::cart_add,
             $crate::ipc::cart_set_qty,
             $crate::ipc::cart_remove,
@@ -539,6 +540,8 @@ macro_rules! commands {
             $crate::floor::save_floor_thresholds,
             $crate::floor::move_order,
             $crate::floor::merge_orders,
+            $crate::floor::combine_candidates,
+            $crate::floor::release_serving_table,
             $crate::floor::split_order,
             $crate::credit::customers,
             $crate::credit::customer_account,
@@ -700,7 +703,6 @@ macro_rules! commands {
             $crate::lan::revoke_device,
             // The floor's items, into the cashier's bill or not.
             $crate::orders::take_the_floors_items,
-            $crate::orders::dismiss_the_floors_items,
             // The licence.
             $crate::licensing::account,
             $crate::licensing::licence_shops,
@@ -779,8 +781,46 @@ use mb_core::{OrderId, TableId};
 /// What is in the cart right now.
 #[tauri::command]
 pub fn current_cart(app: tauri::State<'_, App>) -> UiResult<CartView> {
-    guard::require(&app, Permission::BillCreate)?;
+    current_cart_on(&app)
+}
+
+pub fn current_cart_on(app: &App) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
+    guard::require(app, Permission::BillCreate)?;
+    app.refresh_open_cart()?;
     app.with_cart(|state| cart_view(state, &app.shop_config()))
+}
+
+/// Explicit conflict recovery after the cashier confirms discarding unsaved edits.
+pub fn reload_current_order_on(app: &App) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
+    guard::require(app, Permission::BillCreate)?;
+    let id = app.with_cart(|state| {
+        let Some(origin) = &state.origin else { return Ok(None); };
+        let saved = origin.baseline.as_ref().map(|base| &base.billing.settlement);
+        if saved != Some(&state.settlement) {
+            return Err(UiError::new("order.unsaved_payment", "This bill has unsaved payment changes. Resolve those payments before reloading; they cannot be discarded."));
+        }
+        Ok(Some(origin.id.clone()))
+    })?;
+    let Some(id) = id else { return app.with_cart(|state| cart_view(state, &app.shop_config())); };
+    let order = crate::flows::find_order(app, &id)?;
+    let label = order.as_ref().and_then(|o| o.core().table())
+        .and_then(|table| crate::flows::table_name(app, table));
+    app.with_cart_mut(|state| {
+        match order {
+            Some(ref order @ (mb_core::AnyOrder::Open(_) | mb_core::AnyOrder::Draft(_))) => {
+                *state = CartState::load(order, label);
+            }
+            _ => *state = CartState::new_order(state.order_type()),
+        }
+        cart_view(state, &app.shop_config())
+    })
+}
+
+#[tauri::command]
+pub fn reload_current_order(app: tauri::State<'_, App>) -> UiResult<CartView> {
+    reload_current_order_on(&app)
 }
 
 /// Put an item in.
@@ -790,6 +830,7 @@ pub fn cart_add_on(
     qty: Option<String>,
     note: Option<String>,
 ) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
     let item = app.find_menu_item(&item_id)?;
     let qty = match qty {
@@ -823,6 +864,8 @@ pub fn cart_set_qty(
     handle: tauri::AppHandle,
     index: usize,
     qty: String,
+    reason: Option<String>,
+    expected_line: Option<String>,
 ) -> UiResult<CartView> {
     guard::require(&app, Permission::BillCreate)?;
     let parsed = mb_core::Qty::parse(&qty).map_err(|e| {
@@ -832,12 +875,7 @@ pub fn cart_set_qty(
         )
         .with_detail(e.to_string())
     })?;
-    let view = app.with_cart_mut(|state| {
-        state.cart.set_qty(index, parsed).map_err(|e| {
-            UiError::new("cart.qty", "That quantity could not be set.").with_detail(e.to_string())
-        })?;
-        cart_view(state, &app.shop_config())
-    });
+    let view = crate::corrections::change_line_checked_on(&app, index, Some(parsed), reason.unwrap_or_default(), expected_line);
     shown(&handle, view)
 }
 
@@ -846,22 +884,19 @@ pub fn cart_remove(
     app: tauri::State<'_, App>,
     handle: tauri::AppHandle,
     index: usize,
+    expected_line: Option<String>,
 ) -> UiResult<CartView> {
     guard::require(&app, Permission::BillCreate)?;
-    let view = app.with_cart_mut(|state| {
-        state.cart.remove(index).map_err(|e| {
-            UiError::new("cart.remove", "That line could not be removed.")
-                .with_detail(e.to_string())
-        })?;
-        cart_view(state, &app.shop_config())
-    });
+    let view = crate::corrections::change_line_checked_on(&app, index, None, String::new(), expected_line);
     shown(&handle, view)
 }
 
 /// New order. Keeps the order type, because the type lock is what stops a parcel counter
 /// re-selecting it forty times an hour.
 pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
+    crate::flows::park_current(app)?;
     let config = app.shop_config();
     app.with_cart_mut(|state| {
         let previous = if keep_type {
@@ -880,6 +915,7 @@ pub fn cart_set_order_type(
     handle: tauri::AppHandle,
     order_type: String,
 ) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     guard::require(&app, Permission::BillCreate)?;
     let kind = order_type_from_label(&order_type).ok_or_else(|| {
         UiError::new(
@@ -906,6 +942,7 @@ pub fn cart_set_order_type(
 }
 
 /// Take a payment. A split is this more than once: the cash box, then the lit mode.
+#[cfg(test)]
 pub fn cart_add_payment_on(
     app: &App,
     mode: String,
@@ -996,9 +1033,10 @@ pub fn cart_clear_payments(
     app: tauri::State<'_, App>,
     handle: tauri::AppHandle,
 ) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     guard::require(&app, Permission::BillCreate)?;
     let view = app.with_cart_mut(|state| {
-        state.settlement = mb_core::Settlement::new();
+        state.settlement = state.account.settlement.clone();
         cart_view(state, &app.shop_config())
     });
     shown(&handle, view)
@@ -1011,10 +1049,11 @@ pub fn cart_cash_given(
     handle: tauri::AppHandle,
     amount: String,
 ) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     guard::require(&app, Permission::BillCreate)?;
     let typed = amount.trim().to_owned();
     let cleared = app.with_cart_mut(|state| {
-        state.settlement = mb_core::Settlement::new();
+        state.settlement = state.account.settlement.clone();
         cart_view(state, &app.shop_config())
     })?;
     if typed.is_empty() {
@@ -1032,7 +1071,7 @@ pub fn cart_cash_given(
     }
     shown(
         &handle,
-        cart_add_payment_on(&app, "Cash".to_owned(), given.paise(), None),
+        take_payment(&app, "Cash".to_owned(), given.paise(), None),
     )
 }
 
@@ -1041,6 +1080,7 @@ pub fn cart_cash_given(
 /// Take money off this bill — or, with `line`, off one line of it. The two are two
 /// permissions: a cashier who may knock a little off one dosa is not the person who may
 /// discount a banquet.
+#[cfg(test)]
 pub fn cart_set_discount_on(
     app: &App,
     kind: String,
@@ -1048,7 +1088,20 @@ pub fn cart_set_discount_on(
     reason: Option<String>,
     line: Option<usize>,
 ) -> UiResult<CartView> {
+    cart_set_discount_checked_on(app, kind, value, reason, line, None)
+}
+
+pub fn cart_set_discount_checked_on(
+    app: &App,
+    kind: String,
+    value: String,
+    reason: Option<String>,
+    line: Option<usize>,
+    expected_line: Option<String>,
+) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     let who = guard::require(app, guard::discount_permission(line))?;
+    refresh_for_line_edit(app, line, expected_line.as_deref())?;
     let config = app.shop_config();
 
     let discount = match kind.as_str() {
@@ -1122,8 +1175,15 @@ pub fn cart_set_discount_on(
 /// Clear the discount — the bill's, or one line's. Separate from setting one so that "no
 /// discount" is never expressed as "a discount of zero", which would print a zero line on the
 /// bill and read as a mistake.
+#[cfg(test)]
 pub fn cart_clear_discount_on(app: &App, line: Option<usize>) -> UiResult<CartView> {
+    cart_clear_discount_checked_on(app, line, None)
+}
+
+pub fn cart_clear_discount_checked_on(app: &App, line: Option<usize>, expected_line: Option<String>) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     guard::require(app, guard::discount_permission(line))?;
+    refresh_for_line_edit(app, line, expected_line.as_deref())?;
     app.with_cart_mut(|state| {
         match line {
             Some(index) => state
@@ -1134,6 +1194,26 @@ pub fn cart_clear_discount_on(app: &App, line: Option<usize>) -> UiResult<CartVi
         }
         cart_view(state, &app.shop_config())
     })
+}
+
+/// The displayed index must still refer to the same exact line after remote refresh.
+fn refresh_for_line_edit(app: &App, line: Option<usize>, expected: Option<&str>) -> UiResult<()> {
+    if let Some(index) = line {
+        let before = app.with_cart(|state| {
+            crate::billing::check_line_edit(state, index, expected)?;
+            Ok((state.order_id().map(str::to_owned), state.cart.lines().get(index).cloned()))
+        })?;
+        app.refresh_open_cart()?;
+        app.with_cart(|state| {
+            crate::billing::check_line_edit(state, index, expected)?;
+            if before.0.as_deref() != state.order_id() || before.1.as_ref() != state.cart.lines().get(index) {
+                return Err(crate::billing::order_conflict());
+            }
+            Ok(())
+        })
+    } else {
+        app.refresh_open_cart()
+    }
 }
 
 /// `"12.5"` to `1250` basis points, without a float.
@@ -1170,13 +1250,14 @@ pub fn cart_set_discount(
     value: String,
     reason: Option<String>,
     line: Option<usize>,
+    expected_line: Option<String>,
 ) -> UiResult<CartView> {
-    cart_set_discount_on(&app, kind, value, reason, line)
+    cart_set_discount_checked_on(&app, kind, value, reason, line, expected_line)
 }
 
 #[tauri::command]
-pub fn cart_clear_discount(app: tauri::State<'_, App>, line: Option<usize>) -> UiResult<CartView> {
-    cart_clear_discount_on(&app, line)
+pub fn cart_clear_discount(app: tauri::State<'_, App>, line: Option<usize>, expected_line: Option<String>) -> UiResult<CartView> {
+    cart_clear_discount_checked_on(&app, line, expected_line)
 }
 
 /// The floor — the only view of open orders.
@@ -1270,9 +1351,14 @@ pub fn search_items_on(
 /// The cart goes to a table. Lines typed at the counter and not yet in the books go with it —
 /// onto a free table as its order, onto a busy table's bill as new items for the kitchen.
 pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
+    crate::flows::park_current(app)?;
     let table = TableId::new(table_id);
     let (label, found) = table_and_its_order(app, &table)?;
+    if found.as_ref().is_some_and(|o| o.core().billing.billed_into.is_some()) {
+        return Err(UiError::new("order.combined", "This table belongs to a combined bill; release it after the guests leave."));
+    }
     let config = app.shop_config();
 
     app.with_cart_mut(|state| {
@@ -1315,10 +1401,9 @@ fn table_and_its_order(
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let label = repos.floor().find_table(table)?.map(|t| t.label);
-                let found = match repos.floor().first_party_at(table)? {
-                    Some(order_id) => repos.orders().find(&OrderId::new(order_id))?,
-                    None => None,
-                };
+                let found = repos.orders().list_open(OUTLET)?.into_iter()
+                    .filter(|order| order.core().table() == Some(table) && order.core().seat().is_none())
+                    .min_by_key(|order| order.core().created_at);
                 Ok((label, found))
             })
             .map_err(|e| words::from_db(&e))
@@ -1335,18 +1420,20 @@ fn table_and_its_order(
 /// A second party on a table, with its own letter: the one given, or the next free one. What
 /// was typed at the counter goes with it; a parked order in the cart stays where it is.
 pub fn join_table_on(app: &App, table_id: String, seat: Option<String>) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
+    crate::flows::park_current(app)?;
     let table = TableId::new(table_id);
     let (label, _) = table_and_its_order(app, &table)?;
     let config = app.shop_config();
 
-    let taken: Vec<mb_core::SubTable> = app
+    let open = app
         .with_shop(|shop| {
             shop.db
                 .transaction(|tx| mb_db::Repos::new(tx).orders().list_open(OUTLET))
                 .map_err(|e| words::from_db(&e))
-        })?
-        .iter()
+        })?;
+    let taken: Vec<mb_core::SubTable> = open.iter()
         .filter(|o| o.core().table() == Some(&table))
         .filter_map(|o| o.core().seat().cloned())
         .collect();
@@ -1370,9 +1457,7 @@ pub fn join_table_on(app: &App, table_id: String, seat: Option<String>) -> UiRes
             seat
         }
         // A is the table's own party; the next party takes the first free letter after it.
-        None => ('B'..='Z')
-            .filter_map(|letter| mb_core::SubTable::parse(&letter.to_string()).ok())
-            .find(|candidate| !taken.contains(candidate))
+        None => crate::floor::next_free_seat(&open, &table)
             .ok_or_else(|| {
                 UiError::new(
                     "table.full",
@@ -1403,7 +1488,12 @@ pub fn join_table(
 
 /// Open an order that has no table — a parcel or a self-service order on the floor.
 pub fn open_order_on(app: &App, order_id: String) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
+    crate::flows::park_current(app)?;
+    if app.with_cart(|state| Ok(state.order_id() == Some(order_id.as_str())))? {
+        return app.with_cart(|state| cart_view(state, &app.shop_config()));
+    }
     let order = crate::flows::find_order(app, &OrderId::new(&order_id))?;
     let Some(order) =
         order.filter(|o| matches!(o, mb_core::AnyOrder::Open(_) | mb_core::AnyOrder::Draft(_)))
@@ -1413,6 +1503,9 @@ pub fn open_order_on(app: &App, order_id: String) -> UiResult<CartView> {
             "That order is not on the floor any more.",
         ));
     };
+    if order.core().billing.billed_into.is_some() {
+        return Err(UiError::new("order.combined", "This table belongs to a combined bill; release it after the guests leave."));
+    }
     let label = order
         .core()
         .table()
@@ -1508,7 +1601,7 @@ pub fn lock_state_on(app: &App) -> UiResult<LockState> {
         role: current.as_ref().and_then(|s| s.actor.role_name.clone()),
         permissions: current.as_ref().map_or_else(Vec::new, |s| {
             s.actor
-                .permissions
+                .effective_permissions()
                 .iter()
                 .map(|p| p.code().to_owned())
                 .collect()

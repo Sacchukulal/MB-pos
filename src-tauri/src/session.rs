@@ -37,7 +37,7 @@ impl Session {
     /// has no PINs yet, which is the owner's own machine.
     #[must_use]
     pub fn is_owner(&self) -> bool {
-        self.is_stand_in || self.actor.role_id.as_deref() == Some(mb_auth::RolePreset::Owner.id())
+        self.is_stand_in || mb_auth::is_owner_role(self.actor.role_id.as_deref())
     }
 }
 

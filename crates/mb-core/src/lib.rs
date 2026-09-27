@@ -3,6 +3,7 @@
 #![deny(missing_debug_implementations)]
 
 pub mod bill;
+pub mod billing_account;
 pub mod businessday;
 pub mod cart;
 pub mod charge;
@@ -39,6 +40,7 @@ pub mod transfer;
 pub mod units;
 
 pub use bill::{Bill, BillError, BillInput, BillLine, compute_bill};
+pub use billing_account::BillingAccount;
 pub use businessday::{BusinessDay, DayRule};
 pub use cart::{Cart, CartError, CartLine, LineIdentity};
 pub use charge::{BillCharge, Charge, ChargeBasis, ChargeKind};

@@ -131,6 +131,8 @@ pub struct OrderCore {
     pub created_by: StaffId,
     pub note: Option<String>,
     pub kitchen: KitchenLedger,
+    #[serde(default)]
+    pub billing: crate::BillingAccount,
 }
 
 impl OrderCore {
@@ -296,6 +298,7 @@ impl DraftOrder {
                 created_by,
                 note: None,
                 kitchen: KitchenLedger::new(),
+                billing: crate::BillingAccount::default(),
             },
         }
     }
@@ -371,7 +374,18 @@ impl SettledOrder {
     /// Back to the counter to be fixed: the same order, the same numbers, the bill and the
     /// payments dropped so it can be billed and paid again.
     #[must_use]
-    pub fn reopen(self) -> OpenOrder {
+    pub fn reopen(mut self) -> OpenOrder {
+        self.core.billing.refund = None;
+        self.core.billing.refunds.clear();
+        self.core.billing.discount = self.bill.bill_discount.clone();
+        self.core.billing.settlement = self.settlement.clone();
+        // Change already handed back is not an advance towards the corrected bill.
+        if let Ok(change) = self.settlement.change_due(self.bill.grand_total)
+            && change.is_positive()
+        {
+            let _ = self.core.billing.settlement.return_to("Cash", change);
+        }
+        self.core.billing.revision = self.core.billing.revision.saturating_add(1);
         OpenOrder {
             core: self.core,
             token: self.token,
@@ -397,9 +411,17 @@ impl SettledOrder {
 }
 
 /// What the kitchen has already been told.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Default, Serialize, Deserialize)]
 pub struct KitchenLedger {
     told: Vec<(LineIdentity, Qty)>,
+}
+
+// The ledger is a map kept in display order. SQL and JSON may return that order differently.
+impl PartialEq for KitchenLedger {
+    fn eq(&self, other: &Self) -> bool {
+        self.told.len() == other.told.len()
+            && self.told.iter().all(|entry| other.told.contains(entry))
+    }
 }
 
 impl KitchenLedger {
@@ -423,8 +445,16 @@ impl KitchenLedger {
         let mut pending = Vec::new();
         for line in cart.lines() {
             let identity = line.identity();
+            if pending.iter().any(|(known, _)| known == &identity) {
+                continue;
+            }
             let already = self.quantity_told(&identity);
-            let outstanding = line.qty.sub(already)?;
+            let ordered = cart
+                .lines()
+                .iter()
+                .filter(|l| l.identity() == identity)
+                .try_fold(Qty::ZERO, |sum, l| sum.add(l.qty))?;
+            let outstanding = ordered.sub(already)?;
             if outstanding.is_positive() {
                 pending.push((identity, outstanding));
             }
@@ -456,8 +486,8 @@ impl KitchenLedger {
             let ordered = cart
                 .lines()
                 .iter()
-                .find(|line| &line.identity() == identity)
-                .map_or(Qty::ZERO, |line| line.qty);
+                .filter(|line| &line.identity() == identity)
+                .try_fold(Qty::ZERO, |sum, line| sum.add(line.qty))?;
             let over = told.sub(ordered)?;
             if over.is_positive() {
                 excess.push((identity.clone(), over));
@@ -522,6 +552,28 @@ mod tests {
     use crate::money::{Money, RoundingMode};
     use crate::payment::{Payment, PaymentMode};
     use crate::tax::TaxRate;
+
+    #[test]
+    fn kitchen_equality_survives_storage_sort_order_but_detects_changes() {
+        let identity = |id| LineIdentity {
+            item_id: ItemId::new(id),
+            note: None,
+            modifier_ids: vec![],
+        };
+        let entries = vec![
+            (identity("itm_2"), Qty::ONE),
+            (identity("itm_10"), Qty::ONE),
+        ];
+        let mut original = KitchenLedger::new();
+        original.mark_printed(&entries).expect("printed");
+        let mut restored = KitchenLedger::new();
+        restored
+            .mark_printed(&entries.into_iter().rev().collect::<Vec<_>>())
+            .expect("restored");
+        assert_eq!(original, restored);
+        restored.set_told(&identity("itm_2"), Qty::from_thousandths(2_000));
+        assert_ne!(original, restored);
+    }
 
     fn day() -> BusinessDay {
         BusinessDay::from_ymd(2026, 8, 1)
@@ -596,9 +648,7 @@ mod tests {
             .take_bill_number(numbering.claim_bill(day()))
             .expect("numbered");
         assert_eq!(
-            order
-                .take_bill_number(numbering.claim_bill(day()))
-                .err(),
+            order.take_bill_number(numbering.claim_bill(day())).err(),
             Some(OrderError::AlreadyBilled),
             "a printed number never moves"
         );
@@ -1189,7 +1239,11 @@ mod tests {
         assert_eq!(all[0].bill_number(), None, "a draft has no number yet");
         assert_eq!(all[1].bill_number(), None, "nor an order nobody has billed");
         assert!(all[2].bill_number().is_some(), "a paid bill has one");
-        assert_eq!(all[3].bill_number(), None, "a walk-out before any bill leaves no hole");
+        assert_eq!(
+            all[3].bill_number(),
+            None,
+            "a walk-out before any bill leaves no hole"
+        );
         assert!(all[4].bill_number().is_some(), "a voided bill keeps its");
         for order in &all {
             assert_eq!(order.core().business_day, day());

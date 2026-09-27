@@ -309,6 +309,194 @@ fn money_only_goes_back_against_a_voided_bill_and_never_more_than_came_in() {
 
 /// The reason list is data, and a shop's edits are its own.
 #[test]
+fn a_corrected_bill_can_return_its_remaining_payments_after_a_later_void() {
+    let scratch = Scratch::new("refund_after_correction");
+    let db = scratch.open();
+    shop::build(&db);
+    let original = settle_one(&db, "ord_correct_then_void", 4);
+    let paid = original.bill.grand_total;
+    let mut open = original.reopen();
+    open.core.cart.set_qty(0, Qty::ONE).expect("reduce bill");
+    let bill = compute_bill(
+        BillInput::new(&open.core.cart, Registration::Regular)
+            .with_order_type(open.core.order_type()),
+    )
+    .expect("replacement bill");
+    let remaining = bill.grand_total;
+    let difference = paid.sub(remaining).expect("difference");
+    open.core.billing.refunds = vec![("cash".to_owned(), difference)];
+    let mut settlement = Settlement::new();
+    settlement
+        .add(Payment::new(PaymentMode::Cash, remaining).expect("remaining payment"))
+        .expect("record payment");
+    let corrected = mb_db::settle(
+        &db,
+        mb_db::Till::new(OUTLET, TERMINAL),
+        open,
+        bill,
+        settlement,
+        at(20),
+        StaffId::new("staff_1"),
+    )
+    .expect("corrected");
+    let voided = corrected
+        .void("Returned order", StaffId::new("staff_1"), at(21))
+        .expect("voided");
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        repos
+            .orders()
+            .save(OUTLET, TERMINAL, &AnyOrder::Voided(voided.clone()))?;
+        repos.corrections().record_refund(
+            OUTLET,
+            &Refund {
+                id: "last_return".to_owned(),
+                order_id: voided.core.id.clone(),
+                amount: remaining,
+                mode: "cash".to_owned(),
+                reason: "Returned order".to_owned(),
+                refunded_at: at(22),
+                refunded_by: Some(StaffId::new("staff_1")),
+            },
+            day(),
+        )?;
+        assert_eq!(repos.corrections().refunded_so_far(&voided.core.id)?, paid);
+        let again = repos.corrections().record_refund(
+            OUTLET,
+            &Refund {
+                id: "too_much_after_return".to_owned(),
+                order_id: voided.core.id.clone(),
+                amount: Money::from_paise(1),
+                mode: "cash".to_owned(),
+                reason: "Already returned".to_owned(),
+                refunded_at: at(23),
+                refunded_by: Some(StaffId::new("staff_1")),
+            },
+            day(),
+        );
+        assert!(again.is_err(), "no payment remains to return");
+        Ok(())
+    })
+    .expect("return only the remaining payments");
+}
+
+#[test]
+fn correcting_a_combined_bill_refreshes_its_moved_service_order_without_reopening_a_released_one() {
+    let scratch = Scratch::new("combined_service_correction");
+    let db = scratch.open();
+    shop::build(&db);
+    let till = mb_db::Till::new(OUTLET, TERMINAL);
+    let original = settle_one(&db, "ord_combined_again", 1);
+    let make_open = |id: &str, placement| {
+        mb_db::open_draft(
+            &db,
+            till,
+            mb_core::DraftOrder::new(
+                OrderId::new(id),
+                day(),
+                at(3),
+                placement,
+                StaffId::new("staff_1"),
+            ),
+        )
+        .expect("open serving order")
+    };
+    let source = make_open("ord_combined_source", mb_core::Placement::Parcel);
+    let service = make_open(
+        "ord_combined_again_service",
+        mb_core::Placement::on_table(mb_core::TableId::new("tbl_2")),
+    );
+    let service_token = service.token.clone();
+    let mut open = original.reopen();
+    open.core.placement = mb_core::Placement::on_table(mb_core::TableId::new("tbl_1"));
+    open.core.billing.sources = vec![source.core.id];
+    open.core
+        .cart
+        .set_qty(0, Qty::from_thousandths(2_000))
+        .expect("correct food");
+    let pending = open.core.kitchen.pending(&open.core.cart).expect("pending");
+    open.core
+        .kitchen
+        .mark_printed(&pending)
+        .expect("kitchen told");
+    open.core.billing.service_cart = Some(open.core.cart.clone());
+    open.core.billing.service_kitchen = Some(open.core.kitchen.clone());
+    let delivery = mb_core::kitchen_delivery::Delivery::new(
+        "corrected_kitchen",
+        open.core.id.as_str(),
+        "Kitchen",
+        at(4),
+    );
+    db.transaction(|tx| {
+        Repos::new(tx)
+            .kitchen()
+            .send(OUTLET, &delivery, Some("Main"), None, day())
+    })
+    .expect("new correction ticket");
+    let settle_revision = |open: mb_core::OpenOrder| {
+        let bill = compute_bill(
+            BillInput::new(&open.core.cart, Registration::Regular)
+                .with_order_type(open.core.order_type()),
+        )
+        .expect("bill");
+        let mut payment = Settlement::new();
+        payment
+            .add(Payment::new(PaymentMode::Cash, bill.grand_total).expect("payment"))
+            .expect("paid");
+        mb_db::settle(
+            &db,
+            till,
+            open,
+            bill,
+            payment,
+            at(5),
+            StaffId::new("staff_1"),
+        )
+        .expect("corrected combined bill")
+    };
+    let corrected = settle_revision(open);
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let Some(AnyOrder::Open(serving)) = repos.orders().find(&service.core.id)? else {
+            panic!("serving order closed unexpectedly");
+        };
+        assert_eq!(
+            serving.core.placement, service.core.placement,
+            "retain moved location"
+        );
+        assert_eq!(serving.token, service_token);
+        assert_eq!(serving.core.cart, corrected.core.cart);
+        assert_eq!(serving.core.kitchen, corrected.core.kitchen);
+        assert_eq!(
+            repos
+                .kitchen()
+                .get(&delivery.id)?
+                .expect("ticket")
+                .delivery
+                .order_id,
+            service.core.id.as_str()
+        );
+        let released = serving
+            .cancel("Table released", StaffId::new("staff_1"), at(6))
+            .expect("release");
+        repos
+            .orders()
+            .save(OUTLET, TERMINAL, &AnyOrder::Cancelled(released))?;
+        Ok(())
+    })
+    .expect("serving food and tickets refreshed");
+    settle_revision(corrected.reopen());
+    db.transaction(|tx| {
+        assert!(matches!(
+            Repos::new(tx).orders().find(&service.core.id)?,
+            Some(AnyOrder::Cancelled(_))
+        ));
+        Ok(())
+    })
+    .expect("a released party stays released");
+}
+
+#[test]
 fn the_reason_list_is_the_shops_own() {
     let scratch = Scratch::new("reasons");
     let db = scratch.open();
@@ -386,10 +574,15 @@ fn a_cancelled_order_keeps_its_number_and_is_counted() {
 
     let till = mb_db::Till::new(OUTLET, TERMINAL);
     let issued_before = db
-        .transaction(|tx| mb_db::numbering::last_issued(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill))
+        .transaction(|tx| {
+            mb_db::numbering::last_issued(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill)
+        })
         .expect("last issued");
     let open = mb_db::open_draft(&db, till, draft).expect("opened");
-    assert_eq!(open.bill_number, None, "no bill was made, so no number was spent");
+    assert_eq!(
+        open.bill_number, None,
+        "no bill was made, so no number was spent"
+    );
 
     let cancelled = open
         .cancel("Customer left", StaffId::new("staff_1"), at(5))
@@ -407,15 +600,23 @@ fn a_cancelled_order_keeps_its_number_and_is_counted() {
         .expect("the order");
     match read {
         AnyOrder::Cancelled(o) => {
-            assert_eq!(o.bill_number, None, "a walk-out before any bill leaves no hole");
+            assert_eq!(
+                o.bill_number, None,
+                "a walk-out before any bill leaves no hole"
+            );
             assert_eq!(o.reason, "Customer left");
         }
         other => panic!("expected a cancelled order, got {other:?}"),
     }
     let issued_after = db
-        .transaction(|tx| mb_db::numbering::last_issued(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill))
+        .transaction(|tx| {
+            mb_db::numbering::last_issued(tx, OUTLET, TERMINAL, mb_db::CounterKind::Bill)
+        })
         .expect("last issued");
-    assert_eq!(issued_after, issued_before, "the walk-out spent a bill number");
+    assert_eq!(
+        issued_after, issued_before,
+        "the walk-out spent a bill number"
+    );
 
     // It is not in the open list any more — which is how the table frees.
     let open_now = db

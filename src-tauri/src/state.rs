@@ -1091,9 +1091,41 @@ impl App {
         f(&lock(&self.cart))
     }
 
+    /// Refresh under begin_action; independent local edits survive authoritative updates.
+    pub fn refresh_open_cart(&self) -> UiResult<()> {
+        let selected = self.with_cart(|state| Ok(state.order_id().map(str::to_owned)))?;
+        let Some(id) = selected else { return Ok(()); };
+        let order = crate::flows::find_order(self, &mb_core::OrderId::new(&id))?;
+        let label = order.as_ref().and_then(|o| o.core().table())
+            .and_then(|table| crate::flows::table_name(self, table));
+        self.with_cart_mut(|state| {
+            if state.order_id() != Some(id.as_str()) { return Ok(()); }
+            match order {
+                Some(ref order @ (mb_core::AnyOrder::Open(_) | mb_core::AnyOrder::Draft(_))) => {
+                    *state = state.reconciled(order, label)?;
+                }
+                _ if !state.has_local_changes()? => {
+                    *state = CartState::new_order(state.order_type());
+                }
+                _ => return Err(crate::billing::order_conflict()),
+            }
+            Ok(())
+        })
+    }
+
     /// Change the cart, and get the new view back.
     pub fn with_cart_mut<T>(&self, f: impl FnOnce(&mut CartState) -> UiResult<T>) -> UiResult<T> {
-        f(&mut lock(&self.cart))
+        let mut state = lock(&self.cart);
+        let before = state.account.service_cart.as_ref().map(|_| state.clone());
+        let result = f(&mut state);
+        let Some(before) = before else { return result; };
+        match result {
+            Ok(value) => match state.reconcile_service_from(&before) {
+                Ok(()) => Ok(value),
+                Err(error) => { *state = before; Err(error) }
+            },
+            Err(error) => { *state = before; Err(error) }
+        }
     }
 
     /// One menu row, by id — and only one that is on the menu right now.

@@ -5,6 +5,13 @@ use mb_core::Money;
 use crate::error::AuthError;
 use crate::permission::{Permission, PermissionSet};
 
+/// The built-in Owner is an authority, not an editable permission bundle.
+/// Display names and flags supplied by synced clients never confer ownership.
+#[must_use]
+pub fn is_owner_role(role_id: Option<&str>) -> bool {
+    role_id == Some(RolePreset::Owner.id())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleShape {
     pub id: String,
@@ -18,6 +25,19 @@ pub struct RoleShape {
 }
 
 impl RoleShape {
+    /// Resolve the role against this build's capabilities. Owner always includes
+    /// newly added permissions, even when persisted grants came from an older client.
+    #[must_use]
+    pub fn effective(mut self) -> Self {
+        if is_owner_role(Some(&self.id)) {
+            self.permissions = PermissionSet::everything();
+            self.max_discount_bp = None;
+            self.max_discount = None;
+            self.is_builtin = true;
+        }
+        self
+    }
+
     /// The ceiling as a person reads it — `"10%"`, `"12.5%"`, or `None` for no limit.
     #[must_use]
     pub fn percent_label(&self) -> Option<String> {

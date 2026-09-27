@@ -24,6 +24,12 @@ limit and answers.
 **If a phone does send a money field, it is ignored, not rejected.** Refusing
 would break a whole floor of phones one version behind on a Saturday night.
 
+Orders participating in a combined bill, and issued bills with an unfinished
+counter correction, refuse phone changes with guidance to use the counter.
+This includes bill and settlement requests: a phone must not change or settle
+one source independently of its combined account. An ordinary table open joins
+the unlettered party; it never silently selects another party's sub-table.
+
 ---
 
 ## 1. Finding the counter
@@ -268,6 +274,7 @@ taken as sending now.
 | `open_order` | `order_type`, `table_id?`, `covers?` | `bill.create` |
 | `add_item` | `item_id`, `qty` (decimal string), `note?`, `modifiers[]` | `bill.create` |
 | `set_qty` | `line`, `qty` | `bill.create` |
+| `reduce_qty` | `expected` (the complete line from the last order view), `qty` (remaining quantity), `reason` (**compulsory**) | `order.item.void` — atomically keeps the remaining quantity, cancels only the excess already sent to the kitchen, and records the reason |
 | `void_item` | `line`, `reason` (**compulsory**) | `order.item.void` — a line the kitchen already has comes off too: the ledger forgets it and a stop slip prints, as the counter's own void does |
 | `set_order_note` | `note?` | `bill.create` |
 | `set_covers` | `covers?` | `bill.create` |
@@ -445,10 +452,18 @@ payment and discount are untouched either way.
 
 ### (c) A waiter voids or shrinks a line the kitchen has already made
 
-**Refused, and sent to the counter.** Throwing away cooked food is a decision
-with a cost and it belongs to somebody standing at the till. `set_qty` below
-what was cooked is refused for the same reason, in a sentence with the number
-in it.
+`set_qty` below the quantity already sent to the kitchen is refused. An authorised
+waiter instead uses `reduce_qty`, with a reason and the complete original line as
+`expected`. The remaining quantity must be a whole number of at least 1 and smaller than the original;
+use `void_item` to remove the whole line. A changed line is refused, so an offline
+request cannot reduce another item after line indexes move. Replaying the same
+intent returns its recorded outcome without another cancellation ticket.
+
+The floor advertises `partial_item_cancellation: true` when this operation is
+supported. Phones must not send it to an older counter. The kitchen ledger and bill
+are updated in the same transaction; a cancellation KOT contains only the quantity
+the kitchen must stop preparing. The item-void permission applies even when the
+kitchen has already prepared the dish; staff without it must ask an authorised person.
 
 ### (d) The cashier moves a table while a phone holds the old one
 
@@ -702,3 +717,13 @@ why this is here and not in React or in Kotlin.
   P31–P35 and reuses this command set rather than replacing it.
 * **No statutory payroll** (PF, ESI, TDS). Scope 9.17 is pending the owner's
   decision; see §15 of `FEATURE_SCOPE.md`.
+# Phone floor and offline-order extension — 27 September 2026
+
+The following additive contract applies to the local Android priority round:
+
+- Floor snapshots have `tables_complete: true`, `party_orders: true`, and complete active `tables[]` entries (`id`, `label`, `section`, `seats`, `state`, `order_id`). A phone replaces table membership and metadata atomically with the orders in that snapshot. Absence means the table is no longer on the active floor. Older state-only snapshots omit the marker and retain their existing semantics.
+- Each `orders[]` entry has `seat` (nullable) and a counter-formatted `table_label` including the room and party letter. Several order IDs may share one table ID; clients must preserve and render every one.
+- `{"do":"open_party","table_id":"…","covers":null}` creates a separate party. The counter validates the active table and allocates its letter in the same transaction as the order. It uses the same allocation function as desktop join/split. Retrying the same intent ID returns the original order.
+- Dependent intents may carry `open_intent_id` beside `order_id`. It identifies the successful open intent in the durable event ledger. The counter resolves that exact dependency, or refuses the dependent operation; it never substitutes an unrelated order. Both IDs, when supplied, must agree.
+- New phones preserve each group's opening ID on disk and send one staged new-order group per batch. Older implicit batches remain accepted, but every open attempt resets their current order, including a refused open.
+- Catalogue versions hash the complete item/table payload, including table room and seats. Both catalogue and floor descriptions use the same active-table projection.

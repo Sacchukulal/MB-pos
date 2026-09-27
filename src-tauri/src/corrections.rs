@@ -651,7 +651,8 @@ pub fn bill_detail_on(app: &App, order_id: String) -> UiResult<BillDetailView> {
                     );
                 }
 
-                let edits = edits_of(&repos, &order, &names, &config)?;
+                let pending_edit = repos.orders().find_working(&id)?.as_ref() != Some(&order);
+                let edits = edits_of(&repos, &order, pending_edit, &names, &config)?;
                 for (edit, row) in edits.iter().zip(repos.corrections().reverts_of(&id)?) {
                     note(
                         row.before_settled_at,
@@ -685,6 +686,7 @@ pub fn bill_detail_on(app: &App, order_id: String) -> UiResult<BillDetailView> {
                     change: change.into(),
                     history: history.into_iter().map(|(_, h)| h).collect(),
                     can_approve: who.must(Permission::BillRevertApprove).is_ok()
+                        && !pending_edit
                         && edits.iter().any(|e| e.approved_at.is_none()),
                     edits,
                     row,
@@ -698,6 +700,7 @@ pub fn bill_detail_on(app: &App, order_id: String) -> UiResult<BillDetailView> {
 fn edits_of(
     repos: &mb_db::Repos<'_>,
     order: &AnyOrder,
+    pending_edit: bool,
     names: &Names<'_>,
     config: &crate::settings::ShopConfig,
 ) -> Result<Vec<RevertView>, mb_db::DbError> {
@@ -742,7 +745,7 @@ fn edits_of(
             None => (
                 now_lines.clone(),
                 now_total,
-                !matches!(order, AnyOrder::Open(_) | AnyOrder::Draft(_)),
+                !pending_edit && !matches!(order, AnyOrder::Open(_) | AnyOrder::Draft(_)),
             ),
         };
         let changes = if billed_again {
@@ -891,6 +894,7 @@ pub fn void_bill_on(
     approver_staff_id: Option<String>,
     approver_pin: Option<String>,
 ) -> UiResult<Vec<BillRowView>> {
+    let _one_at_a_time = app.begin_action();
     let who = guard::require(app, Permission::BillVoid)?;
     let at = now();
     let day = today(at);
@@ -898,7 +902,14 @@ pub fn void_bill_on(
 
     let found = app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).orders().find(&id))
+            .transaction(|tx| {
+                let orders = mb_db::Repos::new(tx).orders();
+                let issued = orders.find(&id)?;
+                if orders.find_working(&id)? != issued {
+                    return Err(mb_db::DbError::invariant("Finish this bill's correction before voiding it."));
+                }
+                Ok(issued)
+            })
             .map_err(|e| words::from_db(&e))
     })?;
 
@@ -1077,16 +1088,22 @@ pub fn revert_bill_on(
         return Err(UiError::new("revert.reason", "Give a reason."));
     }
 
-    // The lines come back onto this counter, so it has to be free.
-    let busy = app.with_cart(|state| Ok(!state.cart.is_empty()))?;
-    if busy {
-        return Err(UiError::new(
-            "revert.counter_busy",
-            "There is a bill on the counter. Finish it or clear it first.",
-        ));
+    let working = crate::flows::find_order(app, &id)?;
+    if let Some(AnyOrder::Open(open)) = &working
+        && open.bill_number.is_some() && open.core.billing.billed_into.is_none() {
+            if let Some(refusal) = crate::dayclose::day_refusal_on(app, open.core.business_day,
+                "revert.day_closed", "correct this bill")? { return Err(refusal); }
+            prepare_counter_for_revert(app)?;
+            // Asking to edit the correction already on the counter must not reload its
+            // earlier disk snapshot over local items, discounts, or receipts.
+            if app.with_cart(|state| Ok(state.order_id() == Some(id.as_str())))? {
+                return Ok("The correction is already on the counter.".to_owned());
+            }
+            let label = open.core.table().and_then(|t| crate::flows::table_name(app, t));
+            app.with_cart_mut(|state| { *state = crate::billing::CartState::load(&AnyOrder::Open(open.clone()), label); Ok(()) })?;
+            return Ok("The correction is back on the counter.".to_owned());
     }
-
-    let Some(AnyOrder::Settled(settled)) = crate::flows::find_order(app, &id)? else {
+    let Some(AnyOrder::Settled(settled)) = working else {
         return Err(UiError::new(
             "revert.not_settled",
             "Only a bill that has been paid can be reverted.",
@@ -1102,6 +1119,9 @@ pub fn revert_bill_on(
     }
     let total = settled.bill.grand_total;
     approve_if_needed(app, total, approver_staff_id, approver_pin)?;
+    // Validate the requested bill first. Leaving a persisted order saves its local
+    // work; it does not settle or cancel that customer's bill.
+    prepare_counter_for_revert(app)?;
 
     // The bill as it is, for the register.
     let before_lines: Vec<RevertLine> = settled
@@ -1133,17 +1153,10 @@ pub fn revert_bill_on(
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                // The stock the bill used goes back on the shelf; billing again takes it off.
-                repos.stock().reverse_for_bill(
-                    OUTLET,
-                    &open.core.id,
-                    at,
-                    day,
-                    Some(&who.staff_id),
-                )?;
+                // Keep the issued sale, money and stock intact until the replacement commits.
                 repos
                     .orders()
-                    .save(OUTLET, &till, &AnyOrder::Open(open.clone()))?;
+                    .save_working(OUTLET, &till, &AnyOrder::Open(open.clone()))?;
                 repos.corrections().record_revert(
                     OUTLET,
                     &RevertRow {
@@ -1206,6 +1219,25 @@ pub fn revert_bill_on(
     Ok(format!("Bill {number} is back on the counter."))
 }
 
+fn prepare_counter_for_revert(app: &App) -> UiResult<()> {
+    let unsaved = app.with_cart(|state| {
+        Ok(state.origin.is_none()
+            && (!state.cart.is_empty()
+                || !state.settlement.payments().is_empty()
+                || state.bill_discount.is_some()
+                || state.customer.is_some()
+                || state.note.is_some()
+                || state.covers.is_some()))
+    })?;
+    if unsaved {
+        return Err(UiError::new(
+            "revert.counter_busy",
+            "There is an unsaved bill on the counter. Save or finish it before editing another bill.",
+        ));
+    }
+    crate::flows::park_current(app)
+}
+
 /// A manager signs an edit off.
 pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
     let who = guard::require(app, Permission::BillRevertApprove)?;
@@ -1219,6 +1251,11 @@ pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
                 let row = repos
                     .corrections()
                     .approve_revert(&revert_id, &who.staff_id, at)?;
+                // This check shares the approval transaction, so a refusal rolls the
+                // signature back too. The issued sale remains visible during correction.
+                if repos.orders().find_working(&row.order_id)? != repos.orders().find(&row.order_id)? {
+                    return Err(mb_db::DbError::invariant("Complete the corrected bill before approving its changes."));
+                }
                 let number = repos
                     .corrections()
                     .bill_number_of(&row.order_id)?
@@ -1251,6 +1288,7 @@ pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
 
 /// The customer walked out.
 pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<()> {
+    let _one_at_a_time = app.begin_action();
     let who = guard::require(app, Permission::OrderCancel)?;
     let at = now();
     let day = today(at);
@@ -1268,6 +1306,13 @@ pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<
             "Only an order that is still open can be cancelled.",
         ));
     };
+
+    if open.core.billing.billed_into.is_some() || !open.core.billing.sources.is_empty()
+        || !open.core.billing.settlement.is_empty() {
+        return Err(UiError::new("cancel.has_money", "This order belongs to a bill with payments or combined tables. Finish that bill before releasing its tables."));
+    }
+    if let Some(refusal) = crate::dayclose::day_refusal_on(app, open.core.business_day,
+        "cancel.day_closed", "cancel this order")? { return Err(refusal); }
 
     // The kitchen first — while the order still says what it was told.
     let told: Vec<(mb_core::LineIdentity, mb_core::Qty)> = open.core.kitchen.told().to_vec();
@@ -1364,10 +1409,78 @@ fn print_cancellation(
 // Void one line.
 
 /// Take one line off the order in the cart.
+#[cfg(test)]
 pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::billing::CartView> {
+    change_line_on(app, index, None, reason)
+}
+
+#[cfg(test)]
+pub fn change_line_on(app: &App, index: usize, quantity: Option<mb_core::Qty>, reason: String) -> UiResult<crate::billing::CartView> {
+    change_line_checked_on(app, index, quantity, reason, None)
+}
+
+pub fn change_line_checked_on(
+    app: &App,
+    index: usize,
+    quantity: Option<mb_core::Qty>,
+    reason: String,
+    expected_line: Option<String>,
+) -> UiResult<crate::billing::CartView> {
     // One counter action at a time — see `App::begin_action`.
     let _one_at_a_time = app.begin_action();
-    let who = guard::require(app, Permission::OrderItemVoid)?;
+    let mut proposed = app.with_cart(|state| Ok(state.clone()))?;
+    let selected_order = proposed.order_id().map(str::to_owned);
+    let old_line = proposed.cart.lines().get(index).cloned().ok_or_else(||
+        UiError::new(if expected_line.is_some() { "order.changed" } else { "cart.line" },
+            "That item is no longer on this order. Check the refreshed order and choose the item again."))?;
+    if expected_line.as_ref().is_some_and(|expected|
+        expected != &crate::billing::line_edit_token(&proposed, &old_line)) {
+        return Err(UiError::new(
+            "order.changed",
+            "That item changed since it was shown. Check the refreshed order and choose the item again.",
+        ));
+    }
+    if let Some(qty) = quantity {
+        crate::billing::validate_reduced_quantity(old_line.qty, qty)?;
+    }
+    match quantity {
+        Some(qty) => proposed.cart.set_qty(index, qty).map(|_| ()),
+        None => proposed.cart.remove(index).map(|_| ()),
+    }.map_err(|e| UiError::new("cart.qty", e.to_string()))?;
+    let pending_cancel = proposed.kitchen.over_told(&proposed.cart)
+        .map_err(|e| UiError::new("void_line.kitchen", e.to_string()))?;
+    let reduces_sent = !pending_cancel.is_empty();
+    guard::require(app, if reduces_sent { Permission::OrderItemVoid } else { Permission::BillCreate })?;
+    if reduces_sent && reason.trim().is_empty() {
+        return Err(UiError::new("cart.reason_required", "Give a reason for reducing food already sent to the kitchen."));
+    }
+    // Check the saved baseline before changing a bill or sending a kitchen cancellation.
+    crate::flows::park_current(app)?;
+    let rollback = app.with_cart(|state| Ok(state.clone()))?;
+    // Reconciliation may have added, removed, or reordered lines since this screen
+    // selected an index. Change only the exact unchanged line the person selected.
+    let mut matches = rollback.cart.lines().iter().enumerate()
+        .filter(|(_, line)| *line == &old_line)
+        .map(|(position, _)| position);
+    let index = matches.next().filter(|_| matches.next().is_none())
+        .filter(|_| rollback.order_id() == selected_order.as_deref())
+        .ok_or_else(|| UiError::new(
+            "order.changed",
+            "That item changed on another device. Check the refreshed order and choose the item again.",
+        ))?;
+    // Start from the refreshed order, including unrelated phone additions, saved
+    // payments, and the kitchen ledger; an old proposal would overwrite them.
+    proposed = rollback.clone();
+    match quantity {
+        Some(qty) => proposed.cart.set_qty(index, qty).map(|_| ()),
+        None => proposed.cart.remove(index).map(|_| ()),
+    }.map_err(|e| UiError::new("cart.qty", e.to_string()))?;
+    let reduces_sent = !proposed.kitchen.over_told(&proposed.cart)
+        .map_err(|e| UiError::new("void_line.kitchen", e.to_string()))?.is_empty();
+    let who = guard::require(app, if reduces_sent { Permission::OrderItemVoid } else { Permission::BillCreate })?;
+    if reduces_sent && reason.trim().is_empty() {
+        return Err(UiError::new("cart.reason_required", "Give a reason for reducing food already sent to the kitchen."));
+    }
     let at = now();
     let day = today(at);
 
@@ -1386,10 +1499,7 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
     // leaving it.
     let (cancel, slip, core) = app.with_cart_mut(|state| {
         let before = state.cart.clone();
-        state.cart.remove(index).map_err(|e| {
-            UiError::new("void_line.refused", "That line could not be removed.")
-                .with_detail(e.to_string())
-        })?;
+        *state = proposed;
         let cancel = state.kitchen.over_told(&state.cart).map_err(|e| {
             UiError::new(
                 "void_line.kitchen",
@@ -1407,6 +1517,11 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
     // The kitchen's slip does not need a table to exist yet, so a dine-in cart with no table is
     // not refused here — there is no paper without a ledger, and no ledger without a park.
     let core = core.ok();
+
+    if let Err(error) = crate::flows::park_current(app) {
+        app.with_cart_mut(|state| { *state = rollback; Ok(()) })?;
+        return Err(error);
+    }
 
     // The paper, before the ledger.
     if !cancel.is_empty() {
@@ -1441,7 +1556,8 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
         })?;
     }
 
-    app.record(
+    if quantity.is_none_or(|new_qty| new_qty < old_line.qty) {
+      app.record(
         &AuditEntry::new(
             at,
             day,
@@ -1449,14 +1565,16 @@ pub fn void_line_on(app: &App, index: usize, reason: String) -> UiResult<crate::
             action::ITEM_VOIDED,
             "order",
         )
-        .about(order_id.unwrap_or_else(|| "unsaved".to_owned()))
+        .about(order_id.clone().unwrap_or_else(|| "unsaved".to_owned()))
         .changed(
             serde_json::json!({ "item": name, "qty": qty.to_string() }),
-            serde_json::json!({ "removed": true, "reason": reason }),
+            serde_json::json!({ "removed": quantity.is_none_or(|q| !q.is_positive()), "qty": quantity.map(|q| q.to_string()), "reason": reason }),
         ),
-    );
+      );
+    }
 
-    log_info!("{name} voided off the bill by {} — {reason}", who.name);
+    if order_id.is_some() { crate::flows::park_open_order(app)?; }
+    log_info!("{name} changed on the bill by {} — {reason}", who.name);
     app.with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))
 }
 
@@ -1799,8 +1917,9 @@ pub fn void_line(
     app: tauri::State<'_, App>,
     index: usize,
     reason: String,
+    expected_line: Option<String>,
 ) -> UiResult<crate::billing::CartView> {
-    void_line_on(&app, index, reason)
+    change_line_checked_on(&app, index, None, reason, expected_line)
 }
 
 #[tauri::command]

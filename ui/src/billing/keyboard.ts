@@ -445,6 +445,7 @@ export const SHORTCUTS: readonly {
   { group: 'The order', keys: 'Enter', what: 'On an order from Processing orders: complete the bill' },
   { group: 'The order', keys: 'table number, Enter', what: "Open that table's order — typed items go with you" },
   { group: 'The order', keys: 'Enter, with no table', what: 'A dine-in order asks for its table number in a box; type it and the kitchen ticket goes' },
+  { group: 'The order', keys: '\u2190 / \u2192, Enter', what: 'After choosing an occupied table, add to its order or choose a separate subtable' },
   { group: 'The order', keys: '← →', what: 'Change the order type (unless the shop locks it)' },
   { group: 'The order', keys: 'Esc', what: 'New order, from anywhere' },
   { group: 'Processing orders', keys: '↓', what: 'From an empty box, into the processing orders' },

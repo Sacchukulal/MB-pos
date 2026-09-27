@@ -17,6 +17,7 @@ import {
   Icon,
   Input,
   MoneyInput,
+  Modal,
   onlyAmount,
   Page,
   Panel,
@@ -27,7 +28,7 @@ import {
   useReport,
   useToast,
 } from '../kit';
-import { call, inApp, isUiError, subscribe } from '../ipc/call';
+import { call, inApp, isUiError } from '../ipc/call';
 import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { CartView } from '../ipc/generated/CartView';
 import { useMay } from '../shell/permissions';
@@ -45,6 +46,8 @@ import { MergeBill } from './MergeBill';
 import { SplitBill } from './SplitBill';
 import { TableGrid } from './TableGrid';
 import { useArrivals } from './arrivals';
+import { useFloorUpdates } from './floorUpdates';
+import { OrderConflict } from './OrderConflict';
 import { Totals } from './Totals';
 import { Before } from '../preview/Before';
 import { keep, remember } from '../remember';
@@ -64,11 +67,18 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const toast = useToast();
   /** What this person may do — a button they may not press is not drawn. */
   const may = useMay();
-  const [cart, setCart] = useState<CartView | null>(null);
+  const [cart, storeCart] = useState<CartView | null>(null);
+  const cartRevision = useRef(0);
+  const setCart = useCallback((fresh: CartView) => {
+    // A completed edit or table switch invalidates older background cart reads.
+    cartRevision.current += 1;
+    storeCart(fresh);
+  }, []);
   /** A shop with no kitchen ticket: the ticket command parks the order and prints nothing. */
   const kitchenOff = cart?.kitchenTicketOff ?? false;
   /** The floor as Rust last gave it — `null` until the first read, so a first read is not an arrival. */
   const [floor, setFloor] = useState<readonly TableView[] | null>(null);
+  const floorRead = useRef(0);
   const tables = floor ?? NO_TABLES;
   /** The orders that landed while this screen was open: their cards beat for a moment. */
   const arrived = useArrivals(floor, { beat: cart?.arrivalBeat ?? true, sound: cart?.arrivalBeep ?? false });
@@ -79,9 +89,11 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   // See it before it prints.
   const [preview, setPreview] = useState(false);
   /** The line somebody is voiding, once the kitchen has been told. */
-  const [voidingLine, setVoidingLine] = useState<{ index: number; name: string } | null>(null);
+  const [voidingLine, setVoidingLine] = useState<{ index: number; name: string; expectedLine: string | undefined } | null>(null);
+  const [reducingLine, setReducingLine] = useState<{ index: number; qty: string; expectedLine: string | undefined } | null>(null);
+  const [returning, setReturning] = useState(false);
   /** The line whose quantity is being typed, and what has been typed so far. */
-  const [typingQty, setTypingQty] = useState<{ index: number; text: string } | null>(null);
+  const [typingQty, setTypingQty] = useState<{ index: number; text: string; originalQty: string; expectedLine: string | undefined } | null>(null);
   /** The reason for cancelling a parked order. */
   const [cancelReason, setCancelReason] = useState(false);
   /** Some of the food goes onto a second bill. */
@@ -157,7 +169,12 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   // One reporter for the whole product — and it obeys the tone the engine set, so "the kitchen
   // already has everything on this bill" no longer arrives in the same red as a printer that
   // has died.
-  const report = useReport();
+  const reportError = useReport();
+  const [orderConflict, setOrderConflict] = useState(false);
+  const report = useCallback((cause: unknown) => {
+    if (isUiError(cause) && cause.code === 'order.changed') setOrderConflict(true);
+    else reportError(cause);
+  }, [reportError]);
   // One action at a time on this screen, matching the counter in Rust.
   const [act, acting] = useAction();
   /**
@@ -169,11 +186,13 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   // Silent on failure, and deliberately.
   const refreshFloor = useCallback(async () => {
     if (!inApp()) return;
+    const read = ++floorRead.current;
     try {
-      setFloor(await call('open_orders'));
+      const fresh = await call('open_orders');
+      if (read === floorRead.current) setFloor(fresh);
     } catch {
       // A floor that will not load is visible as an empty floor.
-      setFloor([]);
+      if (read === floorRead.current) setFloor([]);
     }
   }, []);
 
@@ -194,26 +213,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       });
   }, [report]);
 
-  // The floor changed the order this cart has open.
-  useEffect(() => {
-    if (!inApp()) return undefined;
-    let stop: (() => void) | undefined;
-    subscribe((message) => {
-      if (message.kind === 'floorChanged') {
-        call('current_cart')
-          .then(setCart)
-          .catch(() => undefined);
-      }
-      // The data says an order, a table or a payment changed — whoever changed it.
-      if (message.kind === 'floorChanged' || message.kind === 'floor') void refreshFloor();
-    })
-      .then((off) => {
-        stop = off;
-      })
-      .catch(() => undefined);
-    return () => stop?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useFloorUpdates(setCart, refreshFloor, cartRevision);
 
   // The tick is for the timers only: a timer lives on the ORDER, so the screen re-reads rather
   // than counting. Changes arrive by push, above.
@@ -264,9 +264,9 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   );
 
   const removeLine = useCallback(
-    async (index: number) => {
+    async (index: number, expectedLine: string | undefined) => {
       try {
-        setCart(await call('cart_remove', { index }));
+        setCart(await call('cart_remove', { index, expectedLine }));
       } catch (cause) {
         report(cause);
       }
@@ -276,11 +276,12 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
   /** Change a line's quantity — the thing the cart could not do. */
   const setQty = useCallback(
-    async (index: number, qty: string) => {
+    async (index: number, qty: string, expectedLine: string | undefined) => {
       try {
-        setCart(await call('cart_set_qty', { index, qty }));
+        setCart(await call('cart_set_qty', { index, qty, expectedLine }));
       } catch (cause) {
-        report(cause);
+        if (isUiError(cause) && cause.code === 'cart.reason_required') setReducingLine({ index, qty, expectedLine });
+        else report(cause);
       }
     },
     [report],
@@ -291,10 +292,9 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
     const typed = typingQty;
     setTypingQty(null);
     if (!typed) return;
-    const was = cart?.lines.find((l) => l.index === typed.index)?.qty;
-    if (typed.text.trim() === '' || typed.text.trim() === was) return;
-    await setQty(typed.index, typed.text.trim());
-  }, [cart?.lines, setQty, typingQty]);
+    if (typed.text.trim() === '' || typed.text.trim() === typed.originalQty) return;
+    await setQty(typed.index, typed.text.trim(), typed.expectedLine);
+  }, [setQty, typingQty]);
 
   /** Once the kitchen has been told, taking a line off is a void, which is its own permission. */
   const mayVoidLine = may('order.item.void');
@@ -303,16 +303,16 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
   /** ✕ — and what ✕ means changes the moment the kitchen has been told. */
   const takeOffTheBill = useCallback(
-    async (line: { index: number; name: string }) => {
+    async (line: CartLineView) => {
       if (cart?.kitchenTold) {
         if (!mayVoidLine) {
           toast.show('warn', 'The kitchen has this already. Ask somebody who may void an item.');
           return;
         }
-        setVoidingLine({ index: line.index, name: line.name });
+        setVoidingLine({ index: line.index, name: line.name, expectedLine: line.editToken });
         return;
       }
-      await removeLine(line.index);
+      await removeLine(line.index, line.editToken);
     },
     [cart?.kitchenTold, mayVoidLine, removeLine, toast],
   );
@@ -447,7 +447,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       await refreshFloor();
       toast.show('ok', `Bill ${number} settled.`);
     } catch (cause) {
-      if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable('bill');
+      if (isUiError(cause) && cause.code === 'bill.return_due') setReturning(true);
+      else if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable('bill');
       else report(cause);
     }
   }, [freshMoney, payMode, refreshFloor, report, toast]);
@@ -519,16 +520,25 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
    * without a second Enter.
    */
   const tableChosen = useCallback(
-    (table: TableView) => {
+    (table: TableView, seat?: string) => {
       const waiting = pickingTable;
-      setPickingTable(null);
       act(async () => {
-        await openTableById(table.id);
+        try {
+          setCart(seat === undefined
+            ? await call('open_table', { tableId: table.id })
+            : await call('join_table', { tableId: table.id, seat }));
+        } catch (cause) {
+          report(cause);
+          await refreshFloor();
+          return;
+        }
+        setPickingTable(null);
+        await refreshFloor();
         if (waiting === 'bill') await completeBill();
         else await printKitchen();
       });
     },
-    [act, completeBill, openTableById, pickingTable, printKitchen],
+    [act, completeBill, pickingTable, printKitchen, refreshFloor, report, setCart],
   );
 
   /** Carry the bill to the table. */
@@ -538,12 +548,17 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       // opinion about whether to print.
       if (!table.orderId) return;
       try {
+        if (table.billedInto) {
+          await call('release_serving_table', { orderId: table.orderId });
+          await refreshFloor();
+          return;
+        }
         toast.show('ok', await call('print_open_bill', { orderId: table.orderId }));
       } catch (cause) {
         report(cause);
       }
     },
-    [report, toast],
+    [report, toast, refreshFloor],
   );
 
   // Performing what the reducer asked for.
@@ -789,6 +804,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           {pickingTable ? (
             <TableBox
               tables={tables}
+              busy={acting}
               onClose={() => setPickingTable(null)}
               onOpen={tableChosen}
             />
@@ -927,21 +943,12 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             <div className="mb-row--end">
               <Button
                 size="sm"
-                variant="quiet"
-                onClick={() => {
-                  call('dismiss_the_floors_items').then(setCart).catch(report);
-                }}
-              >
-                Not now
-              </Button>
-              <Button
-                size="sm"
                 variant="primary"
                 onClick={() => {
                   call('take_the_floors_items').then(setCart).catch(report);
                 }}
               >
-                Add them to this bill
+                Got it
               </Button>
             </div>
           </div>
@@ -1022,10 +1029,11 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                       autoFocus
                       inputMode="decimal"
                       aria-label={`Quantity of ${line.name}`}
+                      title="When reducing, enter a whole quantity of 1 or more. Use the remove button to take the item off."
                       value={typingQty.text}
                       onChange={(e) =>
                         setTypingQty({
-                          index: line.index,
+                          ...typingQty,
                           // Digits and one dot.
                           text: onlyAmount(e.target.value),
                         })
@@ -1041,7 +1049,12 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                       size="sm"
                       className="mb-cartline__qty"
                       aria-label={`Change the quantity of ${line.name}`}
-                      onClick={() => setTypingQty({ index: line.index, text: line.qty })}
+                      onClick={(event) => {
+                        // This tap opens a text editor; the screen's click-to-search handler
+                        // must not immediately steal its focus and commit it on blur.
+                        event.stopPropagation();
+                        setTypingQty({ index: line.index, text: line.qty, originalQty: line.qty, expectedLine: line.editToken });
+                      }}
                     >
                       {line.qty}
                     </Button>
@@ -1063,7 +1076,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                           }
                           // "1.234 kg" — the number is the quantity.
                           const [amount] = answer.says.split(' ');
-                          if (amount) setTypingQty({ index: line.index, text: amount });
+                          if (amount) setTypingQty((typed) => typed?.index === line.index ? { ...typed, text: amount } : typed);
                         })
                         .catch(report);
                     }}
@@ -1268,6 +1281,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           line={discounting.line}
           onClose={() => setDiscounting(null)}
           onChanged={setCart}
+          onFailed={report}
         />
       ) : null}
 
@@ -1307,6 +1321,28 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
         />
       ) : null}
 
+      {returning && cart ? (
+        <ReturnAmounts cart={cart} busy={acting} onClose={() => setReturning(false)}
+          onConfirm={(refundAmounts) => act(async () => {
+                try {
+                  await call('complete_bill', { mode: payMode, refundAmounts });
+                  setReturning(false);
+                  setCart(await call('current_cart'));
+                  freshMoney();
+                  await refreshFloor();
+                  toast.show('ok', 'The corrected bill and return are recorded.');
+                } catch (cause) { report(cause); }
+              })} />
+      ) : null}
+
+      {reducingLine ? (
+        <ReasonDialog kind="item_void" what="Reduce the quantity sent to the kitchen" confirmLabel="Change quantity"
+          onCancel={() => setReducingLine(null)} onConfirm={(reason) => {
+            const change = reducingLine;
+            call('cart_set_qty', { ...change, reason }).then((fresh) => { setCart(fresh); setReducingLine(null); }).catch(report);
+          }} />
+      ) : null}
+
       {/* Taking a line off a bill the kitchen is already cooking. */}
       {voidingLine ? (
         <ReasonDialog
@@ -1317,7 +1353,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           onConfirm={(reason) => {
             const line = voidingLine;
             setVoidingLine(null);
-            call('void_line', { index: line.index, reason })
+            call('void_line', { index: line.index, reason, expectedLine: line.expectedLine })
               .then((fresh) => {
                 setCart(fresh);
                 toast.show('ok', `${line.name} is off the bill.`);
@@ -1345,12 +1381,53 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           onFailed={report}
         />
       ) : null}
+      {orderConflict ? (
+        <OrderConflict onClose={() => setOrderConflict(false)} onFailed={reportError}
+          onReloaded={(fresh) => {
+            setCart(fresh);
+            setOrderConflict(false);
+            setReturning(false);
+            setReducingLine(null);
+            setVoidingLine(null);
+            setOnAccount(false);
+            setDiscounting(null);
+            setSplitting(false);
+            setMerging(false);
+            freshMoney();
+            void refreshFloor();
+          }} />
+      ) : null}
     </Page>
   );
 }
 
 /** The ways that are not cash, in the order a counter meets them. */
 const OTHER_MODES = ['Card', 'UPI'] as const;
+
+/** Collect the actual returns; Rust validates the total and each original payment mode. */
+export function ReturnAmounts({ cart, busy, onClose, onConfirm }: {
+  cart: Pick<CartView, 'change' | 'payments'>;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (amounts: [string, string][]) => void;
+}) {
+  const modes = [...new Set(cart.payments.map((payment) => payment.mode))];
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const confirm = () => {
+    if (!busy) onConfirm(modes.map((mode) => [mode, amounts[mode] ?? '']));
+  };
+  return (
+    <Modal open title={`Return ${cart.change.text}`} onClose={() => { if (!busy) onClose(); }}
+      onEnter={confirm}
+      note="Enter the amount returned through each original payment mode, then confirm."
+      actions={<Button variant="primary" disabled={busy} onClick={confirm}>Confirm return</Button>}>
+      {modes.map((mode) => (
+        <MoneyInput key={mode} label={`Return by ${mode}`} value={amounts[mode] ?? ''}
+          disabled={busy} onChange={(typed) => setAmounts((before) => ({ ...before, [mode]: typed }))} />
+      ))}
+    </Modal>
+  );
+}
 
 /**
  * What the row says beside the cash box, and in which colour. Rust worked the figures out;

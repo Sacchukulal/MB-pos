@@ -1,6 +1,6 @@
 /** Merge bill: another open order's food joins the bill on the counter. */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Button, EmptyState, Hint, Modal, Notice, Numeric } from '../kit';
 import { call } from '../ipc/call';
@@ -12,7 +12,7 @@ export function mergeCandidates(
   orders: readonly TableView[],
   orderId: string | null,
 ): TableView[] {
-  return orders.filter((t) => t.orderId !== null && t.orderId !== orderId);
+  return orders.filter((t) => t.orderId !== null && t.orderId !== orderId && !t.billedInto);
 }
 
 export function MergeBill({
@@ -31,7 +31,9 @@ export function MergeBill({
   onFailed: (cause: unknown) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const others = mergeCandidates(orders, cart.orderId);
+  const [available, setAvailable] = useState(orders);
+  useEffect(() => { call('combine_candidates').then(setAvailable).catch(onFailed); }, [onFailed]);
+  const others = mergeCandidates(available, cart.orderId);
 
   return (
     <Modal open title="Merge bill" onClose={onClose}>
@@ -45,14 +47,14 @@ export function MergeBill({
       ) : (
         <>
           <Hint>
-            Pick the order that joins this bill. Its food comes across, it is closed and
-            marked as merged, and the kitchen is not told again.
+            Choose an order or paid bill to include. Payments stay with the combined bill;
+            each table stays occupied until its guests leave.
           </Hint>
           <ul className="mb-merge__list" aria-label="Orders that can join this bill">
             {others.map((other) => (
               <li key={other.orderId} className="mb-merge__row">
                 <span className="mb-merge__name">
-                  {other.section === null ? other.label : `Table ${other.label}`}
+                  <span>{other.section === null ? other.label : `Table ${other.label}`}</span>
                   {other.token ? (
                     <span className="mb-merge__no"> · #{other.token}</span>
                   ) : other.billNumber ? (

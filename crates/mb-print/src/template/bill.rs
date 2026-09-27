@@ -262,6 +262,15 @@ fn meta(doc: &mut Document, metrics: &Metrics, ctx: &BillContext<'_>) -> Result<
     // first time the paper is printed or the money is taken, and a placeholder would be a
     // number the paper will not have.
     let number = ctx.order.bill_number().map(|n| n.formatted.as_str());
+    if core.billing.revision > 0 {
+        doc.text(format!("REVISED - version {}", core.billing.revision + 1), Style::BOLD, Align::Centre);
+    }
+    for source in &core.billing.source_labels {
+        doc.text(format!("Includes {source}"), s.sections.meta, Align::Centre);
+    }
+    for (mode, amount) in core.billing.refund.iter().chain(&core.billing.refunds) {
+        doc.text(format!("Returned {} by {mode}", amount.to_plain_string()), Style::BOLD, Align::Centre);
+    }
 
     if let Some(title) = title_of(ctx) {
         doc.text(

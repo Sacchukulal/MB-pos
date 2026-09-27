@@ -15,6 +15,8 @@ export interface ReasonDialogProps {
   kind: ReasonKind;
   /** "Void bill 0042 — ₹450.00". */
   what: string;
+  /** Longer context belongs in the body so the dialog title stays readable. */
+  description?: string;
   /** The button, in the same words. */
   confirmLabel: string;
   /** True when this action needs a manager's PIN as well. */
@@ -27,6 +29,7 @@ export interface ReasonDialogProps {
 export function ReasonDialog({
   kind,
   what,
+  description,
   confirmLabel,
   needsApproval,
   approvers = [],
@@ -72,6 +75,7 @@ export function ReasonDialog({
 
   return (
     <Modal open title={what} onClose={onCancel}>
+      {description ? <p className="mb-muted">{description}</p> : null}
       <div className="mb-reasons">
         {choices.map((choice) => (
           <Radio

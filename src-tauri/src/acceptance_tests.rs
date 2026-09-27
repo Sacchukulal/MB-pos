@@ -787,6 +787,7 @@ fn a_settled_order_is_never_given_a_second_bill_number() {
     app.with_cart_mut(|state| {
         state.set_order_type(mb_core::OrderType::Parcel);
         state.origin = Some(crate::billing::Origin {
+            baseline: None,
             id: mb_core::OrderId::new(settled_id),
             created_at: crate::flows::now(),
             business_day: crate::flows::today(crate::flows::now()),
