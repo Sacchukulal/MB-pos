@@ -408,6 +408,9 @@ pub struct TableView {
     pub total: Option<MoneyView>,
     /// How long it has been sitting.
     pub minutes: Option<u32>,
+    /// The order's creation time in Unix milliseconds; `None` for a free table.
+    #[ts(type = "number | null")]
+    pub created_at: Option<i64>,
     /// Whether the kitchen has been told.
     pub kitchen_told: bool,
     /// Minutes since the last kitchen ticket went out — scope 14.2's second timer, and the one
@@ -832,6 +835,7 @@ fn free_tile(
         selected,
         total: None,
         minutes: None,
+        created_at: None,
         kitchen_told: false,
         kitchen_minutes: None,
         bill_asked: false,
@@ -888,6 +892,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         selected,
         total: running_total(order, config),
         minutes: Some(crate::ipc::count(minutes)),
+        created_at: Some(core.created_at.millis()),
         // The delta ledger answers "is there anything the kitchen has not been told?".
         kitchen_told: core
             .kitchen

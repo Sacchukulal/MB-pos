@@ -7,7 +7,7 @@ import type { TableView } from '../ipc/generated/TableView';
 import { formatMinutes } from './TableGrid';
 import { hasArrived } from './arrivals';
 
-/** The orders being cooked or served — sent to the kitchen and not yet billed, oldest first. */
+/** The orders being cooked or served — sent to the kitchen and not yet billed, newest first. */
 export function processingOrders(
   tables: readonly TableView[],
   /** A shop with no kitchen ticket: every open order counts. */
@@ -15,7 +15,9 @@ export function processingOrders(
 ): TableView[] {
   return tables
     .filter((t) => t.orderId !== null && (kitchenOff || t.kitchenTold))
-    .sort((a, b) => (b.minutes ?? -1) - (a.minutes ?? -1));
+    .sort((a, b) =>
+      (b.createdAt ?? -1) - (a.createdAt ?? -1) || a.id.localeCompare(b.id),
+    );
 }
 
 /** The panel's head: always in the top row, with the count, whether the list is open or not. */

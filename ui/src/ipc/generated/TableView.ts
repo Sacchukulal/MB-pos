@@ -25,6 +25,10 @@ total: MoneyView | null,
  */
 minutes: number | null, 
 /**
+ * The order's creation time in Unix milliseconds; `None` for a free table.
+ */
+createdAt: number | null, 
+/**
  * Whether the kitchen has been told.
  */
 kitchenTold: boolean, 

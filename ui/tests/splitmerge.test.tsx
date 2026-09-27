@@ -32,6 +32,7 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
     state: 'occupied',
     total: null,
     minutes: null,
+    createdAt: null,
     kitchenTold: true,
     kitchenMinutes: null,
     billAsked: false,

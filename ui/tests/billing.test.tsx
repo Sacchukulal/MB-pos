@@ -27,6 +27,7 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
     state: 'free',
     total: null,
     minutes: null,
+    createdAt: null,
     kitchenTold: true,
     kitchenMinutes: null,
     billAsked: false,
@@ -534,22 +535,39 @@ describe('the processing orders (2026-08-27)', () => {
       total: money(16_800, '168.00'),
       billNumber: 'B-104',
       minutes: 12,
+      createdAt: 1_800_000_000_000,
       ...over,
     });
 
-  it('lists only what the kitchen has, oldest first', () => {
+  it('lists only what the kitchen has, newest first', () => {
     const shown = processingOrders(
       [
         table({ id: '1', label: '1' }),
-        cooking({ id: '2', label: '2', minutes: 5 }),
-        cooking({ id: '3', label: '3', minutes: 40, state: 'late' }),
+        cooking({ id: '2', label: '2', minutes: 5, createdAt: 1_800_000_300_000 }),
+        cooking({ id: '3', label: '3', minutes: 40, createdAt: 1_799_998_200_000, state: 'late' }),
         // Open, but the kitchen has not been told: the tile's amber dot, not this list.
         cooking({ id: '4', label: '4', kitchenTold: false }),
-        cooking({ id: 'p', label: 'Parcel', section: null, minutes: 20 }),
+        cooking({ id: 'p', label: 'Parcel', section: null, minutes: 20, createdAt: 1_799_999_400_000 }),
       ],
       false,
     );
-    expect(shown.map((t) => t.label)).toEqual(['3', 'Parcel', '2']);
+    expect(shown.map((t) => t.label)).toEqual(['2', 'Parcel', '3']);
+  });
+
+  it('puts a new order first even in the same minute, without rearranging the floor', () => {
+    const older = cooking({ id: '1', label: '1', minutes: 0, kitchenMinutes: 0 });
+    const newer = cooking({ id: '9', label: '9', minutes: 0, createdAt: older.createdAt! + 1 });
+    const floor = [older, newer];
+    expect(processingOrders(floor, false).map((t) => t.id)).toEqual(['9', '1']);
+    expect(floor.map((t) => t.id)).toEqual(['1', '9']);
+    // Another KOT on the older order changes its kitchen timer, not its creation order.
+    expect(processingOrders([{ ...older, kitchenMinutes: 0 }, newer], false)[0]).toBe(newer);
+  });
+
+  it('keeps a deterministic order when creation milliseconds match', () => {
+    const a = cooking({ id: 'a', label: '1' });
+    const b = cooking({ id: 'b', label: '2' });
+    expect(processingOrders([b, a], false)).toEqual(processingOrders([a, b], false));
   });
 
   it('counts every open order for a shop with no kitchen ticket', () => {

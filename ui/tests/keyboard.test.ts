@@ -17,6 +17,7 @@ import {
 } from '../src/billing/keyboard';
 import type { MenuItemView } from '../src/ipc/generated/MenuItemView';
 import type { TableView } from '../src/ipc/generated/TableView';
+import { processingOrders } from '../src/billing/Processing';
 
 function item(id: string, name: string): MenuItemView {
   return {
@@ -38,6 +39,7 @@ function table(label: string, busy = false): TableView {
     state: busy ? 'occupied' : 'free',
     total: busy ? { paise: 64_600n, text: '646.00' } : null,
     minutes: busy ? 12 : null,
+    createdAt: busy ? 1_800_000_000_000 : null,
     kitchenTold: true,
     token: null,
     billNumber: null,
@@ -193,14 +195,20 @@ describe('Enter on an empty box (step 3)', () => {
     expect(commands).toEqual([{ do: 'complete-bill' }]);
   });
 
-  it('opens the first running order when the cart is empty', () => {
+  it('opens the top processing order, even when the floor starts with another order', () => {
     const [, commands] = run(
       initial(),
       cart(false),
-      floor(table('1'), table('6', true)),
+      floor(table('1', true), table('6', true)),
+      cooking(table('6', true), table('1', true)),
       press('Enter'),
     );
     expect(commands).toEqual([{ do: 'open-table', tableId: 'tbl_6' }]);
+  });
+
+  it('does not select a floor order that is absent from processing', () => {
+    const [, commands] = run(initial(), floor(table('1', true)), press('Enter'));
+    expect(commands).toEqual([]);
   });
 
   it('does nothing at all when there is nothing to do', () => {
@@ -413,12 +421,31 @@ describe('the processing orders by keyboard (step 4)', () => {
     expect(state.mode).toEqual({ kind: 'processing', index: 1 });
   });
 
-  it('a highlight past the end of a shorter list moves onto its last row', () => {
+  it('follows the highlighted order when the row above it leaves', () => {
     // The row above was billed and left the list; the arrows are still in the list.
     let [state] = run(initial(), cooking(...two), press('ArrowDown'), press('ArrowDown'));
     expect(state.mode).toEqual({ kind: 'processing', index: 1 });
     [state] = run(state, cooking(two[1] as TableView));
     expect(state.mode).toEqual({ kind: 'processing', index: 0 });
+  });
+
+  it('keeps the same order highlighted and billed when a newer order arrives above it', () => {
+    const selected = { ...two[0]!, selected: true };
+    let [state] = run(initial(), cooking(selected), cart(true), press('ArrowDown'));
+    let commands: Command[];
+    [state, commands] = run(state, cooking(table('9', true), selected));
+    expect(state.mode).toEqual({ kind: 'processing', index: 1 });
+    expect(commands).toEqual([]);
+    [, commands] = run(state, press('Enter'));
+    expect(commands).toEqual([{ do: 'complete-bill' }]);
+  });
+
+  it('returns to the box when the highlighted order leaves, even if its table is reused', () => {
+    const [state] = run(
+      initial(), cooking(...two), press('ArrowDown'),
+      cooking({ ...two[0]!, orderId: 'replacement' }, two[1]!),
+    );
+    expect(state.mode.kind).toBe('searching');
   });
 
   it('a parcel in the list is its own order', () => {
@@ -482,6 +509,26 @@ describe('the help sheet', () => {
 });
 
 describe('the whole counter flow, by keyboard alone', () => {
+  it.each(['Dine in', 'Parcel'])('KOT, then Enter opens the newest %s order, then Enter bills it', (kind) => {
+    const older = table('1', true);
+    const newest = {
+      ...table('9', true),
+      createdAt: older.createdAt! + 1,
+      ...(kind === 'Parcel' ? { id: 'ord_9', section: null } : {}),
+    };
+    let [state, commands] = run(initial(), cart(true, false), press('Enter'));
+    expect(commands).toEqual([{ do: 'print-kitchen' }]);
+    [state, commands] = run(
+      state, cart(false), floor(older, newest),
+      cooking(...processingOrders([older, newest], false)), press('Enter'),
+    );
+    expect(commands).toEqual([kind === 'Parcel'
+      ? { do: 'open-order', orderId: 'ord_9' }
+      : { do: 'open-table', tableId: 'tbl_9' }]);
+    [, commands] = run(state, cart(true, true), press('Enter'));
+    expect(commands).toEqual([{ do: 'complete-bill' }]);
+  });
+
   it('item, how many, ticket, then the bill from the processing orders', () => {
     let state = initial();
     let commands: Command[];

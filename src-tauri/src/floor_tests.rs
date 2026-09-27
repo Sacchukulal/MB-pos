@@ -647,6 +647,7 @@ fn an_empty_table_is_marked_the_moment_it_is_opened() {
     let two = after.iter().find(|t| t.label == "2").expect("table 2");
     assert_eq!(two.state, crate::billing::TableState::Free);
     assert!(two.order_id.is_none());
+    assert!(two.created_at.is_none());
 }
 
 /// Selecting a table costs it none of its own signal.
@@ -662,12 +663,16 @@ fn a_late_table_that_is_open_in_the_cart_still_looks_late() {
     let three = before.iter().find(|t| t.label == "3").expect("table 3");
     assert_eq!(three.state, crate::billing::TableState::Late);
     assert!(!three.selected);
+    assert_eq!(three.created_at, Some(at(1).millis()));
+    let json = serde_json::to_value(three).expect("tile JSON");
+    assert_eq!(json["createdAt"].as_i64(), Some(at(1).millis()));
 
     crate::ipc::open_table_on(&app, "tbl_3".to_owned()).expect("opened");
 
     let after = crate::ipc::open_orders_on(&app).expect("the floor");
     let three = after.iter().find(|t| t.label == "3").expect("table 3");
     assert!(three.selected, "the open table is not marked");
+    assert_eq!(three.created_at, Some(at(1).millis()));
     assert_eq!(
         three.state,
         crate::billing::TableState::Late,

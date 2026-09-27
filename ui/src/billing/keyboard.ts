@@ -151,15 +151,14 @@ export function reduce(state: State, event: Event): [State, Command[]] {
       return [{ ...state, tables: event.tables }, []];
 
     case 'processing': {
-      // A highlight past the end of a shorter list moves onto its last row; an empty list
-      // sends it back to the box.
-      const count = event.orders.length;
-      const mode =
-        state.mode.kind !== 'processing' || state.mode.index < count
-          ? state.mode
-          : count > 0
-            ? { kind: 'processing' as const, index: count - 1 }
-            : { kind: 'searching' as const };
+      // Follow the order when a newer one arrives above it. If it leaves the list, return
+      // to the box rather than silently highlighting a different customer's bill.
+      let mode = state.mode;
+      if (mode.kind === 'processing') {
+        const orderId = state.processing[mode.index]?.orderId;
+        const index = event.orders.findIndex((order) => order.orderId === orderId);
+        mode = index >= 0 ? { kind: 'processing', index } : { kind: 'searching' };
+      }
       return [{ ...state, processing: event.orders, mode }, []];
     }
 
@@ -382,7 +381,7 @@ function key(state: State, pressed: string): [State, Command[]] {
         [{ do: state.kitchenUpToDate ? 'complete-bill' : 'print-kitchen' }],
       ];
     }
-    const firstOpen = state.tables.find((t) => t.orderId !== null);
+    const firstOpen = state.processing[0];
     if (firstOpen) {
       return [state, [openCommand(firstOpen)]];
     }
