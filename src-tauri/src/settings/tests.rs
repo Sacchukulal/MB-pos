@@ -185,17 +185,19 @@ fn search_finds_a_setting_by_the_word_a_person_would_type() {
 /// A section's name finds the whole section.
 #[test]
 fn searching_by_section_finds_that_section() {
-    let found = super::search("kitchen ticket");
-    let in_section = CATALOG.iter().filter(|e| e.group == Group::Kitchen).count();
-    assert_eq!(
-        found.iter().filter(|e| e.group == Group::Kitchen).count(),
-        in_section,
-        "a section search must find every setting in that section"
-    );
-    assert!(
-        found.iter().any(|e| e.key == "billing.kitchen_ticket_off"),
-        "and the ones outside it that are about the same thing"
-    );
+    for typed in ["kitchen ticket", "KOT"] {
+        let found = super::search(typed);
+        let in_section = CATALOG.iter().filter(|e| e.group == Group::Kitchen).count();
+        assert_eq!(
+            found.iter().filter(|e| e.group == Group::Kitchen).count(),
+            in_section,
+            "a section search for {typed:?} must find every setting in that section"
+        );
+        assert!(
+            found.iter().any(|e| e.key == "billing.kitchen_ticket_off"),
+            "and the ones outside it that are about the same thing"
+        );
+    }
 }
 
 /// The GST number is judged for the screen's mark and never refused: the shop decides what

@@ -66,6 +66,16 @@ impl Group {
         }
     }
 
+    /// Familiar section names remain searchable after the visible label changes.
+    #[must_use]
+    pub const fn search_aliases(self) -> &'static [&'static str] {
+        match self {
+            Group::Kitchen => &["kitchen tickets"],
+            Group::Appearance => &["how it looks"],
+            _ => &[],
+        }
+    }
+
     /// The stable name this group crosses the wire as.
     #[must_use]
     pub const fn code(self) -> &'static str {

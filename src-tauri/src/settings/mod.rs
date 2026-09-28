@@ -707,6 +707,7 @@ pub fn search(text: &str) -> Vec<&'static catalog::Entry> {
         .filter(|entry| {
             entry.label.to_lowercase().contains(&needle)
                 || entry.group.label().to_lowercase().contains(&needle)
+                || entry.group.search_aliases().iter().any(|s| s.contains(&needle))
                 || entry.key.contains(&needle)
                 || entry.synonyms.iter().any(|s| s.contains(&needle))
         })
