@@ -120,12 +120,14 @@ function cart(over: Partial<CartView> = {}): CartView {
 }
 
 describe('merge bill', () => {
-  it('offers every other open order, never this one and never a free table', () => {
+  it('excludes this order, free tables, paid bills and absorbed orders', () => {
     const others = mergeCandidates(
       [
         table({ id: '4', label: '4', orderId: 'ord_four' }),
         table({ id: '5', label: '5', orderId: 'ord_five' }),
         table({ id: '6', label: '6', state: 'free' }),
+        table({ id: 'paid', label: '7', orderId: 'paid', billNumber: 'A/12' }),
+        table({ id: 'linked', label: '8', orderId: 'linked', billedInto: 'ord_four' }),
         table({ id: 'parcel', label: 'Parcel 3', section: null, orderId: 'ord_parcel' }),
       ],
       'ord_four',
@@ -135,8 +137,8 @@ describe('merge bill', () => {
 
   it('merges the picked order INTO the one on the counter, and says who joined', async () => {
     call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates'
-      ? [table({ id: '5', label: '5', orderId: 'ord_five', total: money(32_000, '320.00'), billNumber: 'A/0012' })]
-      : {}));
+      ? [table({ id: '5', label: '5', orderId: 'ord_five', total: money(32_000, '320.00') })]
+      : name === 'preview_merge' ? { previewKey: 'reviewed', fromLabel: 'Table 5', intoLabel: 'Table 4', fromTotal: money(32_000, '320.00'), intoTotal: money(19_000, '190.00'), total: money(51_000, '510.00') } : {}));
     const onMerged = vi.fn();
     render(
       <MergeBill
@@ -148,7 +150,6 @@ describe('merge bill', () => {
             label: '5',
             orderId: 'ord_five',
             total: money(32_000, '320.00'),
-            billNumber: 'A/0012',
           }),
         ]}
         onClose={vi.fn()}
@@ -157,21 +158,25 @@ describe('merge bill', () => {
       />,
     );
 
-    expect(screen.getByText('Table 5')).toBeInTheDocument();
+    expect(await screen.findByText('Table 5')).toBeInTheDocument();
     expect(screen.getByText('320.00')).toBeInTheDocument();
     expect(screen.queryByText('Table 4')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    expect(await screen.findByText('510.00')).toBeInTheDocument();
+    expect(call.mock.calls.some(([name]) => name === 'merge_orders')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm merge' }));
     await waitFor(() => expect(onMerged).toHaveBeenCalled());
     // The counter's order survives; the picked one is absorbed.
     expect(call).toHaveBeenCalledWith('merge_orders', {
       fromOrder: 'ord_five',
       intoOrder: 'ord_four',
+      previewKey: 'reviewed',
     });
     expect(onMerged).toHaveBeenCalledWith('Table 5 joined this bill.');
   });
 
-  it('says so when nothing else is open, and when this order is not on disk yet', () => {
+  it('says so when nothing else is open, and when this order is not on disk yet', async () => {
     const { unmount } = render(
       <MergeBill
         cart={cart()}
@@ -181,7 +186,7 @@ describe('merge bill', () => {
         onFailed={vi.fn()}
       />,
     );
-    expect(screen.getByText('Nothing to merge')).toBeInTheDocument();
+    expect(await screen.findByText('Nothing to merge')).toBeInTheDocument();
     unmount();
 
     render(
@@ -194,6 +199,34 @@ describe('merge bill', () => {
       />,
     );
     expect(screen.getByText(/Print the kitchen ticket first/)).toBeInTheDocument();
+  });
+
+  it('does not offer stale floor rows when candidate loading fails', async () => {
+    call.mockRejectedValue(new Error('offline'));
+    const onFailed = vi.fn();
+    render(<MergeBill cart={cart()} orders={[table({ id: '5', label: '5', orderId: 'ord_five' })]}
+      onClose={vi.fn()} onMerged={vi.fn()} onFailed={onFailed} />);
+    expect(await screen.findByText(/Could not load orders/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Select' })).toBeNull();
+    expect(onFailed).toHaveBeenCalledOnce();
+  });
+
+  it('requires a new review after a concurrent change refuses confirmation', async () => {
+    const other = table({ id: '5', label: '5', orderId: 'ord_five' });
+    call.mockImplementation((name: string) => name === 'merge_orders'
+      ? Promise.reject({ code: 'merge.changed', message: 'Order changed' })
+      : Promise.resolve(name === 'combine_candidates' ? [other] : {
+          previewKey: 'reviewed', fromLabel: '5', intoLabel: '4', fromTotal: money(32_000, '320.00'),
+          intoTotal: money(19_000, '190.00'), total: money(51_000, '510.00'),
+        }));
+    const onMerged = vi.fn();
+    render(<MergeBill cart={cart()} orders={[other]} onClose={vi.fn()} onMerged={onMerged} onFailed={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select' }));
+    await screen.findByText('510.00');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm merge' }));
+    await screen.findByText(/Go back and choose again/);
+    expect(screen.getByRole('button', { name: 'Confirm merge' })).toBeDisabled();
+    expect(onMerged).not.toHaveBeenCalled();
   });
 });
 

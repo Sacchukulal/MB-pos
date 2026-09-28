@@ -992,22 +992,16 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           {cart && cart.lines.length > 0 ? (
             cart.lines.map((line) => {
               // The second row exists only when there is something to say on it.
-              const many = line.qty !== '1';
               const more =
-                many || line.modifiers.length > 0 || line.discount.paise > 0n || Boolean(line.note);
+                line.modifiers.length > 0 || line.discount.paise > 0n || Boolean(line.note);
               return (
               <div className={cx('mb-cartline', more && 'mb-cartline--more')} key={line.index}>
                 <span className="mb-cartline__name">{line.name}</span>
-                <span className="mb-cartline__amount">{line.amount.text}</span>
+                <span className="mb-cartline__amount" title={`${line.qty} × ${line.unitPrice.text}`}>{line.amount.text}</span>
                 {more ? (
                   <div className="mb-cartline__about">
                     {/* How the money was reached, the extras on it, and any money off. */}
                     <span className="mb-cartline__detail">
-                      {many ? (
-                        <span className="mb-cartline__price">
-                          {line.qty} × {line.unitPrice.text}
-                        </span>
-                      ) : null}
                       {line.modifiers.length > 0 ? (
                         <span className="mb-cartline__extras">{line.modifiers.join(', ')}</span>
                       ) : null}
@@ -1019,8 +1013,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                   </div>
                 ) : null}
                 {/*
-                  The quantity, then ✕. No − +: the number is tapped and typed, and the two
-                  step buttons took the room the name needed (owner, 2026-09-13).
+                  The quantity is tapped and typed; its column stays aligned across rows.
                 */}
                 <div className="mb-cartline__controls">
                   {typingQty?.index === line.index ? (
@@ -1083,6 +1076,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                     icon={<Icon name="scale" size="sm" />}
                   />
                 ) : null}
+                </div>
+                <div className="mb-cartline__tools">
                 {/*
                   Money off stays behind ⋯ — it is rare, and it is a permission. With nobody
                   allowed it there is no ⋯ at all.
@@ -1095,17 +1090,18 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                     </Button>
                   </RowMenu>
                 ) : null}
-                {/* ✕ on the row itself: a void once the kitchen has been told, and a void is
+                {/* Removing a row is a void once the kitchen has been told, and a void is
                     a permission. */}
                 {!cart.kitchenTold || mayVoidLine ? (
                   <Button
                     size="sm"
                     variant="danger"
+                    className="mb-cartline__remove"
                     iconOnly
                     title={`Take ${line.name} off the bill`}
                     aria-label={`Take ${line.name} off the bill`}
                     onClick={() => void takeOffTheBill(line)}
-                    icon={<Icon name="x" size="sm" />}
+                    icon={<Icon name="trash" />}
                   />
                 ) : null}
                 </div>
@@ -1142,6 +1138,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           {/* One command either way; only the paper, and so the word, differs. */}
           <Button
             size="lg"
+            className="mb-actions__kot"
             disabled={!cart || cart.isEmpty || acting}
             onClick={() => act(printKitchen)}
             icon={<Icon name={kitchenOff ? 'file' : 'printer'} />}
@@ -1225,7 +1222,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           >
             Split bill
           </Button>
-          <Button size="sm" disabled={!cart || !cart.orderId} onClick={() => setMerging(true)}>
+          <Button size="sm" disabled={!cart || !cart.orderId || cart.isEmpty || !!cart.billNumber || (!kitchenOff && !cart.kitchenTold)} onClick={() => setMerging(true)}>
             Merge bill
           </Button>
           {/*
@@ -1307,7 +1304,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       {merging && cart ? (
         <MergeBill
           cart={cart}
-          orders={tables}
+          orders={processing}
           onClose={() => setMerging(false)}
           onMerged={(said) => {
             setMerging(false);

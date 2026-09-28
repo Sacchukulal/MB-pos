@@ -359,7 +359,8 @@ export interface Commands {
   };
   save_floor_thresholds: { args: { warn: number; late: number }; returns: FloorView };
   move_order: { args: { orderId: string; toTable: string }; returns: FloorView };
-  merge_orders: { args: { fromOrder: string; intoOrder: string }; returns: FloorView };
+  merge_orders: { args: { fromOrder: string; intoOrder: string; previewKey: string }; returns: FloorView };
+  preview_merge: { args: { fromOrder: string; intoOrder: string }; returns: import('./generated/MergePreview').MergePreview };
   combine_candidates: { args: undefined; returns: TableView[] };
   release_serving_table: { args: { orderId: string }; returns: void };
   split_order: { args: { request: SplitRequest }; returns: FloorView };

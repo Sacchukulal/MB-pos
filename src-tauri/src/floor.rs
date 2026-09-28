@@ -727,40 +727,51 @@ fn order_label(app: &App, order: &mb_core::AnyOrder) -> String {
         .map_or_else(|| "an order".to_owned(), |t| t.formatted.clone())
 }
 
-pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiResult<FloorView> {
-    let _one_at_a_time = app.begin_action();
-    let who = guard::require(app, Permission::BillCreate)?;
-    let at = now();
+/// One eligibility rule for the picker, preview and write, including reopened corrections.
+fn merge_eligible(order: &mb_core::AnyOrder, kitchen_off: bool) -> UiResult<()> {
+    let core = order.core();
+    if !matches!(order, mb_core::AnyOrder::Open(_)) || order.bill_number().is_some()
+        || !core.billing.settlement.is_empty() || core.billing.revision != 0
+    {
+        return Err(UiError::new("merge.finished", "Only unbilled processing orders can be merged. Change paid bills through bill corrections."));
+    }
+    if core.billing.billed_into.is_some() {
+        return Err(UiError::new("merge.linked", "This order already belongs to a combined bill."));
+    }
+    if core.cart.is_empty() {
+        return Err(UiError::new("merge.empty", "Both orders must contain items. Use Move order for an empty table."));
+    }
+    if !kitchen_off && core.kitchen.told().is_empty() {
+        return Err(UiError::new("merge.unsent", "Send the kitchen ticket before merging this order."));
+    }
+    Ok(())
+}
 
+fn merge_pair(app: &App, from_order: &str, into_order: &str) -> UiResult<(mb_core::AnyOrder, mb_core::AnyOrder)> {
+    guard::require(app, Permission::BillCreate)?;
     if from_order == into_order {
         return Err(UiError::new(
             "floor.same_order",
             "Those are the same order.",
         ));
     }
-    if app.with_cart(|s| Ok(s.order_id() == Some(from_order.as_str()) || s.order_id() == Some(into_order.as_str())))? {
+    if app.with_cart(|s| Ok(s.order_id() == Some(from_order) || s.order_id() == Some(into_order)))? {
         crate::flows::park_open_order(app)?;
     }
-    let absorbed_before = open_order(app, &from_order)?;
-    let survivor_before = open_order(app, &into_order)?;
-    for order in [&absorbed_before, &survivor_before] {
-        if order.core().billing.billed_into.is_some() {
-            return Err(UiError::new("merge.linked", "This order already belongs to a combined bill."));
-        }
+    let absorbed = open_order(app, from_order)?;
+    let survivor = open_order(app, into_order)?;
+    for order in [&absorbed, &survivor] {
+        merge_eligible(order, app.shop_config().billing.kitchen_ticket_off)?;
         if let Some(refusal) = crate::dayclose::day_refusal_on(app, order.core().business_day, "merge.closed", "combine these bills")? { return Err(refusal); }
-        if matches!(order, mb_core::AnyOrder::Settled(_)) { guard::require(app, Permission::BillRevert)?; }
     }
-    if absorbed_before.core().business_day != survivor_before.core().business_day {
+    if absorbed.core().business_day != survivor.core().business_day {
         return Err(UiError::new("merge.day", "Choose bills from the same business day."));
     }
-    let editable = |order: mb_core::AnyOrder| -> UiResult<mb_core::AnyOrder> { match order {
-        mb_core::AnyOrder::Settled(paid) => Ok(mb_core::AnyOrder::Open(paid.reopen())),
-        open @ mb_core::AnyOrder::Open(_) => Ok(open),
-        _ => Err(UiError::new("merge.finished", "Only open or paid bills can be combined.")),
-    }};
-    let absorbed = editable(absorbed_before.clone())?;
-    let survivor = editable(survivor_before.clone())?;
+    Ok((absorbed, survivor))
+}
 
+/// Used by preview and commit so discounts, taxes and rounding have one answer.
+fn merged_order(app: &App, absorbed: &mb_core::AnyOrder, survivor: &mb_core::AnyOrder) -> UiResult<mb_core::AnyOrder> {
     let (mut survivor_portion, absorbed_portion) = (
         mb_core::Portion {
             cart: survivor.core().cart.clone(),
@@ -775,6 +786,82 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
         UiError::new("floor.merge", "Those orders could not be merged.").with_detail(e.to_string())
     })?;
 
+    let mut merged = survivor.clone();
+    let (cart, kitchen) = survivor_portion.into_parts();
+    merged.core_mut().cart = cart;
+    merged.core_mut().kitchen = kitchen;
+    let account = &mut merged.core_mut().billing;
+    if account.service_cart.is_none() {
+        account.service_cart = Some(survivor.core().cart.clone());
+        account.service_kitchen = Some(survivor.core().kitchen.clone());
+    }
+    account.sources.push(absorbed.core().id.clone());
+    account.source_labels.push(format!("Order {}", order_label(app, absorbed)));
+    account.source_labels.extend(absorbed.core().billing.source_labels.clone());
+    account.sources.extend(absorbed.core().billing.sources.clone());
+    account.serving.push(absorbed.core().placement.clone());
+    account.serving.extend(absorbed.core().billing.serving.clone());
+    let discount = crate::flows::bill_of(app, survivor)?.total_bill_discount
+        .add(crate::flows::bill_of(app, absorbed)?.total_bill_discount)
+        .map_err(|e| UiError::new("floor.merge", e.to_string()))?;
+    account.discount = discount.is_positive().then(|| mb_core::DiscountEntry::new(mb_core::Discount::Amount(discount)));
+    Ok(merged)
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct MergePreview {
+    pub preview_key: String,
+    pub from_label: String,
+    pub into_label: String,
+    pub from_total: crate::ipc::MoneyView,
+    pub into_total: crate::ipc::MoneyView,
+    pub total: crate::ipc::MoneyView,
+}
+
+fn merge_key(app: &App, source: &mb_core::AnyOrder, target: &mb_core::AnyOrder) -> UiResult<String> {
+    let bytes = serde_json::to_vec(&(source, target, app.shop_config()))
+        .map_err(|e| UiError::new("merge.preview", e.to_string()))?;
+    Ok(ring::digest::digest(&ring::digest::SHA256, &bytes).as_ref().iter()
+        .map(|byte| format!("{byte:02x}")).collect())
+}
+
+pub fn preview_merge_on(app: &App, from_order: String, into_order: String) -> UiResult<MergePreview> {
+    let _one_at_a_time = app.begin_action();
+    let (absorbed, survivor) = merge_pair(app, &from_order, &into_order)?;
+    let merged = merged_order(app, &absorbed, &survivor)?;
+    Ok(MergePreview {
+        preview_key: merge_key(app, &absorbed, &survivor)?,
+        from_label: order_label(app, &absorbed),
+        into_label: order_label(app, &survivor),
+        from_total: crate::flows::bill_of(app, &absorbed)?.grand_total.into(),
+        into_total: crate::flows::bill_of(app, &survivor)?.grand_total.into(),
+        total: crate::flows::bill_of(app, &merged)?.grand_total.into(),
+    })
+}
+
+#[tauri::command]
+pub fn preview_merge(app: tauri::State<'_, App>, from_order: String, into_order: String) -> UiResult<MergePreview> {
+    preview_merge_on(&app, from_order, into_order)
+}
+
+#[cfg(test)]
+pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiResult<FloorView> {
+    merge_checked_on(app, from_order, into_order, None)
+}
+
+pub(crate) fn merge_checked_on(app: &App, from_order: String, into_order: String, preview_key: Option<String>) -> UiResult<FloorView> {
+    let _one_at_a_time = app.begin_action();
+    let who = guard::require(app, Permission::BillCreate)?;
+    let at = now();
+    let (absorbed, survivor) = merge_pair(app, &from_order, &into_order)?;
+    if let Some(key) = preview_key
+        && key != merge_key(app, &absorbed, &survivor)?
+    {
+        return Err(UiError::new("merge.changed", "An order changed. Go back and review the combined bill again."));
+    }
+    let merged = merged_order(app, &absorbed, &survivor)?;
     let day = survivor.core().business_day;
     let absorbed_label = order_label(app, &absorbed);
     let survivor_label = order_label(app, &survivor);
@@ -784,72 +871,21 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
 
-                // The survivor takes the food.
-                repos.orders().assert_working(&absorbed_before)?;
-                repos.orders().assert_working(&survivor_before)?;
-                let mut merged = survivor.clone();
-                let (cart, kitchen) = survivor_portion.clone().into_parts();
-                match &mut merged {
-                    mb_core::AnyOrder::Draft(o) => {
-                        o.core.cart = cart;
-                        o.core.kitchen = kitchen;
-                    }
-                    mb_core::AnyOrder::Open(o) => {
-                        o.core.cart = cart;
-                        o.core.kitchen = kitchen;
-                    }
-                    _ => {
-                        return Err(mb_db::DbError::invariant(
-                            "only an open order can take another one's food",
-                        ));
-                    }
-                }
-                let account = &mut merged.core_mut().billing;
-                if account.service_cart.is_none() {
-                    account.service_cart = Some(survivor.core().cart.clone());
-                    account.service_kitchen = Some(survivor.core().kitchen.clone());
-                }
-                account.settlement.append(&absorbed.core().billing.settlement).map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
-                account.sources.push(absorbed.core().id.clone());
-                account.source_labels.push(absorbed.bill_number().map_or_else(|| format!("Order {absorbed_label}"), |n| format!("Bill {}", n.formatted)));
-                account.source_labels.extend(absorbed.core().billing.source_labels.clone());
-                account.sources.extend(absorbed.core().billing.sources.clone());
-                account.serving.push(absorbed.core().placement.clone());
-                account.serving.extend(absorbed.core().billing.serving.clone());
-                // Preserve the money discounted on each source instead of expanding a
-                // percentage onto the other guest's food.
-                let discount = [&survivor, &absorbed].iter().try_fold(mb_core::Money::ZERO, |sum, order| {
-                    crate::flows::bill_of(app, order).map_err(|e| mb_db::DbError::invariant(e.message))
-                        .and_then(|b| sum.add(b.total_bill_discount).map_err(|e| mb_db::DbError::invariant(e.to_string())))
-                })?;
-                account.discount = discount.is_positive().then(|| mb_core::DiscountEntry::new(mb_core::Discount::Amount(discount)));
+                repos.orders().assert_working(&absorbed)?;
+                repos.orders().assert_working(&survivor)?;
                 repos.orders().save_working(OUTLET, app.terminal_id(), &merged)?;
 
-                // An open source keeps serving its table; an issued source is replaced only
-                // when the combined correction finishes.
+                // Keep each original table serving, with one payable account.
                 let mut serving = absorbed.clone();
                 serving.core_mut().billing.billed_into = Some(merged.core().id.clone());
-                if matches!(absorbed_before, mb_core::AnyOrder::Settled(_))
-                    && let mb_core::AnyOrder::Open(open) = serving
-                {
-                    serving = mb_core::AnyOrder::Cancelled(open.cancel("Replaced by combined bill", who.staff_id.clone(), at).map_err(|e| mb_db::DbError::invariant(e.to_string()))?);
-                }
                 repos.orders().save_working(OUTLET, app.terminal_id(), &serving)?;
                 // A previously combined source can itself join another bill. Every original
-                // table must now point at the surviving account, including paid sources.
+                // table must now point at the surviving account.
                 for source in &absorbed.core().billing.sources {
                     let mut linked = repos.orders().find_working(source)?
                         .ok_or_else(|| mb_db::DbError::invariant("A combined source order is missing."))?;
                     linked.core_mut().billing.billed_into = Some(merged.core().id.clone());
                     repos.orders().save_working(OUTLET, app.terminal_id(), &linked)?;
-                }
-                // Settling a combined bill also creates a service-only order for its own
-                // table. It carries no source payment, but must follow a later combination.
-                for mut linked in repos.orders().list_open(OUTLET)? {
-                    if linked.core().billing.billed_into.as_ref() == Some(&absorbed.core().id) {
-                        linked.core_mut().billing.billed_into = Some(merged.core().id.clone());
-                        repos.orders().save_working(OUTLET, app.terminal_id(), &linked)?;
-                    }
                 }
                 repos.floor().record_merge(&from_order, &into_order)?;
                 repos.events().record(
@@ -896,7 +932,7 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
     floor_on(app)
 }
 
-/// The same order tiles the counter knows, including issued bills from today's book.
+/// Active, unbilled processing orders. Paid bills and correction drafts never join this list.
 #[tauri::command]
 pub fn combine_candidates(app: tauri::State<'_, App>) -> UiResult<Vec<crate::billing::TableView>> {
     combine_candidates_on(&app)
@@ -908,34 +944,15 @@ pub fn combine_candidates_on(app: &App) -> UiResult<Vec<crate::billing::TableVie
     let config = app.shop_config();
     app.with_shop(|shop| shop.db.transaction(|tx| {
         let repos = mb_db::Repos::new(tx);
-        let mut orders = repos.orders().list_for_day(OUTLET, today(at))?;
-        // Paid sources can have a cancelled working draft while their issued sale remains
-        // in reports. Candidate selection follows that draft too, not just open drafts.
-        for order in &mut orders {
-            if let Some(working) = repos.orders().find_working(&order.core().id)? {
-                *order = working;
-            }
-        }
-        for open in repos.orders().list_open(OUTLET)? {
-            orders.retain(|o| o.core().id != open.core().id);
-            orders.push(open);
-        }
-        orders.retain(|o| matches!(o, mb_core::AnyOrder::Open(_) | mb_core::AnyOrder::Settled(_)) && o.core().billing.billed_into.is_none());
-        let mut tables = repos.floor().list_tables(OUTLET)?;
-        // An issued bill remains a candidate even after its old table is hidden.
-        for table in &mut tables { table.is_active = true; }
+        let orders: Vec<_> = repos.orders().list_open(OUTLET)?.into_iter()
+            .filter(|order| merge_eligible(order, config.billing.kitchen_ticket_off).is_ok())
+            .collect();
+        let tables = repos.floor().list_tables(OUTLET)?;
         let sections = repos.floor().list_sections(OUTLET)?;
-        let mut tiles = Vec::with_capacity(orders.len());
-        for order in &orders {
-            let candidates = crate::billing::floor_view(&tables, &sections, std::slice::from_ref(order),
-                crate::billing::Room { cart_is_on: None, now: at, warn_after: 60, late_after: 120, config: &config });
-            for mut tile in candidates.into_iter().filter(|tile| tile.order_id.is_some()) {
-                // Multiple paid bills can have the same physical table. This is a list of
-                // orders, so its identity must also be the order.
-                tile.id = order.core().id.as_str().to_owned();
-                tiles.push(tile);
-            }
-        }
+        let mut tiles = crate::billing::floor_view(&tables, &sections, &orders,
+            crate::billing::Room { cart_is_on: None, now: at, warn_after: 60, late_after: 120, config: &config });
+        tiles.retain(|tile| tile.order_id.is_some());
+        tiles.sort_by_key(|tile| std::cmp::Reverse(tile.created_at));
         Ok(tiles)
     }).map_err(|e| words::from_db(&e)))
 }
@@ -1247,8 +1264,9 @@ pub fn merge_orders(
     app: tauri::State<'_, App>,
     from_order: String,
     into_order: String,
+    preview_key: String,
 ) -> UiResult<FloorView> {
-    merge_orders_on(&app, from_order, into_order)
+    merge_checked_on(&app, from_order, into_order, Some(preview_key))
 }
 
 #[tauri::command]

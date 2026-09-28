@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { Button, Icon, Input, Modal, NumberInput, Pick, cx, onlyAmount } from '../kit';
+import { Button, Input, Modal, NumberInput, Pick, cx, onlyAmount } from '../kit';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
 import { SHORTCUTS, type Mode } from './keyboard';
@@ -142,7 +142,7 @@ export function TableBox({
     <Modal
       open
       small
-      title="Which table?"
+      title="Table"
       onClose={() => { if (!busy) onClose(); }}
       actions={
         <>
@@ -154,7 +154,8 @@ export function TableBox({
       }
     >
       <Input
-        label="Table number"
+        aria-label="Table number"
+        className="mb-table-number"
         value={typed}
         autoFocus
         autoComplete="off"
@@ -195,20 +196,28 @@ function OccupiedTableBox({ table, tables, busy, onOpen, onClose }: {
     && t.label === `${table.label}${t.seat}`).map((t) => t.seat));
   const choices: (string | undefined)[] = [
     undefined,
-    ...Array.from('BCDEFGHIJKLMNOPQRSTUVWXYZ').filter((letter) => !taken.has(letter)),
+    ...Array.from('BCDEFGHI'),
   ];
   const available = seat === undefined || !taken.has(seat);
   const label = `${table.label}${seat ?? ''}`;
   const choose = () => {
     if (!busy && available) onOpen(table, seat);
   };
-  const step = (direction: number) => {
+  const select = (next: string | undefined) => {
     if (busy) return;
-    const index = Math.max(0, choices.indexOf(seat));
-    setSeat(choices[Math.max(0, Math.min(choices.length - 1, index + direction))]);
-    picker.current?.focus();
+    setSeat(next);
+    picker.current?.querySelector<HTMLButtonElement>(`[data-seat="${next ?? ''}"]`)?.focus();
   };
-  useEffect(() => { picker.current?.focus(); }, []);
+  const step = (direction: number) => {
+    for (let index = choices.indexOf(seat) + direction; index >= 0 && index < choices.length; index += direction) {
+      const next = choices[index];
+      if (next === undefined || !taken.has(next)) {
+        select(next);
+        return;
+      }
+    }
+  };
+  useEffect(() => { picker.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus(); }, []);
 
   return (
     <div onKeyDown={(event) => {
@@ -217,38 +226,48 @@ function OccupiedTableBox({ table, tables, busy, onOpen, onClose }: {
         event.stopPropagation();
         return;
       }
-      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-        event.preventDefault();
-        event.stopPropagation();
-        step(event.key === 'ArrowLeft' ? -1 : 1);
-      }
     }}>
       <Modal
         open
         small
-        title={`Table ${table.label} already has an order`}
+        title="Table"
         onClose={() => { if (!busy) onClose(); }}
         onEnter={choose}
         actions={<>
           <Button disabled={busy} onClick={onClose}>Cancel</Button>
-          <Button disabled={busy || !available} variant="primary" onClick={choose}>Continue</Button>
+          <Button disabled={busy || !available} variant="primary" onClick={choose}>Open</Button>
         </>}
       >
         <div className="mb-ask">
-          <div ref={picker} className="mb-table-choice" tabIndex={0} role="group" aria-label="Order table">
-            <Button disabled={busy || seat === undefined} aria-label="Previous table option" onClick={() => step(-1)}>
-              <Icon name="chevron-left" />
-            </Button>
-            <span className="mb-table-choice__label" aria-live="polite">{label}</span>
-            <Button disabled={busy || seat === choices[choices.length - 1]} aria-label="Next table option" onClick={() => step(1)}>
-              <Icon name="chevron-right" />
-            </Button>
+          <div ref={picker} className="mb-table-choice" role="radiogroup" aria-label="Order table"
+            onKeyDown={(event) => {
+              const direction = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -3, ArrowDown: 3 }[event.key];
+              if (direction !== undefined || event.key === 'Enter' || event.key === 'Home' || event.key === 'End') {
+                event.preventDefault();
+                event.stopPropagation();
+                if (direction !== undefined) step(direction);
+                else if (event.key === 'Enter' && !event.repeat) choose();
+                else if (event.key === 'Home') select(undefined);
+                else if (event.key === 'End') select([...choices].reverse().find((choice) => choice === undefined || !taken.has(choice)));
+              }
+            }}>
+            {choices.map((choice) => (
+              <Button
+                key={choice ?? 'main'}
+                className="mb-table-choice__option"
+                variant={seat === choice ? 'primary' : 'secondary'}
+                role="radio"
+                aria-checked={seat === choice}
+                data-seat={choice ?? ''}
+                tabIndex={seat === choice ? 0 : -1}
+                disabled={busy || (choice !== undefined && taken.has(choice))}
+                onClick={() => select(choice)}
+              >
+                {table.label}{choice}
+              </Button>
+            ))}
           </div>
-          <span>{seat === undefined ? 'Add items to the existing order.' : `Create a separate order on table ${label}.`}</span>
-          {!available ? <span role="alert">This subtable was just taken. Choose another letter.</span> : null}
-          <span className="mb-ask__keys">
-            <kbd className="mb-kbd">{'\u2190 \u2192'}</kbd> choose <kbd className="mb-kbd">Enter</kbd> continue
-          </span>
+          {!available ? <span role="alert">{label} is unavailable.</span> : null}
         </div>
       </Modal>
     </div>

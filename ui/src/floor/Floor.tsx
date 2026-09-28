@@ -30,6 +30,7 @@ import { call, subscribe } from '../ipc/call';
 import { useMay } from '../shell/permissions';
 /* The one table tile in the product. */
 import { AddTile, Tile } from '../billing/TableGrid';
+import { MergeConfirmation, mergeCandidates } from '../billing/MergeBill';
 import { hasArrived, useArrivals } from '../billing/arrivals';
 import type { FloorView } from '../ipc/generated/FloorView';
 import type { SectionView } from '../ipc/generated/SectionView';
@@ -979,7 +980,15 @@ function TableActions({
   onFailed: (cause: unknown) => void;
 }) {
   const [target, setTarget] = useState('');
-  const busy = floor.tiles.filter((t) => t.orderId !== null && t.id !== tile.id);
+  const [candidates, setCandidates] = useState<TableView[]>([]);
+  const [mergeTarget, setMergeTarget] = useState<TableView | null>(null);
+  useEffect(() => {
+    let active = true;
+    call('combine_candidates').then((orders) => { if (active) setCandidates(orders); }).catch(onFailed);
+    return () => { active = false; };
+  }, [onFailed]);
+  const busy = candidates.some((order) => order.orderId === tile.orderId)
+    ? mergeCandidates(candidates, tile.orderId) : [];
   const free = floor.tables.filter(
     (t) => t.isActive && !t.isBusy && t.id !== tile.id,
   );
@@ -1037,7 +1046,11 @@ function TableActions({
         title="Merge into another table"
         note="Both parties pay together. This table's food joins the other bill; its own order is kept and marked as merged, never deleted."
       />
-      {busy.length === 0 ? (
+      {mergeTarget?.orderId && tile.orderId ? (
+        <MergeConfirmation fromOrder={tile.orderId} intoOrder={mergeTarget.orderId}
+          onBack={() => setMergeTarget(null)} onFailed={onFailed}
+          onMerged={(fresh) => onDone(fresh, `Table ${tile.label} joined table ${mergeTarget.label}.`)} />
+      ) : busy.length === 0 ? (
         <EmptyState title="Nothing to merge with" hint="No other table has an order on it." />
       ) : (
         <div className="mb-floor__mergelist">
@@ -1046,16 +1059,7 @@ function TableActions({
               key={other.id}
               size="sm"
               variant="quiet"
-              onClick={() => {
-                call('merge_orders', {
-                  fromOrder: tile.orderId ?? '',
-                  intoOrder: other.orderId ?? '',
-                })
-                  .then((fresh) =>
-                    onDone(fresh, `Table ${tile.label} joined table ${other.label}.`),
-                  )
-                  .catch(onFailed);
-              }}
+              onClick={() => setMergeTarget(other)}
             >
               Into table {other.label}
               {other.total ? ` (${other.total.text})` : ''}

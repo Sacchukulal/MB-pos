@@ -53,8 +53,9 @@ describe('occupied table choice', () => {
     render(<TableBox tables={[table]} onOpen={onOpen} onClose={vi.fn()} />);
     enterTable();
     expect(onOpen).not.toHaveBeenCalled();
-    expect(screen.getByRole('dialog', { name: 'Table 6 already has an order' })).toBeInTheDocument();
-    expect(screen.getByText('Add items to the existing order.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Table' })).toBeInTheDocument();
+    expect(screen.getAllByRole('radio').map((option) => option.textContent)).toEqual(['6', '6B', '6C', '6D', '6E', '6F', '6G', '6H', '6I']);
+    expect(screen.getByRole('radio', { name: '6' })).toHaveAttribute('aria-checked', 'true');
     key('Enter');
     expect(onOpen).toHaveBeenCalledExactlyOnceWith(table, undefined);
   });
@@ -64,9 +65,9 @@ describe('occupied table choice', () => {
     render(<TableBox tables={[table]} onOpen={onOpen} onClose={vi.fn()} />);
     enterTable();
     key('ArrowRight');
-    expect(screen.getByText('6B')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '6B' })).toHaveFocus();
     key('ArrowRight');
-    expect(screen.getByText('6C')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '6C' })).toHaveFocus();
     key('ArrowLeft');
     key('Enter');
     expect(onOpen).toHaveBeenCalledExactlyOnceWith(table, 'B');
@@ -82,12 +83,28 @@ describe('occupied table choice', () => {
     expect(onOpen).toHaveBeenCalledExactlyOnceWith(table, undefined);
   });
 
+  it('moves between grid rows and stops at the eighth subtable', () => {
+    const onOpen = vi.fn();
+    render(<TableBox tables={[table]} onOpen={onOpen} onClose={vi.fn()} />);
+    enterTable();
+    key('ArrowDown');
+    expect(screen.getByRole('radio', { name: '6D' })).toHaveFocus();
+    key('ArrowUp');
+    expect(screen.getByRole('radio', { name: '6' })).toHaveFocus();
+    key('End');
+    key('ArrowRight');
+    key('ArrowDown');
+    expect(screen.getByRole('radio', { name: '6I' })).toHaveFocus();
+    key('Enter');
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(table, 'I');
+  });
+
   it('does not reserve a letter belonging to the same table number in another room', () => {
     render(<TableBox tables={[table, { ...table, id: 'other_order', section: 'Patio', label: '6B', seat: 'B' }]}
       onOpen={vi.fn()} onClose={vi.fn()} />);
     enterTable();
     key('ArrowRight');
-    expect(screen.getByText('6B')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '6B' })).toHaveFocus();
   });
 
   it('skips letters already used and also supports touch', () => {
@@ -95,9 +112,12 @@ describe('occupied table choice', () => {
     render(<TableBox tables={[table, { ...table, id: 'order_6B', label: '6B', seat: 'B', orderId: 'order_6B' }]}
       onOpen={onOpen} onClose={vi.fn()} />);
     enterTable();
-    fireEvent.click(screen.getByRole('button', { name: 'Next table option' }));
-    expect(screen.getByText('6C')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('radio', { name: '6B' })).toBeDisabled();
+    key('ArrowRight');
+    expect(screen.getByRole('radio', { name: '6C' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('radio', { name: '6D' }));
+    fireEvent.click(screen.getByRole('radio', { name: '6C' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(onOpen).toHaveBeenCalledExactlyOnceWith(table, 'C');
   });
 
@@ -123,8 +143,8 @@ describe('occupied table choice', () => {
     enterTable();
     key('ArrowRight');
     view.rerender(<TableBox tables={[table, { ...table, id: 'order_6B', label: '6B', seat: 'B' }]} onOpen={onOpen} onClose={onClose} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('just taken');
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('6B is unavailable.');
+    expect(screen.getByRole('button', { name: 'Open' })).toBeDisabled();
     key('Enter');
     expect(onOpen).not.toHaveBeenCalled();
     key('ArrowRight');
@@ -132,13 +152,13 @@ describe('occupied table choice', () => {
     expect(onOpen).toHaveBeenCalledExactlyOnceWith(table, 'C');
   });
 
-  it('disables the next option when every letter is occupied', () => {
+  it('keeps only the main table available when all eight subtables are occupied', () => {
     const tables = [table, ...Array.from('BCDEFGHIJKLMNOPQRSTUVWXYZ').map((seat) => ({ ...table, label: `6${seat}`, seat }))];
     render(<TableBox tables={tables} onOpen={vi.fn()} onClose={vi.fn()} />);
     enterTable();
-    expect(screen.getByRole('button', { name: 'Next table option' })).toBeDisabled();
+    expect(screen.getAllByRole('radio').filter((option) => !option.hasAttribute('disabled'))).toEqual([screen.getByRole('radio', { name: '6' })]);
     key('ArrowRight');
-    expect(screen.getByText('Add items to the existing order.')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '6' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('ignores confirmation, cancellation and arrows while assignment is running', () => {
@@ -152,8 +172,8 @@ describe('occupied table choice', () => {
     key('Escape');
     expect(onOpen).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByText('Add items to the existing order.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '6' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('button', { name: 'Open' })).toBeDisabled();
   });
 });
 
@@ -218,8 +238,8 @@ describe('saving after the table choice', () => {
     key('ArrowRight');
     key('Enter');
     await screen.findByText('Choose another letter.');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).not.toBeDisabled());
-    expect(screen.getByRole('dialog', { name: 'Table 6 already has an order' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Open' })).not.toBeDisabled());
+    expect(screen.getByRole('dialog', { name: 'Table' })).toBeInTheDocument();
     expect(call.mock.calls.filter(([command]) => command === 'print_kitchen_ticket')).toHaveLength(1);
     expect(call.mock.calls.some(([command]) => command === 'cart_clear')).toBe(false);
     expect(cart.table).toBeNull();

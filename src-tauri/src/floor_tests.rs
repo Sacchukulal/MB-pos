@@ -1121,9 +1121,9 @@ fn splitting_without_a_letter_allocates_a_visible_party_and_refuses_collisions()
 fn a_combined_bill_can_join_another_without_stranding_its_serving_tables() {
     let scratch = Scratch::new("nested_merge");
     let app = a_shop_with_a_room(&scratch);
-    let a = seat(&app, "ord_a", "tbl_1", &[("itm_dosa", 12_000, 1)], None);
-    let b = seat(&app, "ord_b", "tbl_2", &[("itm_tea", 2_000, 1)], None);
-    let c = seat(&app, "ord_c", "tbl_3", &[("itm_tea", 2_000, 1)], None);
+    let a = seat(&app, "ord_a", "tbl_1", &[("itm_dosa", 12_000, 1)], Some(1));
+    let b = seat(&app, "ord_b", "tbl_2", &[("itm_tea", 2_000, 1)], Some(1));
+    let c = seat(&app, "ord_c", "tbl_3", &[("itm_tea", 2_000, 1)], Some(1));
     merge_orders_on(&app, a.as_str().to_owned(), b.as_str().to_owned()).expect("first combine");
     merge_orders_on(&app, b.as_str().to_owned(), c.as_str().to_owned()).expect("second combine");
     for source in [&a, &b] {
@@ -1164,15 +1164,15 @@ fn moving_a_loaded_order_refreshes_the_saved_baseline() {
 }
 
 #[test]
-fn combining_an_already_paid_combination_retargets_its_service_only_order() {
+fn paid_combination_cannot_merge_again_and_keeps_its_serving_tables() {
     let scratch = Scratch::new("recombine_paid");
     let app = a_shop_with_a_room(&scratch);
     crate::signin_tests::hire(&app, "staff_owner", "Owner", RolePreset::Owner, "2468");
     let mut config = app.shop_config();
     config.billing.kitchen_screen = true;
     app.publish_shop_config(config);
-    let a = seat(&app, "ord_a", "tbl_1", &[("itm_dosa", 12_000, 1)], None);
-    let b = seat(&app, "ord_b", "tbl_2", &[("itm_tea", 2_000, 1)], None);
+    let a = seat(&app, "ord_a", "tbl_1", &[("itm_dosa", 12_000, 1)], Some(1));
+    let b = seat(&app, "ord_b", "tbl_2", &[("itm_tea", 2_000, 1)], Some(1));
     crate::kitchen::send(&app, a.as_str(), None).expect("first table's kitchen ticket");
     crate::kitchen::send(&app, b.as_str(), None).expect("root table's kitchen ticket");
     let before = crate::kitchen::look(&app, crate::kitchen::DEFAULT_STATION);
@@ -1196,22 +1196,19 @@ fn combining_an_already_paid_combination_retargets_its_service_only_order() {
     }).map_err(|error| crate::words::from_db(&error))).expect("course retained");
     let c = seat(&app, "ord_c", "tbl_3", &[("itm_tea", 2_000, 1)], None);
     crate::kitchen::send(&app, c.as_str(), None).expect("new root's kitchen ticket");
-    merge_orders_on(&app, b.as_str().to_owned(), c.as_str().to_owned()).expect("combine paid root again");
-    assert_eq!(read(&app, &OrderId::new(&service)).core().billing.billed_into.as_ref(), Some(&c));
-    crate::ipc::open_order_on(&app, c.as_str().to_owned()).expect("load survivor");
-    crate::flows::complete_bill_on(&app, Some("cash".to_owned())).expect("pay remainder");
+    assert_eq!(merge_orders_on(&app, b.as_str().to_owned(), c.as_str().to_owned()).expect_err("paid root refused").code, "merge.finished");
+    assert_eq!(read(&app, &OrderId::new(&service)).core().billing.billed_into.as_ref(), Some(&b));
     let occupied = floor_on(&app).expect("all serving tables");
     assert_eq!(occupied.tiles.iter().filter(|tile| tile.order_id.is_some()).count(), 3);
-    for tile in occupied.tiles.into_iter().filter(|tile| tile.order_id.is_some()) {
-        assert_eq!(tile.billed_into.as_deref(), Some(c.as_str()));
+    for tile in occupied.tiles.into_iter().filter(|tile| tile.billed_into.as_deref() == Some(b.as_str())) {
         crate::floor::release_serving_table_on(&app, tile.order_id.expect("occupied")).expect("released");
     }
-    assert!(floor_on(&app).expect("free floor").tiles.iter().all(|tile| tile.order_id.is_none()));
-    assert!(crate::kitchen::look(&app, crate::kitchen::DEFAULT_STATION).tickets.is_empty(), "releasing all tables closes their original kitchen work");
+    assert_eq!(floor_on(&app).expect("remaining order").tiles.iter().filter(|tile| tile.order_id.is_some()).count(), 1);
+    assert!(matches!(read(&app, &c), AnyOrder::Open(_)));
 }
 
 #[test]
-fn candidates_include_each_bill_from_the_same_table() {
+fn candidates_exclude_paid_visits_even_from_the_same_table() {
     let scratch = Scratch::new("combine_candidates");
     let app = a_shop_with_a_room(&scratch);
     crate::signin_tests::hire(&app, "staff_owner", "Owner", RolePreset::Owner, "2468");
@@ -1223,14 +1220,10 @@ fn candidates_include_each_bill_from_the_same_table() {
         crate::flows::complete_bill_on(&app, Some("cash".to_owned())).expect("paid visit");
     }
     let candidates = crate::floor::combine_candidates_on(&app).expect("candidates");
-    assert_eq!(candidates.len(), 2);
-    assert!(candidates.iter().any(|tile| tile.id == "ord_first"));
-    assert!(candidates.iter().any(|tile| tile.id == "ord_second"));
-    assert!(candidates.iter().all(|tile| tile.bill_number.is_some()));
-    merge_orders_on(&app, "ord_first".to_owned(), "ord_second".to_owned()).expect("combine paid visits");
-    let candidates = crate::floor::combine_candidates_on(&app).expect("working candidates");
-    assert_eq!(candidates.len(), 1, "an absorbed paid source is not offered while the correction is pending");
-    assert_eq!(candidates[0].order_id.as_deref(), Some("ord_second"));
+    assert!(candidates.is_empty());
+    assert_eq!(merge_orders_on(&app, "ord_first".to_owned(), "ord_second".to_owned()).expect_err("paid visits refused").code, "merge.finished");
+    crate::corrections::revert_bill_on(&app, "ord_first".to_owned(), "Correct items".to_owned(), None, None).expect("correction draft");
+    assert!(crate::floor::combine_candidates_on(&app).expect("correction candidates").is_empty());
 }
 
 #[test]
@@ -1252,6 +1245,56 @@ fn moving_a_correction_keeps_the_issued_bill_and_updates_only_its_draft() {
     let refused = move_order_on(&app, other.as_str().to_owned(), "tbl_3".to_owned()).expect_err("correction draft occupies target");
     assert_eq!(refused.code, "floor.table_busy");
     assert_eq!(read(&app, &other).core().table().map(TableId::as_str), Some("tbl_4"));
+}
+
+#[test]
+fn merge_candidates_and_commit_share_processing_eligibility() {
+    let scratch = Scratch::new("merge_eligibility");
+    let app = a_shop_with_a_room(&scratch);
+    let active = seat(&app, "active", "tbl_1", &[("itm_dosa", 12_000, 2)], Some(1));
+    let unsent = seat(&app, "unsent", "tbl_2", &[("itm_tea", 2_000, 1)], None);
+    let empty = seat(&app, "empty", "tbl_3", &[], None);
+    let candidates = crate::floor::combine_candidates_on(&app).expect("candidates");
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].order_id.as_deref(), Some(active.as_str()));
+    assert!(candidates[0].kitchen_told, "an addition after KOT stays in Processing");
+    for (id, code) in [(&unsent, "merge.unsent"), (&empty, "merge.empty")] {
+        for (source, target) in [(id, &active), (&active, id)] {
+            assert_eq!(merge_orders_on(&app, source.as_str().to_owned(), target.as_str().to_owned()).expect_err("ineligible").code, code);
+        }
+    }
+    let before = read(&app, &active);
+    let mut config = app.shop_config();
+    config.billing.kitchen_ticket_off = true;
+    app.publish_shop_config(config);
+    assert_eq!(crate::floor::combine_candidates_on(&app).expect("no KOT").len(), 2);
+    let preview = crate::floor::preview_merge_on(&app, unsent.as_str().to_owned(), active.as_str().to_owned()).expect("preview");
+    assert_eq!(read(&app, &active), before, "preview does not merge orders");
+    merge_orders_on(&app, unsent.as_str().to_owned(), active.as_str().to_owned()).expect("merge saved orders");
+    let merged = read(&app, &active);
+    assert_eq!(preview.total.paise, crate::flows::bill_of(&app, &merged).expect("bill").grand_total.paise());
+    assert_eq!(crate::floor::combine_candidates_on(&app).expect("absorbed excluded").len(), 1);
+    assert_eq!(merge_orders_on(&app, unsent.as_str().to_owned(), active.as_str().to_owned()).expect_err("duplicate refused").code, "merge.linked");
+}
+
+#[test]
+fn merge_confirmation_refuses_changed_orders_and_preserves_discounts() {
+    let scratch = Scratch::new("merge_preview");
+    let app = a_shop_with_a_room(&scratch);
+    let source = seat(&app, "source", "tbl_1", &[("itm_dosa", 12_000, 2)], Some(2));
+    let target = seat(&app, "target", "tbl_2", &[("itm_tea", 2_000, 1)], Some(1));
+    let preview = crate::floor::preview_merge_on(&app, source.as_str().to_owned(), target.as_str().to_owned()).expect("preview");
+    let mut changed = read(&app, &source);
+    changed.core_mut().billing.discount = Some(mb_core::DiscountEntry::new(mb_core::Discount::Amount(Money::from_paise(1_000))));
+    app.with_shop(|shop| shop.db.transaction(|tx| Repos::new(tx).orders().save_working(OUTLET, app.terminal_id(), &changed))
+        .map_err(|e| crate::words::from_db(&e))).expect("another cashier changes discount");
+    assert_eq!(crate::floor::merge_checked_on(&app, source.as_str().to_owned(), target.as_str().to_owned(), Some(preview.preview_key)).expect_err("stale review").code, "merge.changed");
+    assert!(read(&app, &source).core().billing.billed_into.is_none());
+    let preview = crate::floor::preview_merge_on(&app, source.as_str().to_owned(), target.as_str().to_owned()).expect("fresh preview");
+    crate::floor::merge_checked_on(&app, source.as_str().to_owned(), target.as_str().to_owned(), Some(preview.preview_key)).expect("confirmed");
+    let bill = crate::flows::bill_of(&app, &read(&app, &target)).expect("bill");
+    assert_eq!(bill.grand_total.paise(), preview.total.paise);
+    assert_eq!(bill.total_bill_discount.paise(), 1_000);
 }
 
 #[test]

@@ -197,6 +197,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ),
     ("move_order", Access::Needs(Permission::BillCreate)),
     ("merge_orders", Access::Needs(Permission::BillCreate)),
+    ("preview_merge", Access::Needs(Permission::BillCreate)),
     ("combine_candidates", Access::Needs(Permission::BillCreate)),
     ("release_serving_table", Access::Needs(Permission::BillCreate)),
     ("split_order", Access::Needs(Permission::BillCreate)),

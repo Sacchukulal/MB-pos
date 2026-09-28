@@ -1036,7 +1036,7 @@ fn an_unchanged_correction_retains_the_payment_and_the_issued_sale_until_commit(
 }
 
 #[test]
-fn two_paid_bills_combine_without_collecting_the_money_again() {
+fn two_paid_bills_cannot_be_merged_by_normal_billing() {
     let scratch = Scratch::new("combine_paid");
     let app = a_trading_shop(&scratch);
     order_teas(&app, 2);
@@ -1045,19 +1045,11 @@ fn two_paid_bills_combine_without_collecting_the_money_again() {
     order_teas(&app, 2);
     settle_the_cart(&app);
     let second = list_bills_on(&app).expect("bills").into_iter().find(|b| b.order_id != first.order_id).expect("second");
-    crate::floor::merge_orders_on(&app, second.order_id.clone(), first.order_id.clone()).expect("combine");
-    assert_eq!(list_bills_on(&app).expect("issued until completion").iter().filter(|b| b.state == "settled").count(), 2);
-    crate::ipc::open_order_on(&app, first.order_id.clone()).expect("combined cart");
-    app.with_cart(|s| { assert_eq!(s.settlement.total_paid().expect("paid").paise(), first.total.paise + second.total.paise); Ok(()) }).expect("cart");
-    // Rounding the combined total may differ from rounding each original bill.
-    crate::flows::complete_bill_with_return_on(&app, Some("Cash".to_owned()), Some("Cash".to_owned())).expect("complete");
-    let rows = list_bills_on(&app).expect("bills");
-    assert_eq!(rows.iter().filter(|b| b.state == "settled").count(), 1);
-    app.with_shop(|shop| shop.db.transaction(|tx| {
-        let count: i64 = tx.query_row("SELECT COUNT(*) FROM bill_versions", [], |r| r.get(0))?;
-        assert_eq!(count, 2);
-        Ok(())
-    }).map_err(|e| crate::words::from_db(&e))).expect("originals retained");
+    let before = list_bills_on(&app).expect("issued bills");
+    let error = crate::floor::merge_orders_on(&app, second.order_id.clone(), first.order_id.clone()).expect_err("paid bills refused");
+    assert_eq!(error.code, "merge.finished");
+    let after = list_bills_on(&app).expect("unchanged bills");
+    assert_eq!(serde_json::to_value(before).expect("before"), serde_json::to_value(after).expect("after"));
 }
 
 #[test]

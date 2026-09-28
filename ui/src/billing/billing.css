@@ -898,25 +898,21 @@
   }
 }
 
-/* One line: what, the stepper, how much, and the way off the bill. */
-/*
- * ONE ROW: the name, the − n + and its tools, the money. The price of one and the tax rate are
- * not repeated under every line (owner, 2026-09-13: "eating too much space"); a second row
- * appears only when the line has something to say — more than one, an extra, a note, money off.
- */
+/* Stable columns keep names, quantities, amounts and row tools aligned on a narrow bill. */
 .mb-cartline {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  grid-template-areas: 'name controls amount';
+  grid-template-columns: minmax(0, 1fr) var(--control-md) minmax(8ch, max-content) auto;
+  grid-template-areas: 'name controls amount tools';
   align-items: center;
-  column-gap: var(--space-3);
-  padding: var(--space-2);
+  column-gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
   border-radius: var(--radius-sm);
 }
 .mb-cartline--more {
   grid-template-areas:
-    'name controls amount'
-    'about about about';
+    'name controls amount tools'
+    'about about about about';
   row-gap: var(--space-1);
 }
 
@@ -954,7 +950,8 @@
  * only places it and lends it the number font.
  */
 .mb-cartline__qty {
-  min-width: var(--space-8);
+  width: var(--control-md);
+  min-width: 0;
   padding: 0 var(--space-1);
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
@@ -963,20 +960,31 @@
 
 /* Typing must not change the row's height, and the tint says which box is being typed into. */
 input.mb-cartline__qty {
-  width: var(--space-8);
+  width: var(--control-md);
   height: var(--control-sm);
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   background: var(--accent-soft);
 }
 
-/* The quantity, then the tools, at the line's right end. */
+/* The quantity editor stays in its own column, including when a scale is connected. */
 .mb-cartline__controls {
   grid-area: controls;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-1);
+}
+
+.mb-cartline__tools {
+  grid-area: tools;
+  display: flex;
+  align-items: center;
+}
+
+.mb-cartline__remove {
+  border-color: transparent;
 }
 
 /* Under the name: the price of one, the tax rate, the extras, any money off. */
@@ -1012,7 +1020,7 @@ input.mb-cartline__qty {
 
 .mb-cartline__amount {
   grid-area: amount;
-  min-width: var(--space-8);
+  min-width: 0;
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
   font-weight: var(--weight-medium);
@@ -1281,16 +1289,30 @@ input.mb-cartline__qty {
   color: var(--text-muted);
 }
 
-.mb-table-choice {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+/* Keep KOT's full contrast even while its action is unavailable. */
+.mb-actions__kot:disabled {
+  opacity: 1;
 }
 
-.mb-table-choice__label {
-  flex: 1;
-  text-align: center;
+.mb-table-choice {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.mb-table-number,
+.mb-table-choice__option {
+  height: calc(var(--control-lg) + var(--space-4));
+  min-width: 0;
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-2xl);
+  font-weight: var(--weight-medium);
+  text-align: center;
+}
+
+.mb-table-choice__option[aria-checked='true'] {
+  border-color: var(--accent);
 }
 
 .mb-help {

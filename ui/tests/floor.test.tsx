@@ -136,7 +136,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   });
 
   it('tells all FIVE states apart without colour', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     const { container } = show();
     await screen.findAllByTitle('4 seats');
 
@@ -149,7 +149,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   });
 
   it('draws the section grid when no table has been placed', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     const { container } = show();
     await screen.findAllByTitle('4 seats');
 
@@ -177,7 +177,7 @@ describe('the floor (scope 14.1–14.3)', () => {
 
   /** "with 20 tables open it becomes a scrolling exercise.". */
   it('filters to the tables that need somebody', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     const { container } = show();
     await screen.findAllByTitle('4 seats');
 
@@ -192,7 +192,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   });
 
   it('sends the order and the table the screen actually showed', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     show();
     await screen.findAllByTitle('4 seats');
 
@@ -210,7 +210,7 @@ describe('the floor (scope 14.1–14.3)', () => {
   });
 
   it('offers no order actions for a free table', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     show();
     await screen.findAllByTitle('4 seats');
 
@@ -228,7 +228,7 @@ describe('the floor (scope 14.1–14.3)', () => {
 describe('arranging the room (2026-08-22)', () => {
   /** Folded on a shop that already has tables. */
   it('folds the panel to a button, and unfolds it when pressed', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     show();
     await screen.findAllByTitle('4 seats');
 
@@ -248,7 +248,7 @@ describe('arranging the room (2026-08-22)', () => {
   it('hides the panel from somebody who may not arrange the room', async () => {
     // A courtesy, not the control — guard::require is what refuses, and FloorView::can_arrange
     // is that same question asked once.
-    call.mockResolvedValue(floor({ canArrange: false }));
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor({ canArrange: false })));
     show();
     await screen.findAllByTitle('4 seats');
 
@@ -259,7 +259,7 @@ describe('arranging the room (2026-08-22)', () => {
   });
 
   it('ticks one at a time, and all of them at once', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     show();
     await screen.findAllByTitle('4 seats');
 
@@ -419,7 +419,7 @@ describe('arranging the room (2026-08-22)', () => {
   });
 
   it('adds a run of tables from the panel', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     show();
     await screen.findAllByTitle('4 seats');
 
@@ -434,7 +434,7 @@ describe('arranging the room (2026-08-22)', () => {
 
   /** The explanations are asked for, not given. */
   it('keeps the timer explanation in a tip rather than on the screen', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     const { container } = show();
     await screen.findAllByTitle('4 seats');
 
@@ -455,7 +455,7 @@ describe('arranging the room (2026-08-22)', () => {
  */
 describe('empty is not a lecture (P30.5)', () => {
   it('hides the room picker until there is more than one room', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     show();
     await screen.findAllByTitle('4 seats');
     expect(screen.queryByRole('group', { name: 'Which room' })).toBeNull();
@@ -537,7 +537,7 @@ describe('empty is not a lecture (P30.5)', () => {
 
   /** The Floor screen draws the SAME tile as the billing screen, from the same file. */
   it('offers the same print-the-bill mark the billing screen has', async () => {
-    call.mockResolvedValue(floor());
+    call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     show();
     await screen.findAllByTitle('4 seats');
 

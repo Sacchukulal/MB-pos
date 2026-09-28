@@ -558,8 +558,9 @@ describe('the processing orders (2026-08-27)', () => {
       state: 'occupied',
       orderId: `ord_${over.id}`,
       total: money(16_800, '168.00'),
-      billNumber: 'B-104',
+      billNumber: null,
       minutes: 12,
+      token: '104',
       createdAt: 1_800_000_000_000,
       ...over,
     });
@@ -572,6 +573,8 @@ describe('the processing orders (2026-08-27)', () => {
         cooking({ id: '3', label: '3', minutes: 40, createdAt: 1_799_998_200_000, state: 'late' }),
         // Open, but the kitchen has not been told: the tile's amber dot, not this list.
         cooking({ id: '4', label: '4', kitchenTold: false }),
+        cooking({ id: 'paid', label: 'Paid visit', billNumber: 'B-104' }),
+        cooking({ id: 'merged', label: 'Merged table', billedInto: 'ord_2' }),
         cooking({ id: 'p', label: 'Parcel', section: null, minutes: 20, createdAt: 1_799_999_400_000 }),
       ],
       false,
@@ -641,7 +644,7 @@ describe('the processing orders (2026-08-27)', () => {
     const three = screen.getByRole('button', { name: /Table 3/ });
     expect(three.getAttribute('aria-pressed')).toBe('true');
     expect(three.textContent).toContain('12m');
-    expect(three.textContent).toContain('B-104');
+    expect(three.textContent).toContain('#104');
     expect(three.textContent).toContain('168.00');
     expect(three.textContent).toContain('8m');
     // A parcel names itself, and a late one carries a dot as well as the colour.

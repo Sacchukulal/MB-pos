@@ -540,6 +540,7 @@ macro_rules! commands {
             $crate::floor::save_floor_thresholds,
             $crate::floor::move_order,
             $crate::floor::merge_orders,
+            $crate::floor::preview_merge,
             $crate::floor::combine_candidates,
             $crate::floor::release_serving_table,
             $crate::floor::split_order,

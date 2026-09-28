@@ -14,7 +14,7 @@ export function processingOrders(
   kitchenOff: boolean,
 ): TableView[] {
   return tables
-    .filter((t) => t.orderId !== null && !t.billedInto && (kitchenOff || t.kitchenTold))
+    .filter((t) => t.orderId !== null && !t.billedInto && !t.billNumber && (kitchenOff || t.kitchenTold))
     .sort((a, b) =>
       (b.createdAt ?? -1) - (a.createdAt ?? -1) || a.id.localeCompare(b.id),
     );

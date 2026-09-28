@@ -1130,11 +1130,8 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         total: running_total(order, config),
         minutes: Some(crate::ipc::count(minutes)),
         created_at: Some(core.created_at.millis()),
-        // The delta ledger answers "is there anything the kitchen has not been told?".
-        kitchen_told: core
-            .kitchen
-            .pending(&core.cart)
-            .is_ok_and(|pending| pending.is_empty()),
+        // Processing continues when more items are added after the first ticket.
+        kitchen_told: !core.kitchen.told().is_empty(),
         // Filled in by `floor::floor_on`, which is the only caller with the events table open.
         kitchen_minutes: None,
         bill_asked: false,
