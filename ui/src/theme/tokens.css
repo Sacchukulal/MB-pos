@@ -481,10 +481,10 @@
    * a panel is told apart from the page by its white and its shadow, and the line only
    * finishes the edge. A heavy mid-grey line on every box was the "old website" look.
    */
-  --border: #b8c3d3;
+  --border: #b0bccd;
   --border-strong: #6f809c;
   /* A panel's edge. */
-  --panel-border: #b3bfd0;
+  --panel-border: #abb8ca;
 
   /* Text — three steps, all of them dark enough to read from a step back. */
   --text: #0f172a;
@@ -586,9 +586,9 @@
   --surface-2: #1f2a40;
   --surface-sunk: #28354e;
 
-  --border: #3a4a66;
+  --border: #445470;
   --border-strong: #71849f;
-  --panel-border: #3d4d6b;
+  --panel-border: #475775;
 
   --text: #f1f5f9;
   --text-muted: #b7c3d6;
