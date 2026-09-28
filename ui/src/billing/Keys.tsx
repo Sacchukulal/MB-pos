@@ -81,7 +81,7 @@ export function HowMany({
       actions={
         <>
           <Button onMouseDown={(event) => event.preventDefault()} onClick={onLeave}>
-            Leave it
+            Cancel
           </Button>
           <Button variant="primary" onMouseDown={(event) => event.preventDefault()} onClick={onAdd}>
             Add
@@ -89,20 +89,14 @@ export function HowMany({
         </>
       }
     >
-      <div className="mb-ask">
-        <NumberInput
-          ref={box}
-          className="mb-ask__box"
-          data-keys="engine"
-          aria-label="How many"
-          value={mode.text}
-          onChange={(event) => onChange(onlyAmount(event.target.value))}
-        />
-        <span className="mb-ask__keys">
-          <kbd className="mb-kbd">↑ ↓</kbd> more or fewer <kbd className="mb-kbd">Enter</kbd> add{' '}
-          <kbd className="mb-kbd">Esc</kbd> leave it
-        </span>
-      </div>
+      <NumberInput
+        ref={box}
+        className="mb-ask__box"
+        data-keys="engine"
+        aria-label="Quantity"
+        value={mode.text}
+        onChange={(event) => onChange(onlyAmount(event.target.value))}
+      />
     </Modal>
   );
 }
