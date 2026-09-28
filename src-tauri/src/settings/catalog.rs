@@ -1884,6 +1884,17 @@ pub const CATALOG: &[Entry] = &[
         ["beat", "flash", "blink", "wave", "highlight", "phone order"],
         billing.arrival_beat
     ),
+    number!(
+        "billing.bill_copies",
+        Billing,
+        Row,
+        "Bill copies on completion",
+        "Copies printed each time you complete a bill. Set 2 for a customer copy and a shop copy. \
+         Unpaid table bills and manual reprints print one copy per request.",
+        ["print", "receipt", "copies", "duplicate", "two copies", "complete bill"],
+        1..=10 "copies",
+        u8, billing.bill_copies
+    ),
     flag!(
         "billing.kitchen_ticket_off",
         Billing,
@@ -2246,6 +2257,7 @@ const TOPICS: &[(&str, &str)] = &[
     ("kitchen.items", "Text sizes"),
     ("kitchen.column_names", "Text sizes"),
     ("billing.search_mode", "At the counter"),
+    ("billing.bill_copies", "Before it prints"),
     ("billing.rounding", "At the counter"),
     ("billing.lock_order_type", "At the counter"),
     ("billing.locked_order_type", "At the counter"),

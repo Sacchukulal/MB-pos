@@ -1526,6 +1526,55 @@ fn money_goes_back_only_after_a_void() {
 }
 
 #[test]
+fn bill_copies_apply_to_completion_only_and_keep_one_sale() {
+    use crate::settings::ipc::{SettingEdit, save_on};
+    use crate::settings::printers::{PrinterEdit, save_printer_on};
+
+    let scratch = Scratch::new("bill_copies_flow");
+    let app = a_trading_shop(&scratch);
+    // An intentionally absent printer keeps jobs on disk for inspection, even after failure.
+    save_printer_on(&app, PrinterEdit {
+        id: String::new(), name: "Offline test printer".to_owned(),
+        kind: "spooler".to_owned(), address: "__mb_absent_bill_copies_test__".to_owned(),
+        paper_mm: 80, is_default: true, role: "bill".to_owned(),
+        engine: "text".to_owned(), is_bold_dark: false, can_kick_drawer: false,
+    }).expect("test printer");
+
+    order_teas(&app, 1);
+    let first = settle_the_cart(&app);
+    save_on(&app, vec![SettingEdit {
+        key: "billing.bill_copies".to_owned(), value: "2".to_owned(),
+    }]).expect("two copies");
+    app.reload_shop_config();
+    order_teas(&app, 1);
+    let second = settle_the_cart(&app);
+    let bills = list_bills_on(&app).expect("bills");
+    assert_eq!(bills.len(), 2, "extra paper must not create extra sales");
+    let bill = bills.iter().find(|bill| bill.number == second).expect("second bill");
+    assert_eq!(bill.reprints, 0, "completion copies are not manual reprints");
+    reprint_bill_on(&app, bill.order_id.clone(), "Customer requested a copy".to_owned())
+        .expect("single reprint");
+
+    order_teas(&app, 1);
+    let open = crate::flows::park_open_order(&app).expect("open bill");
+    crate::flows::print_open_bill_on(&app, open.core.id.as_str().to_owned())
+        .expect("single unpaid bill");
+    let jobs = app.with_shop(|shop| {
+        shop.db.transaction(|tx| Repos::new(tx).print_jobs().unfinished(OUTLET))
+            .map_err(|e| crate::words::from_db(&e))
+    }).expect("durable jobs");
+    for (reason, copies) in [
+        (format!("bill {first}"), 1), (format!("bill {second}"), 2),
+        ("copy 2".to_owned(), 1), ("bill to the table".to_owned(), 1),
+    ] {
+        let matching: Vec<_> = jobs.iter()
+            .filter(|job| job.reason.as_deref() == Some(reason.as_str())).collect();
+        assert_eq!(matching.len(), 1, "expected one job for {reason}");
+        assert_eq!(matching[0].copies, copies, "copy count for {reason}");
+    }
+}
+
+#[test]
 fn a_reprint_says_which_copy_it_is() {
     let scratch = Scratch::new("reprint_flow");
     let app = a_trading_shop(&scratch);

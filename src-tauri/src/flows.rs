@@ -756,6 +756,12 @@ pub(crate) fn queue_bill(
     copy: Copy,
 ) -> UiResult<()> {
     let printer = default_printer(app)?;
+    // Completion copies share one durable job. Explicit reprints and unpaid bills stay single.
+    let copies = if matches!(&copy, Copy::Original) {
+        app.shop_config().billing.bill_copies
+    } else {
+        1
+    };
     let because = match &copy {
         Copy::Original => order
             .bill_number()
@@ -776,7 +782,9 @@ pub(crate) fn queue_bill(
             logo: true,
         },
     )?;
-    app.print(Job::new(JobKind::Bill, &printer.id, document, today(now())).because(because))?;
+    let mut job = Job::new(JobKind::Bill, &printer.id, document, today(now())).because(because);
+    job.copies = copies;
+    app.print(job)?;
     Ok(())
 }
 

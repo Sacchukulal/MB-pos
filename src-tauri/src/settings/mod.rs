@@ -190,6 +190,8 @@ pub const fn price_basis_to(basis: mb_core::PriceBasis) -> &'static str {
 #[serde(default)]
 pub struct Billing {
     pub search_mode: MatchMode,
+    /// Identical receipts printed when a bill is completed.
+    pub bill_copies: u8,
     pub rounding: mb_core::RoundingMode,
     pub lock_order_type: bool,
     pub locked_order_type: mb_core::OrderType,
@@ -221,6 +223,7 @@ impl Default for Billing {
     fn default() -> Self {
         Billing {
             search_mode: MatchMode::Contains,
+            bill_copies: 1,
             rounding: mb_core::RoundingMode::NearestRupee,
             lock_order_type: false,
             locked_order_type: mb_core::OrderType::DineIn,

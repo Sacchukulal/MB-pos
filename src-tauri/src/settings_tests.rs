@@ -411,6 +411,38 @@ fn save(app: &App, old: &ShopConfig, new: &ShopConfig) {
     app.reload_shop_config();
 }
 
+#[test]
+fn bill_copies_are_validated_saved_and_loaded() {
+    use crate::settings::ipc::{SettingEdit, all_on, save_on};
+
+    let scratch = Scratch::new("bill-copies-setting");
+    let app = a_shop(&scratch, "copies");
+    let field = all_on(&app).expect("settings").groups.into_iter()
+        .find(|group| group.code == "billing").expect("billing settings")
+        .settings.into_iter().find(|setting| setting.key == "billing.bill_copies")
+        .expect("copy count is visible");
+    assert_eq!(field.value, "1");
+    assert_eq!((field.min, field.max), (Some(1), Some(10)));
+
+    for count in ["2", "10", "1"] {
+        save_on(&app, vec![SettingEdit {
+            key: "billing.bill_copies".to_owned(), value: count.to_owned(),
+        }]).expect("save copy count");
+        app.reload_shop_config();
+        assert_eq!(app.shop_config().billing.bill_copies.to_string(), count);
+    }
+    for invalid in ["0", "-1", "11", "1.5", "", "two"] {
+        assert!(save_on(&app, vec![SettingEdit {
+            key: "billing.bill_copies".to_owned(), value: invalid.to_owned(),
+        }]).is_err(), "accepted {invalid:?}");
+        app.reload_shop_config();
+        assert_eq!(app.shop_config().billing.bill_copies, 1);
+    }
+    // Settings exported by older builds have no copy count.
+    let old: crate::settings::Billing = serde_json::from_str("{}").expect("old settings");
+    assert_eq!(old.bill_copies, 1);
+}
+
 fn updated_at(app: &App) -> i64 {
     app.with_shop(|shop| {
         shop.db
