@@ -65,6 +65,10 @@ const invented: ReportView = {
 
 function answer(command: string) {
   if (command === 'report_list') return Promise.resolve(list);
+  if (command === 'bills') return Promise.resolve({ rows: [], periods: list.periods,
+    cashiers: [], approvers: [], waiting: 0, canRevert: false, canVoid: false, canReprint: false, canApprove: false,
+    totals: { gross: { paise: 0, text: '0.00' }, voids: { paise: 0, text: '0.00' }, net: { paise: 0, text: '0.00' },
+      refunded: { paise: 0, text: '0.00' }, bills: 0, voidedBills: 0, cancelledOrders: 0 } });
   if (command === 'dashboard') {
     return Promise.resolve({
       title: 'Today, so far',
@@ -128,7 +132,7 @@ async function unfold(group: string) {
   fireEvent.click(screen.getByRole('button', { name: group }));
 }
 
-/** The screen opens on the dashboard, with every group folded away. */
+/** Reports opens on Bills, with every group folded away. */
 async function openOnAReport() {
   open();
   await unfold('Sales');
@@ -273,7 +277,7 @@ it('folds a group out of sight, not just out of the accessibility tree', async (
 });
 
 /** A licence refusal is an ANSWER, and it stays on the screen. */
-it('says why, on the screen, when the licence does not cover reports', async () => {
+it('keeps Bills available when the licence does not cover reports', async () => {
   const refusal = {
     code: 'licence.not_operating',
     message:
@@ -292,11 +296,9 @@ it('says why, on the screen, when the licence does not cover reports', async () 
     </ToastProvider>,
   );
 
-  expect(await screen.findByText('This part needs a licence')).toBeTruthy();
-  expect(screen.getByText(/no licence yet/)).toBeTruthy();
-  // And the way out is on the same screen, not somewhere they have to find.
-  fireEvent.click(screen.getByRole('button', { name: 'Open Account' }));
-  expect(go).toHaveBeenCalledWith('account');
+  expect(await screen.findByRole('heading', { name: 'Bills' })).toBeTruthy();
+  expect(screen.queryByText('This part needs a licence')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Dashboard' })).toBeNull();
 });
 
 /** A cashier may close the day without reading a single report. */
@@ -329,7 +331,7 @@ it('opens on Day open/close when asked for it', async () => {
   expect(call).toHaveBeenCalledWith('report_list');
 });
 
-it('puts the days beside the dashboard, and opens them without asking for a report', async () => {
+it('puts the days beside Bills, and opens them without asking for a report', async () => {
   open();
   await waitFor(() => expect(screen.getByRole('button', { name: 'Day open/close' })).toBeTruthy());
   fireEvent.click(screen.getByRole('button', { name: 'Day open/close' }));

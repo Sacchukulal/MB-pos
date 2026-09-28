@@ -21,7 +21,6 @@ import { call, isLicenceRefusal, isUiError } from '../ipc/call';
 import { keep, remember } from '../remember';
 import { useMay } from '../shell/permissions';
 import { Bills } from './Bills';
-import { Dashboard } from './Dashboard';
 import { Days } from './Days';
 import type { PeriodChoiceView } from '../ipc/generated/PeriodChoiceView';
 import type { ReportEntryView } from '../ipc/generated/ReportEntryView';
@@ -54,8 +53,8 @@ export function Reports({
    * reports comes here for Day open/close and sees nothing else.
    */
   const [mayReport, setMayReport] = useState(true);
-  // The dashboard is what this screen opens on.
-  const [chosen, setChosen] = useState<string>(initial === DAYS ? DAYS : TODAY);
+  // The dashboard has its own home in the logo; Reports opens on the bill history.
+  const [chosen, setChosen] = useState<string>(initial === DAYS ? DAYS : BILLS);
   useEffect(() => {
     if (initial === DAYS) setChosen(DAYS);
   }, [initial]);
@@ -114,8 +113,8 @@ export function Reports({
 
   // One effect, one call: whenever the report or the period changes, ask again.
   useEffect(() => {
-    // The dashboard, the bills and the days are not reports.
-    if (!from || !to || chosen === DAYS || chosen === TODAY || chosen === BILLS) return;
+    // The bills and the days are not reports.
+    if (!from || !to || chosen === DAYS || chosen === BILLS) return;
     setBusy(true);
     call('report', { id: chosen, period: { from, to } })
       .then(setReport)
@@ -165,10 +164,9 @@ export function Reports({
   return (
     <div className="mb-railpage">
       <Scroller inset className="mb-reports__rail">
-        {/* At the top and on their own: the dashboard, the bills, and the day itself. */}
+        {/* At the top and on their own: the bills and the day itself. */}
         <div className="mb-reports__group">
           {[
-            { id: TODAY, label: 'Dashboard', shown: mayReport },
             { id: BILLS, label: 'Bills', shown: mayReport },
             { id: DAYS, label: 'Day open/close', shown: true },
           ]
@@ -225,8 +223,6 @@ export function Reports({
           <Days />
         ) : locked || !list ? (
           <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />
-        ) : chosen === TODAY ? (
-          <Dashboard presets={list.periods} />
         ) : (
           <>
         <div className="mb-reports__when">
@@ -362,9 +358,6 @@ const DAYS = 'days';
 
 /** Nor are the bills: one at a time, with the ways to take one back. */
 const BILLS = 'bills';
-
-/** Nor is the dashboard: it is the answer to a question, not a report. */
-const TODAY = 'today';
 
 /** Which report groups are open, on this computer. */
 const FOLDS = 'reports.unfolded';

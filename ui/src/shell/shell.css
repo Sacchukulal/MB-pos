@@ -47,6 +47,30 @@
   min-width: 0;
 }
 
+.mb-topbar__home {
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: var(--space-1);
+  font: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background var(--motion-normal) var(--ease), border-color var(--motion-normal) var(--ease);
+}
+
+.mb-topbar__home:hover,
+.mb-topbar__home[aria-current='page'] {
+  background: var(--dash-wash);
+  border-color: var(--dash-green);
+}
+
+/* Keep the extra logo hit area from squeezing More off the minimum-size window. */
+.mb-topbar--tight .mb-nav__item {
+  gap: var(--space-1);
+  padding-inline: var(--space-1);
+  font-size: var(--text-sm);
+}
+
 .mb-topbar__mark {
   display: flex;
   align-items: center;

@@ -251,11 +251,12 @@ describe('the top navigation', () => {
   });
 
   /** Every destination is reachable and none is in both places. */
-  it('puts every screen in exactly one of the two places', () => {
+  it('puts every screen in exactly one place, including the logo', () => {
     const { inBar, inMore } = splitScreens(SHIPPED_SCREENS, 'billing');
-    const ids = [...inBar, ...inMore].map((s) => s.id);
+    const ids = ['dashboard', ...[...inBar, ...inMore].map((s) => s.id)];
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.sort()).toEqual([...SHIPPED_SCREENS].map((s) => s.id).sort());
+    expect(splitScreens(SHIPPED_SCREENS, 'dashboard').elsewhere).toBeNull();
   });
 
   /** Every item has a real icon and keeps its word (§5). */

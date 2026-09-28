@@ -10,6 +10,7 @@ import type { ChartView } from '../ipc/generated/ChartView';
 import type { PointView } from '../ipc/generated/PointView';
 import { cx } from './cx';
 import { SectionHeader } from './display';
+import { ChartPlaceholder, Trend } from './Trend';
 
 /** The run over time: a column per step. */
 const COLUMNS_HEIGHT = 190;
@@ -50,15 +51,15 @@ function hueClass(hue: number): string {
   return hue > 0 ? `mb-chart__mark--hue-${hue}` : 'mb-chart__mark--mono';
 }
 
-export function Chart({ chart, className }: { chart: ChartView; className?: string }) {
+export function Chart({ chart, className, overview = false }: { chart: ChartView; className?: string; overview?: boolean }) {
   return (
-    <section className={cx('mb-card', 'mb-chart', className)}>
+    <section className={cx('mb-card', 'mb-chart', overview && 'mb-chart--overview', className)}>
       <SectionHeader title={chart.title} />
       {chart.note ? <p className="mb-chart__note">{chart.note}</p> : null}
       {chart.points.length === 0 ? (
-        <p className="mb-chart__empty">{chart.empty}</p>
+        overview ? <ChartPlaceholder kind={chart.kind} message={chart.empty} /> : <p className="mb-chart__empty">{chart.empty}</p>
       ) : chart.kind === 'columns' ? (
-        <Columns points={chart.points} />
+        overview ? <Trend points={chart.points} /> : <Columns points={chart.points} />
       ) : chart.kind === 'donut' ? (
         <Donut points={chart.points} />
       ) : (

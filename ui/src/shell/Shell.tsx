@@ -36,6 +36,7 @@ import { Delivery } from '../delivery/Delivery';
 import { Menu } from '../menu/Menu';
 import { Phones } from '../phones/Phones';
 import { Reports } from '../reports/Reports';
+import { DashboardPage } from '../reports/Dashboard';
 import { Settings } from '../settings/Settings';
 
 import './shell.css';
@@ -74,6 +75,13 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     // `go` so an empty shop's counter can open the menu, the floor and the printers.
     render: (go) => <Billing onGoTo={go} />,
     needs: 'bill.create',
+  },
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    icon: 'chart',
+    render: (go) => <DashboardPage onGoTo={go} />,
+    needs: 'reports.view',
   },
   {
     // The floor answers a different question from the billing grid: not "which table am I
@@ -786,7 +794,7 @@ export function splitScreens(
   current: string,
 ): { inBar: Screen[]; inMore: Screen[]; elsewhere: Screen | null } {
   const inBar = screens.filter((s) => s.daily);
-  const inMore = screens.filter((s) => !s.daily);
+  const inMore = screens.filter((s) => !s.daily && s.id !== 'dashboard');
   return {
     inBar,
     inMore,
@@ -948,12 +956,24 @@ function TopBar({
       className={['mb-topbar', tight ? 'mb-topbar--tight' : ''].filter(Boolean).join(' ')}
       data-tauri-drag-region
     >
-      <div className="mb-topbar__brand" data-tauri-drag-region title={shopPath ?? undefined}>
+      {screens.some((item) => item.id === 'dashboard') ? (
+        <button
+          type="button"
+          className="mb-topbar__brand mb-topbar__home"
+          aria-label="Magic Bill dashboard"
+          aria-current={current === 'dashboard' ? 'page' : undefined}
+          title="Open dashboard"
+          onClick={() => go('dashboard')}
+        >
+          <span className="mb-topbar__mark" aria-hidden="true"><Logo size="sm" /></span>
+          <span className="mb-topbar__name mb-topbar__give">Magic Bill</span>
+        </button>
+      ) : <div className="mb-topbar__brand" data-tauri-drag-region title={shopPath ?? undefined}>
         <span className="mb-topbar__mark" aria-hidden="true">
           <Logo size="sm" />
         </span>
         <span className="mb-topbar__name mb-topbar__give">Magic Bill</span>
-      </div>
+      </div>}
       <span className="mb-topbar__divider" aria-hidden="true" />
 
       <nav className="mb-nav" aria-label="Screens" ref={nav}>

@@ -141,6 +141,31 @@ it('does not mount the screen behind the lock', async () => {
   await screen.findByText('Who is at the counter?');
   // Not one command that needs a session has been sent.
   expect(call).not.toHaveBeenCalledWith('menu_items');
+  expect(screen.queryByRole('button', { name: 'Magic Bill dashboard' })).toBeNull();
+});
+
+it('opens the full dashboard from the logo without a More or Reports rail', async () => {
+  signedInAs = 'Meena';
+  call.mockImplementation((command: string) => {
+    if (command === 'report_list') return Promise.resolve({ periods: [{ label: 'Today', from: '2026-09-28', to: '2026-09-28' }], reports: [] });
+    if (command === 'dashboard') return Promise.resolve({ title: 'Today, so far', stats: [], charts: [], attention: [], quiet: 'All clear.', compare: null });
+    return answer(command);
+  });
+  const { container } = show();
+  fireEvent.click(await screen.findByRole('button', { name: 'Magic Bill dashboard' }));
+  expect(await screen.findByRole('heading', { name: 'Business overview' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Magic Bill dashboard' }).getAttribute('aria-current')).toBe('page');
+  expect(container.querySelector('.mb-reports__rail')).toBeNull();
+  expect(container.querySelector('.mb-more__rail')).toBeNull();
+});
+
+it('does not offer the dashboard logo to a cashier without reports permission', async () => {
+  signedInAs = 'Meena';
+  held = ['bill.create'];
+  show();
+  await screen.findByRole('button', { name: 'Billing' });
+  expect(screen.queryByRole('button', { name: 'Magic Bill dashboard' })).toBeNull();
+  expect(call).not.toHaveBeenCalledWith('report_list');
 });
 
 /** A shop with thirty people has thirty names on the lock screen, and the card still fits. */

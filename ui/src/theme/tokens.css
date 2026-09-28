@@ -372,6 +372,28 @@
   --dash-stat: 10rem;
   /* Two chart cards across at 1366; the run over time takes the whole row. */
   --dash-chart: 24rem;
+  /* The home dashboard: a quieter canvas, mint emphasis and roomy chart surfaces. */
+  --dash-radius: 1.125rem;
+  --dash-heading: calc(1.8rem * var(--type-scale));
+  --dash-number: calc(1.65rem * var(--type-scale));
+  --dash-icon: 1.75rem;
+  --dash-plot: 12rem;
+  --dash-ring: 8rem;
+  --dash-ring-width: 1rem;
+  --dash-green: #087f6b;
+  --dash-green-ink: #ffffff;
+  --dash-hero: linear-gradient(125deg, #087f6b, #105c57);
+  --dash-border: color-mix(in srgb, var(--border) 52%, transparent);
+  --dash-wash: color-mix(in srgb, var(--dash-green) 9%, var(--surface));
+  --dash-hero-line: #ffffff38;
+  --dash-hero-soft: #ffffff1c;
+  --dash-hero-muted: #d9f5e9;
+  --dash-grid: color-mix(in srgb, var(--text-faint) 18%, transparent);
+  --dash-glow: radial-gradient(ellipse at top right, color-mix(in srgb, var(--dash-green) 7%, transparent), transparent 55%);
+  --dash-card-shadow: 0 3px 16px #00000005;
+  --dash-plot-stroke: 2.5;
+  --dash-gradient-top: 0.24;
+  --dash-gradient-bottom: 0.01;
   --chart-columns-height: 12rem;
   --chart-bar: 0.75rem;
   --chart-label: 8rem;
@@ -583,6 +605,9 @@
    */
   --bg: #0b1120;
   --surface: #172033;
+  --dash-green: #61d9b6;
+  --dash-green-ink: #0b2624;
+  --dash-hero: linear-gradient(125deg, #134e49, #173c40);
   --surface-2: #1f2a40;
   --surface-sunk: #28354e;
 
@@ -739,4 +764,3 @@ textarea {
     --press: 1;
   }
 }
-
