@@ -358,7 +358,7 @@ function Paper({ preview, kitchen }: { preview: PreviewView | null; kitchen: boo
     <aside className="mb-settings__paper" aria-label="Preview of what prints">
       <div className="mb-settings__paperhead">
         <span className="mb-settings__papertitle">
-          {kitchen ? 'The kitchen ticket' : 'The bill'}
+          {kitchen ? 'KOT' : 'The bill'}
         </span>
         {preview ? (
           <span className="mb-settings__papernote">

@@ -54,14 +54,14 @@ impl Group {
             Group::Store => "Your shop",
             Group::Tax => "Tax",
             Group::Receipt => "The bill",
-            Group::Kitchen => "The kitchen ticket",
+            Group::Kitchen => "KOT",
             Group::Printers => "Printers",
             Group::Numbering => "Bill and token numbers",
             Group::Billing => "Billing",
             Group::Day => "Day open/close",
             Group::Stock => "Stock",
             Group::Backup => "Backup",
-            Group::Appearance => "How it looks",
+            Group::Appearance => "Appearance",
             Group::Devices => "Devices",
         }
     }

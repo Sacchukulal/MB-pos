@@ -112,7 +112,7 @@ const view: SettingsView = {
     /** The section that designs a piece of paper, and the one the paper tests use. */
     {
       code: 'kitchen',
-      label: 'The kitchen ticket',
+      label: 'KOT',
       canEdit: true,
       settings: [
         setting('kitchen.footer', 'Ticket footer', 'words', 'Cook it hot', {
@@ -304,7 +304,7 @@ describe('the settings screen', () => {
   it('draws the sample paper and redraws it as a setting is typed', async () => {
     draw();
     await screen.findByLabelText('Shop name');
-    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+    fireEvent.click(screen.getByRole('button', { name: /KOT/ }));
 
     expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
     // Which paper and which face it DREW with, said above the paper itself — facts, not boxes.
@@ -333,7 +333,7 @@ describe('the settings screen', () => {
     expect(call).not.toHaveBeenCalledWith('preview_settings', expect.anything());
 
     // And it is on the section that DOES design a piece of paper.
-    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+    fireEvent.click(screen.getByRole('button', { name: /KOT/ }));
     expect(await screen.findByLabelText('Preview of what prints')).toBeTruthy();
   });
 
@@ -360,7 +360,7 @@ describe('the settings screen', () => {
   it('draws a size and its bold tick on one named line', async () => {
     draw();
     await screen.findByLabelText('Shop name');
-    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+    fireEvent.click(screen.getByRole('button', { name: /KOT/ }));
 
     // Named once, by the name Rust gave the line.
     const line = (await screen.findByText('Title')).closest('.mb-settings__line');
@@ -382,7 +382,7 @@ describe('the settings screen', () => {
   it('asks for the KITCHEN sample on the kitchen section', async () => {
     draw();
     await screen.findByLabelText('Shop name');
-    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+    fireEvent.click(screen.getByRole('button', { name: /KOT/ }));
 
     await waitFor(() =>
       expect(call).toHaveBeenCalledWith('preview_settings', {
@@ -415,7 +415,7 @@ describe('the settings screen', () => {
     });
     draw();
     await screen.findByLabelText('Shop name');
-    fireEvent.click(screen.getByRole('button', { name: /The kitchen ticket/ }));
+    fireEvent.click(screen.getByRole('button', { name: /KOT/ }));
 
     // The paper is still drawn.
     expect(await screen.findByText('Anna Kuteera')).toBeTruthy();
