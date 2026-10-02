@@ -957,7 +957,7 @@ fn parking_twice_keeps_the_time_and_the_day() {
 /// A parcel cannot be on a table, and a dine-in cart with no table cannot become an order.
 #[test]
 fn a_table_and_a_parcel_cannot_meet() {
-    let mut state = crate::billing::CartState::default();
+    let mut state = crate::billing::CartState::new_order(mb_core::OrderType::DineIn);
     let by = StaffId::new("staff_default");
     let refused = state
         .to_core(crate::flows::now(), &by, "t1")

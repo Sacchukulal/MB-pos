@@ -901,7 +901,7 @@
 /* Stable columns keep names, quantities, amounts and row tools aligned on a narrow bill. */
 .mb-cartline {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--control-md) minmax(8ch, max-content) auto;
+  grid-template-columns: minmax(0, 1fr) calc(var(--control-md) + var(--space-4)) minmax(8ch, max-content) auto;
   grid-template-areas: 'name controls amount tools';
   align-items: center;
   column-gap: var(--space-1);
@@ -944,11 +944,26 @@
   min-width: 0;
 }
 
-/*
- * The quantity: one box, tapped to type a new one. No − +, so the name gets the room they
- * took. The kit draws the box — a small Button at rest, an Input while it is typed into; this
- * only places it and lends it the number font.
- */
+/* The quantity box and its compact up/down controls share one aligned column. */
+.mb-cartline__quantity {
+  display: flex;
+  align-items: stretch;
+}
+
+.mb-cartline__steps {
+  display: flex;
+  flex-direction: column;
+  width: var(--space-4);
+}
+
+.mb-cartline__steps .mb-button {
+  flex: 1;
+  width: var(--space-4);
+  height: calc(var(--control-sm) / 2);
+  min-height: 0;
+  padding: 0;
+}
+
 .mb-cartline__qty {
   width: var(--control-md);
   min-width: 0;

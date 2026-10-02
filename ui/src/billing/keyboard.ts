@@ -38,9 +38,9 @@ export interface State {
 export const MAX_SUGGESTIONS = 10;
 
 export const ORDER_TYPES = [
+  'Self service',
   'Dine in',
   'Parcel',
-  'Self service',
   'Delivery',
 ] as const;
 
@@ -116,7 +116,7 @@ export function reduceCarried(state: Carried, event: CarriedEvent): Carried {
   return { ...next, pending: [...state.pending, ...queued], issued };
 }
 
-export function initial(orderType = 'Dine in'): State {
+export function initial(orderType: string = ORDER_TYPES[0]): State {
   return {
     mode: { kind: 'searching' },
     text: '',
@@ -228,7 +228,7 @@ export function quantityOf(text: string): string {
 }
 
 /** One more or one fewer, never below one whole. */
-function stepQuantity(text: string, by: number): string {
+export function stepQuantity(text: string, by: number): string {
   const n = Number(text.trim());
   const now = Number.isFinite(n) && n > 0 ? n : 1;
   const next = Math.round((now + by) * 1000) / 1000;
@@ -447,7 +447,8 @@ export const SHORTCUTS: readonly {
   { group: 'The order', keys: 'Enter, with no table', what: 'A dine-in order asks for its table number in a box; type it and the kitchen ticket goes' },
   { group: 'The order', keys: '\u2190 / \u2192, Enter', what: 'After choosing an occupied table, add to its order or choose a separate subtable' },
   { group: 'The order', keys: '← →', what: 'Change the order type (unless the shop locks it)' },
-  { group: 'The order', keys: 'Esc', what: 'New order, from anywhere' },
+  { group: 'The order', keys: 'Esc', what: 'New order in Self service; keeps the current mode when locked' },
+  { group: 'The order', keys: '↑ ↓', what: 'On an item quantity: increase or decrease it' },
   { group: 'Processing orders', keys: '↓', what: 'From an empty box, into the processing orders' },
   { group: 'Processing orders', keys: '↑ ↓', what: 'Move through them — the row you land on opens in the cart' },
   { group: 'Processing orders', keys: 'Enter', what: 'Complete the bill for the order the arrows are on' },

@@ -37,7 +37,7 @@ import type { TableView } from '../ipc/generated/TableView';
 import { useTick } from '../clock';
 import { mark } from '../perf';
 import { HelpSheet, HowMany, Suggestions, TableBox } from './Keys';
-import { carry, reduceCarried, type Command as KeyCommand } from './keyboard';
+import { carry, ORDER_TYPES, reduceCarried, stepQuantity, type Command as KeyCommand } from './keyboard';
 import { PutOnAccount } from '../credit/Credit';
 import { ReasonDialog } from '../corrections/Reason';
 import { DiscountDialog } from './Discount';
@@ -53,8 +53,6 @@ import { Before } from '../preview/Before';
 import { keep, remember } from '../remember';
 
 import './billing.css';
-
-const ORDER_TYPES = ['Dine in', 'Parcel', 'Self service', 'Delivery'] as const;
 
 const NO_TABLES: readonly TableView[] = [];
 
@@ -224,8 +222,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   // The same list the grid draws, narrowed to what the kitchen has. A settled order leaves it
   // the moment the floor is re-read.
   const processing = useMemo(
-    () => processingOrders(tables, kitchenOff),
-    [tables, kitchenOff],
+    () => processingOrders(tables),
+    [tables],
   );
 
   const addItem = useCallback(
@@ -296,6 +294,23 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
     await setQty(typed.index, typed.text.trim(), typed.expectedLine);
   }, [setQty, typingQty]);
 
+  const steppingQty = useRef(false);
+  const stepLineQty = async (line: CartLineView, direction: number) => {
+    if (typingQty?.index === line.index) {
+      setTypingQty((typed) => typed && { ...typed, text: stepQuantity(typed.text, direction) });
+      return;
+    }
+    if (steppingQty.current) return;
+    const qty = stepQuantity(line.qty, direction);
+    if (qty === line.qty) return;
+    steppingQty.current = true;
+    try {
+      await setQty(line.index, qty, line.editToken);
+    } finally {
+      steppingQty.current = false;
+    }
+  };
+
   /** Once the kitchen has been told, taking a line off is a void, which is its own permission. */
   const mayVoidLine = may('order.item.void');
   /** Off for a parcel counter (Floor's switch): the orders being cooked take the grid's room. */
@@ -328,15 +343,15 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
   const newOrder = useCallback(async () => {
     try {
-      // The type stays: a parcel counter should not re-pick it forty times an hour. The shop's
-      // lock, when it is on, is applied in Rust.
-      setCart(await call('cart_clear', { keepType: true }));
+      // Escape and New order share the same reset. The local arrow lock keeps the current
+      // mode; Rust applies the shop lock and the unlocked Self service default.
+      setCart(await call('cart_clear', { keepType: arrowsLocked }));
       freshMoney();
       await refreshFloor();
     } catch (cause) {
       report(cause);
     }
-  }, [freshMoney, refreshFloor, report]);
+  }, [arrowsLocked, freshMoney, refreshFloor, report]);
 
   /** Enter, with a burst of characters in the box: ask Rust whether that was a machine. */
   const handledAsScan = useCallback(async (): Promise<boolean> => {
@@ -1016,6 +1031,12 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                   The quantity is tapped and typed; its column stays aligned across rows.
                 */}
                 <div className="mb-cartline__controls">
+                  <div className="mb-cartline__quantity" onKeyDown={(event) => {
+                    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void stepLineQty(line, event.key === 'ArrowUp' ? 1 : -1);
+                  }}>
                   {typingQty?.index === line.index ? (
                     <Input
                       className="mb-cartline__qty"
@@ -1033,8 +1054,12 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                       }
                       onBlur={() => void commitQty()}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') void commitQty();
-                        if (e.key === 'Escape') setTypingQty(null);
+                        if (e.key === 'Enter' || e.key === 'Escape') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (e.key === 'Enter') void commitQty();
+                          else setTypingQty(null);
+                        }
                       }}
                     />
                   ) : (
@@ -1052,6 +1077,26 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                       {line.qty}
                     </Button>
                   )}
+                  <span className="mb-cartline__steps">
+                    {([1, -1] as const).map((direction) => (
+                      <Button
+                        key={direction}
+                        variant="quiet"
+                        size="sm"
+                        iconOnly
+                        aria-label={`${direction === 1 ? 'Increase' : 'Decrease'} the quantity of ${line.name}`}
+                        title={direction === 1 ? 'Increase quantity (↑)' : 'Decrease quantity (↓)'}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void stepLineQty(line, direction);
+                        }}
+                      >
+                        <Icon name={direction === 1 ? 'chevron-up' : 'chevron-down'} size="sm" />
+                      </Button>
+                    ))}
+                  </span>
+                  </div>
                 {typingQty?.index === line.index && hasScale ? (
                   <Button
                     variant="quiet"

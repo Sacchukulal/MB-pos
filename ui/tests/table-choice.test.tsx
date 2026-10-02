@@ -16,6 +16,7 @@ import { TableBox } from '../src/billing/Keys';
 import { ToastProvider } from '../src/kit';
 
 const table: TableView = {
+  processing: false,
   id: 'table_6', label: '6', section: 'Main', sectionOrder: 0, seats: 4,
   state: 'occupied', total: null, minutes: 0, createdAt: null,
   kitchenTold: false, kitchenMinutes: null, billAsked: false, settleAsked: false,

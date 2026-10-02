@@ -34,6 +34,7 @@ import type { TableView } from '../src/ipc/generated/TableView';
 
 function tile(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): TableView {
   return {
+    processing: false,
     section: 'Hall',
     sectionOrder: 0,
     seats: 4,

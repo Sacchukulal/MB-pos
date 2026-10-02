@@ -12,6 +12,52 @@ fn shop(scratch: &Scratch) -> App {
 }
 
 #[test]
+fn reverted_bills_process_under_the_same_number_until_completed() {
+    for sent in [false, true] {
+        let scratch = Scratch::new(if sent { "processing_revert_sent" } else { "processing_revert_unsent" });
+        let app = shop(&scratch);
+        if sent {
+            crate::flows::print_kitchen_ticket_on(&app).expect("sent");
+        }
+        crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("settled");
+        let row = crate::corrections::list_bills_on(&app).expect("bills").remove(0);
+        assert!(crate::ipc::open_orders_on(&app).expect("floor").iter().all(|tile| !tile.processing));
+        crate::corrections::revert_bill_on(&app, row.order_id.clone(), "Correct items".to_owned(), None, None).expect("edit");
+        let tiles = crate::ipc::open_orders_on(&app).expect("reopened floor");
+        let tile = tiles.iter().find(|tile| tile.order_id.as_deref() == Some(row.order_id.as_str())).expect("same order");
+        assert!(tile.processing, "a correction must remain reachable even without an old KOT");
+        let number = tile.bill_number.clone().expect("keeps issued number");
+        crate::ipc::cart_clear_on(&app, false).expect("park correction");
+        assert!(crate::ipc::open_orders_on(&app).expect("parked").iter().any(|tile| tile.processing && tile.bill_number.as_ref() == Some(&number)));
+        crate::ipc::open_order_on(&app, row.order_id.clone()).expect("resume edit");
+        let completed = crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("complete correction");
+        assert_eq!(completed, number);
+        assert!(crate::ipc::open_orders_on(&app).expect("completed floor").iter().all(|tile| !tile.processing));
+    }
+}
+
+#[test]
+fn fresh_orders_use_self_service_unless_the_counter_keeps_or_locks_its_mode() {
+    let scratch = Scratch::new("fresh_order_mode");
+    let app = a_trading_shop(&scratch);
+    assert_eq!(crate::billing::CartState::default().order_type(), mb_core::OrderType::SelfService);
+    for (keep, expected) in [(true, "Parcel"), (false, "Self service")] {
+        app.with_cart_mut(|state| {
+            *state = crate::billing::CartState::new_order(mb_core::OrderType::Parcel);
+            Ok(())
+        }).expect("parcel selected");
+        let cart = crate::ipc::cart_clear_on(&app, keep).expect("fresh order");
+        assert_eq!(cart.order_type, expected);
+        assert!(cart.is_empty);
+    }
+    let mut config = app.shop_config();
+    config.billing.lock_order_type = true;
+    config.billing.locked_order_type = mb_core::OrderType::Delivery;
+    app.publish_shop_config(config);
+    assert_eq!(crate::ipc::cart_clear_on(&app, false).expect("locked fresh order").order_type, "Delivery");
+}
+
+#[test]
 fn reducing_only_unsent_quantity_needs_no_kitchen_cancellation() {
     let scratch = Scratch::new("reduce_unsent");
     let app = shop(&scratch);

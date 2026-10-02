@@ -61,9 +61,11 @@ pub struct CartState {
 
 impl Default for CartState {
     fn default() -> Self {
-        CartState::new_order(OrderType::DineIn)
+        CartState::new_order(DEFAULT_ORDER_TYPE)
     }
 }
+
+pub const DEFAULT_ORDER_TYPE: OrderType = OrderType::SelfService;
 
 impl CartState {
     /// An empty cart of this type — what the counter shows after a bill, keeping the type lock.
@@ -623,6 +625,8 @@ pub struct PaymentView {
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct TableView {
+    /// Whether this order belongs in Processing, decided from its working state.
+    pub processing: bool,
     #[ts(optional)]
     pub billed_into: Option<String>,
     pub id: String,
@@ -1062,6 +1066,7 @@ fn free_tile(
 ) -> TableView {
     TableView {
         id: table_id.to_owned(),
+        processing: false,
         billed_into: None,
         label,
         section: section.name.clone(),
@@ -1118,6 +1123,11 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
 
     TableView {
         // Being selected no longer costs the table its state.
+        processing: matches!(order, AnyOrder::Open(_) | AnyOrder::Draft(_))
+            && core.billing.billed_into.is_none()
+            && (config.billing.kitchen_ticket_off
+                || !core.kitchen.told().is_empty()
+                || order.bill_number().is_some()),
         billed_into: core.billing.billed_into.as_ref().map(|id| id.as_str().to_owned()),
         state: if minutes >= late_after {
             TableState::Late

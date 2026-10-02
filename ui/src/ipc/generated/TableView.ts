@@ -5,7 +5,11 @@ import type { TableState } from "./TableState";
 /**
  * One tile in the grid — the only view of open orders.
  */
-export type TableView = { billedInto?: string, id: string, label: string, 
+export type TableView = { 
+/**
+ * Whether this order belongs in Processing, decided from its working state.
+ */
+processing: boolean, billedInto?: string, id: string, label: string, 
 /**
  * The section's name, or `None` for the "No table" group that holds open parcel and
  * self-service orders — "so no order is ever invisible".

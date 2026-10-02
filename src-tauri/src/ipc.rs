@@ -892,8 +892,7 @@ pub fn cart_remove(
     shown(&handle, view)
 }
 
-/// New order. Keeps the order type, because the type lock is what stops a parcel counter
-/// re-selecting it forty times an hour.
+/// New order. Unlocked resets use Self service; a counter lock keeps its chosen type.
 pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
     let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
@@ -903,7 +902,7 @@ pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
         let previous = if keep_type {
             state.order_type()
         } else {
-            mb_core::OrderType::DineIn
+            crate::billing::DEFAULT_ORDER_TYPE
         };
         *state = CartState::new_order(crate::billing::starting_order_type(&config, previous));
         cart_view(state, &config)

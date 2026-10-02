@@ -1,4 +1,4 @@
-/** The orders the kitchen has, until they are billed. Drawn from the same list as the grid. */
+/** Active orders and bill corrections, drawn from the same core list as the grid. */
 
 import { useEffect, useRef } from 'react';
 
@@ -7,14 +7,12 @@ import type { TableView } from '../ipc/generated/TableView';
 import { formatMinutes } from './TableGrid';
 import { hasArrived } from './arrivals';
 
-/** The orders being cooked or served — sent to the kitchen and not yet billed, newest first. */
+/** Rust decides membership from the working order; this view only sorts it, newest first. */
 export function processingOrders(
   tables: readonly TableView[],
-  /** A shop with no kitchen ticket: every open order counts. */
-  kitchenOff: boolean,
 ): TableView[] {
   return tables
-    .filter((t) => t.orderId !== null && !t.billedInto && !t.billNumber && (kitchenOff || t.kitchenTold))
+    .filter((t) => t.processing)
     .sort((a, b) =>
       (b.createdAt ?? -1) - (a.createdAt ?? -1) || a.id.localeCompare(b.id),
     );
@@ -78,7 +76,7 @@ export function Processing({
       <EmptyState
         small
         title="Nothing cooking"
-        hint="Orders sent to the kitchen show here until they are billed."
+        hint="Orders sent to the kitchen and bills reopened for editing show here."
       />
     );
   }

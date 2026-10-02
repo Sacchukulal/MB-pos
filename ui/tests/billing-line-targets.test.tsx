@@ -20,6 +20,7 @@ const zero = { paise: 0n, text: '0.00' };
 const money = { paise: 16000n, text: '160.00' };
 let cart: CartView;
 beforeEach(() => {
+  window.localStorage.clear();
   call.mockReset();
   cart = {
     lines: [{ index: 0, editToken: 'original-line', name: 'Masala Dosa', note: null, qty: '2',
@@ -42,6 +43,68 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+it('starts a fresh default order on Escape when unlocked', async () => {
+  cart.orderTypeLocked = false;
+  await show();
+  fireEvent.keyDown(window, { key: 'Escape' });
+  await waitFor(() => expect(call).toHaveBeenCalledWith('cart_clear', { keepType: false }));
+});
+
+it('keeps the current mode on Escape when arrow-locked, while mouse switching stays available', async () => {
+  cart.orderTypeLocked = false;
+  await show();
+  fireEvent.click(screen.getByRole('button', { name: 'Lock the arrow keys' }));
+  fireEvent.keyDown(window, { key: 'ArrowRight' });
+  expect(call.mock.calls.some(([command]) => command === 'cart_set_order_type')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Parcel' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('cart_set_order_type', { orderType: 'Parcel' }));
+  fireEvent.keyDown(window, { key: 'Escape' });
+  await waitFor(() => expect(call).toHaveBeenCalledWith('cart_clear', { keepType: true }));
+});
+
+it('shows Self service first in the service buttons', async () => {
+  cart.orderTypeLocked = false;
+  await show();
+  const modes = screen.getByRole('group', { name: 'Order type' });
+  expect([...modes.querySelectorAll('button')].map((button) => button.textContent))
+    .toEqual(['Self service', 'Dine in', 'Parcel', 'Delivery']);
+});
+
+it.each([['Increase', '3'], ['Decrease', '1']])('uses the existing guarded quantity edit for %s', async (action, qty) => {
+  await show();
+  fireEvent.click(screen.getByRole('button', { name: `${action} the quantity of Masala Dosa` }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('cart_set_qty', {
+    index: 0, qty, expectedLine: 'original-line',
+  }));
+});
+
+it('adjusts a typed quantity with arrows without navigating orders or losing the original line token', async () => {
+  await show();
+  fireEvent.click(screen.getByRole('button', { name: 'Change the quantity of Masala Dosa' }));
+  await phoneChangedLine();
+  const input = screen.getByRole('textbox', { name: 'Quantity of Masala Dosa' });
+  fireEvent.keyDown(input, { key: 'ArrowUp' });
+  expect(input).toHaveValue('3');
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
+  expect(input).toHaveValue('2');
+  fireEvent.click(screen.getByRole('button', { name: 'Increase the quantity of Masala Dosa' }));
+  expect(input).toHaveValue('3');
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await waitFor(() => expect(call).toHaveBeenCalledWith('cart_set_qty', {
+    index: 0, qty: '3', expectedLine: 'original-line',
+  }));
+  expect(call.mock.calls.filter(([command]) => command === 'cart_set_qty')).toHaveLength(1);
+  expect(call.mock.calls.some(([command]) => command === 'cart_clear' || command === 'open_table')).toBe(false);
+});
+
+it('does not reduce one item to zero through the quantity controls', async () => {
+  cart.lines[0]!.qty = '1';
+  await show();
+  fireEvent.click(screen.getByRole('button', { name: 'Decrease the quantity of Masala Dosa' }));
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Change the quantity of Masala Dosa' }), { key: 'ArrowDown' });
+  expect(call.mock.calls.some(([command]) => command === 'cart_set_qty' || command === 'cart_remove')).toBe(false);
+});
 
 async function show() {
   render(<ToastProvider><Billing onGoTo={vi.fn()} /></ToastProvider>);
@@ -147,6 +210,7 @@ it('keeps the latest tile total when overlapping floor replies arrive in reverse
     return answer(command, args);
   });
   const tile: TableView = {
+    processing: false,
     id: 'table_4', label: '4', section: 'Main', sectionOrder: 0, seats: 4, state: 'occupied',
     total: { paise: 60000n, text: '600.00' }, minutes: 0, createdAt: null,
     kitchenTold: false, kitchenMinutes: null, billAsked: false, settleAsked: false,

@@ -31,6 +31,7 @@ function item(id: string, name: string): MenuItemView {
 
 function table(label: string, busy = false): TableView {
   return {
+    processing: busy,
     id: `tbl_${label}`,
     label,
     section: 'Main Hall',
@@ -291,11 +292,11 @@ describe('a table name loads its order; anything else falls through', () => {
 describe('the order type, and the lock', () => {
   it('arrows cycle it both ways', () => {
     let [state, commands] = run(initial(), press('ArrowRight'));
-    expect(state.orderType).toBe('Parcel');
-    expect(commands).toEqual([{ do: 'set-order-type', value: 'Parcel' }]);
+    expect(state.orderType).toBe('Dine in');
+    expect(commands).toEqual([{ do: 'set-order-type', value: 'Dine in' }]);
 
     [state] = run(state, press('ArrowLeft'));
-    expect(state.orderType).toBe('Dine in');
+    expect(state.orderType).toBe('Self service');
 
     // And it wraps rather than stopping.
     [state] = run(state, press('ArrowLeft'));
@@ -319,7 +320,7 @@ describe('the order type, and the lock', () => {
       suggest(item('a', 'A'), item('b', 'B')),
       press('ArrowRight'),
     );
-    expect(state.orderType).toBe('Dine in');
+    expect(state.orderType).toBe('Self service');
   });
 });
 
@@ -520,7 +521,7 @@ describe('the whole counter flow, by keyboard alone', () => {
     expect(commands).toEqual([{ do: 'print-kitchen' }]);
     [state, commands] = run(
       state, cart(false), floor(older, newest),
-      cooking(...processingOrders([older, newest], false)), press('Enter'),
+      cooking(...processingOrders([older, newest])), press('Enter'),
     );
     expect(commands).toEqual([kind === 'Parcel'
       ? { do: 'open-order', orderId: 'ord_9' }
