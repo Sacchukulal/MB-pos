@@ -539,7 +539,9 @@ fn repeated_bill_corrections_deduct_the_current_revision_exactly_once() {
         grams(10_000),
         grams(10),
         "kg",
-        UnitCost::ZERO,
+        UnitCost::from_pack_price(Money::from_paise(1_000), &mb_core::Pack {
+            name: "kg".to_owned(), base_per_unit: grams(1_000), is_standard: true,
+        }).expect("one paise per gram"),
         5,
     );
     let mut settled = settle_one(&db, "ord_revision", dosa(), 5, vec![]);
@@ -596,7 +598,21 @@ fn repeated_bill_corrections_deduct_the_current_revision_exactly_once() {
             grams(10_000 - qty * 180),
             "a retried correction cannot reverse its own stock"
         );
+        let profit = db.read_transaction(|tx| Repos::new(tx).reports()
+            .profit(OUTLET, mb_db::repo::reports::Period::one_day(day()))).expect("profit");
+        assert_eq!(profit.food_used.paise(), qty * 180,
+            "historical revisions must not inflate the cost of the current bill");
     }
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let voided = settled.clone().void("Cancelled", StaffId::new("staff_1"), at(21)).expect("void");
+        repos.orders().save(OUTLET, TERMINAL, &mb_core::AnyOrder::Voided(voided))?;
+        repos.stock().reverse_for_bill(OUTLET, &settled.core.id, at(21), day(), None)?;
+        let profit = repos.reports().profit(OUTLET, mb_db::repo::reports::Period::one_day(day()))?;
+        assert_eq!(profit.food_used, Money::ZERO);
+        assert_eq!(profit.gross_margin, Money::ZERO);
+        Ok(())
+    }).expect("void margin");
 }
 
 #[test]

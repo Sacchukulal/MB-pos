@@ -636,12 +636,14 @@ impl<'a> ReportsRepo<'a> {
 
         // What the kitchen actually used, from the ledger and nothing else: what a sale took,
         // what went in the bin, and what a count found missing.
+        // Reversals restore stock with positive quantities/costs. Include their signed cost
+        // so an edited or voided bill does not leave its previous consumption in the margin.
         let cost_of = |kinds: &str| -> Result<i64, DbError> {
             Ok(self.tx.query_row(
                 &format!(
                     "SELECT COALESCE(-SUM(total_cost), 0) FROM stock_movements
                       WHERE outlet_id = ?1 AND business_day BETWEEN ?2 AND ?3
-                        AND base_qty < 0 AND kind IN ({kinds})"
+                        AND (base_qty < 0 OR kind = 'reversal') AND kind IN ({kinds})"
                 ),
                 rusqlite::params![outlet, from, to],
                 |row| row.get(0),
