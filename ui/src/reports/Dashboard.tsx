@@ -166,7 +166,7 @@ export function Dashboard({ presets, onGoTo }: {
 
   return (
     <Scroller className="mb-dash">
-      <div className="mb-dash__intro">
+      <div>
         <PageHeader title="Business overview"
           actions={<>
             <Button size="sm" variant="quiet" disabled={busy} onClick={() => setRefresh((n) => n + 1)}>
