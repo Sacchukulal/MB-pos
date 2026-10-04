@@ -58,6 +58,45 @@ it('recovers from a loading failure using Retry', async () => {
   expect(await screen.findByText('2,400.00')).toBeTruthy();
 });
 
+it('keeps the chart mounted during refresh and replaces figures when the request finishes', async () => {
+  render(<Dashboard presets={presets} />);
+  await screen.findByText('2,400.00');
+  fireEvent.click(screen.getByRole('button', { name: 'Bars' }));
+  const plot = document.querySelector('.mb-trend__plot');
+  let finish!: (fresh: DashboardView) => void;
+  call.mockImplementationOnce(() => new Promise<DashboardView>((resolve) => { finish = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  expect(screen.getByText('2,400.00')).toBeTruthy();
+  expect(screen.getByText('Updating figures…')).toBeTruthy();
+  expect(document.querySelector('.mb-trend__plot')).toBe(plot);
+  await act(async () => finish({ ...view, stats: [{ label: 'Takings', value: '3,200.00', note: '16 bills' }] }));
+  expect(screen.getByText('3,200.00')).toBeTruthy();
+  expect(screen.queryByText('Updating figures…')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Bars' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('removes stale figures if a refresh fails', async () => {
+  render(<Dashboard presets={presets} />);
+  await screen.findByText('2,400.00');
+  call.mockRejectedValueOnce(new Error('Could not refresh'));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByText('2,400.00')).toBeNull();
+});
+
+it('switches daily and hourly trends in one chart area for a longer period', async () => {
+  call.mockResolvedValue({ ...view, charts: [
+    { ...view.charts[0], id: 'trend', title: 'Sales by day' },
+    { ...view.charts[0], id: 'hours' },
+  ] });
+  render(<Dashboard presets={presets} />);
+  await screen.findByRole('heading', { name: 'Sales by day' });
+  expect(document.querySelectorAll('.mb-trend__plot')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Sales by hour' }));
+  expect(screen.getByRole('heading', { name: 'Sales by hour' })).toBeTruthy();
+  expect(document.querySelectorAll('.mb-trend__plot')).toHaveLength(1);
+});
+
 it('clears old figures and avoids a request for a missing or reversed date range', async () => {
   render(<Dashboard presets={presets} />);
   await screen.findByText('2,400.00');

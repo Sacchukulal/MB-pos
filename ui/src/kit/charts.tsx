@@ -4,7 +4,7 @@
  * only decides where the ink goes.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import type { ChartView } from '../ipc/generated/ChartView';
 import type { PointView } from '../ipc/generated/PointView';
@@ -51,11 +51,11 @@ function hueClass(hue: number): string {
   return hue > 0 ? `mb-chart__mark--hue-${hue}` : 'mb-chart__mark--mono';
 }
 
-export function Chart({ chart, className, overview = false }: { chart: ChartView; className?: string; overview?: boolean }) {
+export function Chart({ chart, className, overview = false, action }: { chart: ChartView; className?: string; overview?: boolean; action?: ReactNode }) {
   return (
     <section className={cx('mb-card', 'mb-chart', overview && 'mb-chart--overview', className)}>
-      <SectionHeader title={chart.title} />
-      {chart.note ? <p className="mb-chart__note">{chart.note}</p> : null}
+      <SectionHeader title={chart.title} note={overview && chart.note ? chart.note : undefined} action={action} />
+      {!overview && chart.note ? <p className="mb-chart__note">{chart.note}</p> : null}
       {chart.points.length === 0 ? (
         overview ? <ChartPlaceholder kind={chart.kind} message={chart.empty} /> : <p className="mb-chart__empty">{chart.empty}</p>
       ) : chart.kind === 'columns' ? (

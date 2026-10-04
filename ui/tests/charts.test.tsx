@@ -64,6 +64,18 @@ describe('Chart', () => {
     expect(screen.getByText('Nothing sold.')).toBeTruthy();
   });
 
+  it('uses a local gradient for the overview area and keeps a single point visible', () => {
+    const chart: ChartView = {
+      id: 'trend', title: 'Sales by hour', kind: 'columns', note: '', empty: '',
+      points: [point('9 am', '200.00', '2 bills', 1000)],
+    };
+    const { container } = render(<Chart chart={chart} overview />);
+    const gradient = container.querySelector('linearGradient')!;
+    expect(container.querySelector('.mb-trend__area')?.getAttribute('fill')).toBe(`url(#${gradient.id})`);
+    expect(container.querySelector('.mb-trend__dot--active')).toBeTruthy();
+    expect(screen.getByRole('img', { name: '9 am · 200.00 · 2 bills' })).toBeTruthy();
+  });
+
   it('leads the columns with the tallest point, said in full', () => {
     const chart: ChartView = {
       id: 'trend',

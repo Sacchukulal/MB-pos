@@ -374,13 +374,21 @@
   --dash-stat: 10rem;
   /* Two chart cards across at 1366; the run over time takes the whole row. */
   --dash-chart: 24rem;
-  /* The home dashboard: a quieter canvas, mint emphasis and roomy chart surfaces. */
-  --dash-radius: 1.125rem;
-  --dash-heading: calc(1.8rem * var(--type-scale));
-  --dash-number: calc(1.65rem * var(--type-scale));
+  /* Compact dashboard surface and bounded chart geometry. */
+  --dash-radius: 0.875rem;
+  --dash-heading: calc(1.3rem * var(--type-scale));
+  --dash-number: calc(1.55rem * var(--type-scale));
+  --dash-number-fit: 15cqw;
+  --dash-trend-height: 8rem;
+  --dash-chart-motion: 650ms;
+  --dash-breakdown-min: 14rem;
+  --dash-attention-height: 9rem;
+  --dash-legend-ring: 4rem;
+  --dash-control: 2rem;
+  --dash-date-width: 9rem;
   --dash-icon: 1.75rem;
   --dash-plot: 12rem;
-  --dash-ring: 8rem;
+  --dash-ring: 4.5rem;
   --dash-ring-width: 1rem;
   --dash-green: #087f6b;
   --dash-green-ink: #ffffff;

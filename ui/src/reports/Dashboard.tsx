@@ -1,11 +1,10 @@
-/** The dashboard: the period's figures in tiles and charts, and what needs you. */
+/** A compact business overview. Figures and chart shares are supplied by Rust. */
 
 import { useEffect, useState } from 'react';
 
 import {
   Badge,
   Button,
-  Card,
   Chart,
   DateRangePicker,
   Icon,
@@ -92,7 +91,7 @@ export function DashboardPage({ onGoTo }: { onGoTo?: (screen: string) => void })
 }
 
 const METRIC_ICONS: Record<string, IconName> = {
-  Takings: 'banknote', 'Average bill': 'receipt', 'In the drawer': 'wallet',
+  Takings: 'banknote', 'Average bill': 'receipt', 'In the drawer': 'wallet', 'Cash taken': 'wallet',
   Spent: 'card', Voided: 'x', 'Gross margin': 'chart',
 };
 
@@ -105,7 +104,10 @@ export function Dashboard({ presets, onGoTo }: {
   const [trouble, setTrouble] = useState('');
   const [refresh, setRefresh] = useState(0);
   const [busy, setBusy] = useState(true);
+  const [trendId, setTrendId] = useState('trend');
   const may = useMay();
+  const trends = view?.charts.filter((chart) => chart.kind === 'columns') ?? [];
+  const trend = trends.find((chart) => chart.id === trendId) ?? trends[0];
 
   const choose = (from: string, to: string) => {
     setPeriod({ from, to });
@@ -117,7 +119,7 @@ export function Dashboard({ presets, onGoTo }: {
     let current = true;
     setBusy(true);
     setTrouble('');
-    setView(null);
+    setView((previous) => previous?.from === period.from && previous?.to === period.to ? previous : null);
     if (!period.from || !period.to) {
       setTrouble('Choose a start and end date to see your overview.');
       setBusy(false);
@@ -135,7 +137,10 @@ export function Dashboard({ presets, onGoTo }: {
         setTrouble('');
       })
       .catch((cause: unknown) => {
-        if (current) setTrouble(isUiError(cause) ? cause.message : 'Your figures could not be loaded. Please try again.');
+        if (current) {
+          setView(null);
+          setTrouble(isUiError(cause) ? cause.message : 'Your figures could not be loaded. Please try again.');
+        }
       }).finally(() => { if (current) setBusy(false); });
     return () => { current = false; };
   }, [period, refresh]);
@@ -162,13 +167,12 @@ export function Dashboard({ presets, onGoTo }: {
   return (
     <Scroller className="mb-dash">
       <div className="mb-dash__intro">
-        <span className="mb-dash__eyebrow"><span className="mb-dash__dot" /> Your business at a glance</span>
         <PageHeader title="Business overview"
           actions={<>
-            <Button variant="quiet" disabled={busy} onClick={() => setRefresh((n) => n + 1)}>
+            <Button size="sm" variant="quiet" disabled={busy} onClick={() => setRefresh((n) => n + 1)}>
               <Icon name="refresh" size="sm" /> Refresh
             </Button>
-            {onGoTo && may('bill.create') ? <Button className="mb-dash__primary" onClick={() => onGoTo('billing')}>
+            {onGoTo && may('bill.create') ? <Button size="sm" className="mb-dash__primary" onClick={() => onGoTo('billing')}>
               <Icon name="plus" size="sm" /> New bill
             </Button> : null}
           </>}
@@ -177,41 +181,46 @@ export function Dashboard({ presets, onGoTo }: {
       {when}
       {trouble ? <div className="mb-dash__error" role="alert"><Icon name="warning" /><p>{trouble}</p>
         <Button size="sm" onClick={() => setRefresh((n) => n + 1)}>Try again</Button></div> : null}
-      {busy ? <div className="mb-dash__loading"><Spinner label="Updating your overview" /></div> : null}
-      {view && !busy ? <div className="mb-dash__content">
+      {busy && !view ? <div className="mb-dash__loading"><Spinner label="Updating your overview" /></div> : null}
+      {view ? <div className="mb-dash__content" aria-busy={busy}>
+        <section className="mb-dash__summary" aria-label="Business summary">
         <div className="mb-dash__periodline">
           <h2>{view.title}</h2>
-          {view.compare ? <span className="mb-dash__compare">
+          {busy ? <span role="status" className="mb-dash__compare">Updating figures…</span> : view.compare ? <span className={`mb-dash__compare mb-dash__compare--${view.compare.direction}`}>
             <Icon name={view.compare.direction === 'up' ? 'chevron-up' : view.compare.direction === 'down' ? 'chevron-down' : 'minus'} size="sm" />
             {view.compare.summary}
           </span> : null}
         </div>
         <div className="mb-dash__metrics">
-          {view.stats.map((stat, index) => <Card key={stat.label} className={`mb-dash__metric mb-dash__metric--${index}`}>
+          {view.stats.map((stat, index) => <div key={stat.label} className={`mb-dash__metric mb-dash__metric--${index}`}>
             <div className="mb-dash__metrichead"><span>{stat.label}</span><span className="mb-dash__metricicon"><Icon name={METRIC_ICONS[stat.label] ?? 'chart'} size="md" /></span></div>
             <strong className="mb-dash__value mb-numeric">{stat.value}</strong>
             <span className="mb-dash__metricnote">{stat.note}</span>
-          </Card>)}
+          </div>)}
         </div>
+        </section>
+        <div className="mb-dash__analytics">
         <div className="mb-dash__visuals">
           <div className="mb-dash__performance">
-            {view.charts.filter((chart) => chart.kind === 'columns').map((chart) => <Chart key={chart.id} chart={chart} overview />)}
+            {trend ? <Chart key={trend.id} chart={trend} overview action={trends.length > 1 ?
+              <div className="mb-dash__trendchoices" role="group" aria-label="Sales breakdown">
+                {trends.map((chart) => <Button key={chart.id} size="sm" variant="quiet" aria-pressed={chart.id === trend.id} onClick={() => setTrendId(chart.id)}>{chart.title}</Button>)}
+              </div> : undefined} /> : null}
           </div>
-          <Card className="mb-dash__attention">
-            <div className="mb-dash__panelcaption"><Icon name="pulse" size="sm" /> On your radar</div>
-            <SectionHeader title="What needs you" action={<Badge tone={view.attention.length ? 'warn' : 'ok'}>{view.attention.length ? `${view.attention.length} to review` : 'All clear'}</Badge>} />
-            {view.attention.length === 0 ? <div className="mb-dash__quiet"><span className="mb-dash__allclear"><Icon name="check-circle" size="lg" /></span><strong>Room to focus on the good stuff.</strong><p>{view.quiet}</p></div> :
-              <div className="mb-dash__list">{view.attention.map((item: AttentionView) => <div key={item.title} className={`mb-dash__item mb-dash__item--${item.tone}`}>
+          <aside className="mb-dash__attention" aria-label="Needs attention">
+            <SectionHeader title="Needs attention" action={<Badge tone={view.attention.length ? 'warn' : 'ok'}>{view.attention.length ? `${view.attention.length} to review` : 'All clear'}</Badge>} />
+            {view.attention.length === 0 ? <div className="mb-dash__quiet"><span className="mb-dash__allclear"><Icon name="check-circle" size="lg" /></span><strong>You're all caught up.</strong><p>{view.quiet}</p></div> :
+              <Scroller inset className="mb-dash__list">{view.attention.map((item: AttentionView) => <div key={item.title} className={`mb-dash__item mb-dash__item--${item.tone}`}>
                 <Icon name={item.tone === 'info' ? 'info' : 'warning'} size="sm" /><div><strong>{item.title}</strong><p>{item.detail}</p></div>
-              </div>)}</div>}
+              </div>)}</Scroller>}
             {onGoTo ? <Button variant="quiet" className="mb-dash__reportlink" onClick={() => onGoTo('reports')}>Explore reports <Icon name="arrow-right" size="sm" /></Button> : null}
-          </Card>
+          </aside>
         </div>
-        <div className="mb-dash__breakdownhead"><SectionHeader title="Behind the numbers" /><span>Sales mix & best performers</span></div>
         <div className="mb-dash__breakdowns">
           {view.charts.filter((chart) => chart.kind !== 'columns').map((chart) => <Chart key={chart.id} chart={chart} overview />)}
         </div>
-        <footer className="mb-dash__footer"><span><Icon name="check-circle" size="sm" /> Figures from your recorded transactions</span><span>Magic Bill · Made for your everyday</span></footer>
+        </div>
+        <footer className="mb-dash__footer"><span><Icon name="check-circle" size="sm" /> Recorded transactions</span><span>Hover or focus a chart point for details</span></footer>
       </div> : null}
     </Scroller>
   );
