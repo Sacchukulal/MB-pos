@@ -9,10 +9,14 @@ import {
   ConfirmDialog,
   EmptyState,
   InfoTip,
+  Icon,
   Panel,
   plural,
   Rail,
   RailItem,
+  RailToggle,
+  useRailState,
+  type IconName,
   SaveBar,
   Scroller,
   SectionHeader,
@@ -59,9 +63,16 @@ const EXTRA_SECTIONS = [
 
 /** Which sections show the paper beside them. */
 const SHOWS_PAPER = new Set(['receipt', 'kitchen']);
+const SECTION_ICONS: Record<string, IconName> = {
+  store: 'book', tax: 'tag', receipt: 'receipt', kitchen: 'flame',
+  printers: 'printer', numbering: 'file', billing: 'cash', appearance: 'sun',
+  devices: 'plug', tills: 'monitor', updates: 'download',
+};
 
 /** `initial` opens a section straight away — Billing's printer button lands on Printers. */
 export function Settings({ initial }: { initial?: string | null } = {}) {
+  const [collapsed, setCollapsed] = useRailState('settings');
+  const searchBox = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<SettingsView | null>(null);
   const [group, setGroup] = useState<string>(initial ?? 'store');
   useEffect(() => {
@@ -237,20 +248,27 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
     active !== undefined && active.settings.length > 0 && !DRAWS_OWN_SETTINGS.has(active.code);
 
   return (
-    <div className="mb-settings">
-      <div className="mb-settings__rail">
+    <div className={cx('mb-settings', collapsed && 'mb-settings--collapsed')}>
+      <div className={cx('mb-settings__rail', 'mb-navrail', collapsed && 'mb-navrail--collapsed')}>
+        <RailToggle collapsed={collapsed} onChange={setCollapsed} label="Settings menu" />
+        {collapsed ? <Button variant="quiet" iconOnly title="Search settings" onClick={() => {
+          setCollapsed(false);
+          requestAnimationFrame(() => searchBox.current?.focus());
+        }}><Icon name="search" /></Button> :
         <SearchField
+          ref={searchBox}
           what="settings"
           value={query}
           placeholder="Search every setting"
           onChange={(event) => onSearch(event.currentTarget.value)}
-        />
+        />}
         {/* Only the sections scroll. */}
         <Scroller inset className="mb-settings__sections">
           <Rail label="Settings sections">
             {groups.map((section) => (
               <RailItem
                 key={section.code}
+                icon={SECTION_ICONS[section.code] ?? 'settings'}
                 current={section.code === active?.code}
                 onClick={() => go(section.code)}
                 end={section.canEdit ? null : 'read only'}

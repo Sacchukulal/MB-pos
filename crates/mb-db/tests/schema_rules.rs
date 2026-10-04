@@ -337,6 +337,8 @@ fn t8_every_named_index_exists() {
         // The bell: "any notice from Magic Bill I have not seen?" — partial, so a shop with a
         // year of read notices still answers from a handful of rows.
         "idx_cloud_notices_unseen",
+        // Working menu and Deleted items, with available dishes first.
+        "items_menu_state",
     ];
 
     let db = Scratch::new("t8").open();

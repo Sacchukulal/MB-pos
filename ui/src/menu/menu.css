@@ -1,4 +1,4 @@
-/* The menu screen: categories down the left, items on the right. */
+/* Categories and items stay visible together, each with its own quick entry. */
 
 .mb-menu {
   /* The page margin is the SHELL's. */
@@ -7,19 +7,26 @@
   overflow: hidden;
 }
 
-/* The two panes, under the tabs. The rail gives way first. */
+/* Filters stay in place; the list uses the remaining height. */
 .mb-menu__body {
-  display: grid;
-  grid-template-columns: minmax(0, var(--menu-categories-width)) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: var(--gap-group);
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
+.mb-menu__body--split {
+  display: grid;
+  grid-template-columns: var(--menu-categories-width) minmax(0, 1fr);
+}
 
 /* A pane: the add row stays, the list under it scrolls. */
 .mb-menu__pane {
   min-height: 0;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .mb-menu__pane > .mb-panel__body {
@@ -29,11 +36,58 @@
   flex: 1;
   min-height: 0;
 }
+.mb-menu__pane > .mb-panel__head {
+  min-height: calc(var(--control-md) + var(--space-1) * 2 + var(--border-width));
+}
 
 .mb-menu__list {
   flex: 1;
   min-height: 0;
 }
+
+.mb-menu__list .mb-table { min-width: var(--menu-table-min); }
+.mb-menu__itempane .mb-table__wrap { overflow: visible; }
+.mb-menu__itempane .mb-table th {
+  position: sticky;
+  top: 0;
+  z-index: var(--layer-sticky);
+}
+.mb-menu__list .mb-table td:first-child { width: 100%; overflow-wrap: normal; }
+.mb-menu__itemname {
+  display: block;
+  min-width: var(--menu-name-min);
+  white-space: normal;
+  overflow-wrap: break-word;
+  font-weight: var(--weight-medium);
+}
+.mb-menu__quickedit {
+  width: var(--field-xs);
+}
+.mb-menu__quickedit .mb-menu__cellinput {
+  width: 100%;
+  height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border-color: transparent;
+  background: transparent;
+}
+.mb-menu__quickedit .mb-menu__cellinput:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.mb-menu__quickedit .mb-menu__cellinput[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.mb-menu__cellinput--price {
+  text-align: right;
+  font-family: var(--font-num);
+}
+.mb-menu__hint, .mb-menu__count {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+.mb-menu__body .mb-toolbar { flex-shrink: 0; }
+.mb-menu__body .mb-select { max-width: var(--field-md); }
 
 /* The choices and combos tabs: one scrolling column. */
 .mb-menu__items {
@@ -44,7 +98,7 @@
 }
 
 .mb-menu__find {
-  width: var(--find-width);
+  width: min(var(--find-width), 30vw);
 }
 
 /* The add row: the boxes and the button, on one line. */
@@ -56,7 +110,7 @@
 }
 
 .mb-menu__add--item {
-  grid-template-columns: minmax(0, 2fr) minmax(0, var(--field-sm)) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr) auto;
 }
 
 /* The category list. */
@@ -75,20 +129,6 @@
 .mb-menu__catrow {
   gap: var(--space-1);
   padding: 0;
-}
-
-/* The rename and delete marks show for the row under the hand, and for the row you are on. */
-.mb-menu__catdo {
-  display: flex;
-  flex-shrink: 0;
-  padding-right: var(--space-1);
-  opacity: 0;
-}
-
-.mb-menu__catrow:hover .mb-menu__catdo,
-.mb-menu__catrow[aria-current='page'] .mb-menu__catdo,
-.mb-menu__catrow:focus-within .mb-menu__catdo {
-  opacity: 1;
 }
 
 /*
@@ -117,9 +157,8 @@
 .mb-menu__catname {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .mb-menu__catcount {

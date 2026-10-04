@@ -1063,14 +1063,16 @@ fn t16_the_credit_balance_is_computed_not_stored() {
     .expect("inspect");
 }
 
-/// A sold item cannot be deleted, and the refusal says why in words.
+/// Delete and Put back preserve a sold dish and its historical bill lines.
 #[test]
-fn t17_a_sold_item_cannot_be_deleted_and_says_so() {
+fn t17_deleted_items_can_be_put_back_without_changing_bills() {
     let scratch = Scratch::new("t17");
     let db = scratch.open();
     shop::build(&db);
 
-    let err = db
+    let before: i64 = db.read(|conn| Ok(conn.query_row("SELECT count(*) FROM order_lines WHERE item_id = 'itm_dosa'", [], |r| r.get(0))?)).expect("bill lines");
+    assert!(before > 0);
+    db
         .transaction(|tx| {
             Repos::new(tx).menu().delete_item(
                 OUTLET,
@@ -1078,23 +1080,25 @@ fn t17_a_sold_item_cannot_be_deleted_and_says_so() {
                 Timestamp::from_millis(1),
             )
         })
-        .expect_err("a sold item was deleted");
-    let message = err.to_string();
-    assert!(
-        message.contains("has been sold") && message.contains("take it off the menu"),
-        "the refusal leaks a constraint instead of explaining: {message}"
-    );
+        .expect("delete a sold item");
 
-    // Taking it off the menu works, and the bills are untouched.
+    // An ordinary edit or availability switch must not silently put a deleted item back.
     db.transaction(|tx| {
-        Repos::new(tx).menu().set_available(
-            OUTLET,
-            &ItemId::new("itm_dosa"),
-            false,
-            Timestamp::from_millis(2),
-        )
-    })
-    .expect("take it off the menu");
+        let repos = Repos::new(tx);
+        let id = ItemId::new("itm_dosa");
+        assert!(!repos.menu().list_items(OUTLET, false)?.iter().any(|i| i.id == id));
+        let deleted = repos.menu().list_deleted_items(OUTLET)?;
+        assert_eq!(deleted.len(), 1);
+        assert!(!deleted[0].is_available);
+        assert!(repos.menu().set_available(OUTLET, &id, true, Timestamp::from_millis(2)).is_err());
+        assert!(repos.menu().save_item(OUTLET, &deleted[0], Timestamp::from_millis(2)).is_err());
+        repos.menu().restore_item(OUTLET, &id, Timestamp::from_millis(2))?;
+        assert!(repos.menu().list_items(OUTLET, true)?.iter().any(|i| i.id == id));
+        assert!(repos.menu().list_deleted_items(OUTLET)?.is_empty());
+        Ok(())
+    }).expect("put back");
+    let after: i64 = db.read(|conn| Ok(conn.query_row("SELECT count(*) FROM order_lines WHERE item_id = 'itm_dosa'", [], |r| r.get(0))?)).expect("bill lines");
+    assert_eq!(before, after);
 
     // An item nobody ever sold deletes normally.
     db.transaction(|tx| {
@@ -1109,6 +1113,11 @@ fn t17_a_sold_item_cannot_be_deleted_and_says_so() {
             .delete_item(OUTLET, &ItemId::new("itm_typo"), Timestamp::from_millis(4))
     })
     .expect("an unsold item must be deletable");
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        assert_eq!(repos.menu().list_deleted_items(OUTLET)?.len(), 1);
+        repos.menu().restore_item(OUTLET, &ItemId::new("itm_typo"), Timestamp::from_millis(5))
+    }).expect("unsold items can also be put back");
 }
 
 /// Typed settings: a mismatch is an error, a missing key is `None`.

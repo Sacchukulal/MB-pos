@@ -1273,6 +1273,13 @@ textarea.mb-input {
 
 /* Tables. */
 
+.mb-input--multiline {
+  height: auto;
+  min-height: calc(var(--control-md) * 2);
+  resize: vertical;
+  padding-block: var(--space-2);
+}
+
 .mb-table__wrap {
   flex: 0 0 auto;
   overflow-x: auto;

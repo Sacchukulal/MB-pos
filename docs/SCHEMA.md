@@ -266,7 +266,8 @@ The live menu. **An order never joins back to this table to print a line** —
 | prep_minutes | INTEGER | yes | Scope 3.6 — the KDS target. A ticket's target is its slowest dish, because the order is ready when the last thing on it is. |
 | course | TEXT | yes | **Scope 3.5 — which course this dish belongs to** (P24). NULL means "no course", and that is the default on purpose: when every dish is NULL the whole order fires at once, exactly as it does today, and a shop that does not serve in courses never discovers this exists. Free text rather than an enum — "starter" and "main" are the common pair, but a thali house has its own words. |
 | is_open_price | INTEGER | no | Sold by weight; the cashier types the price. |
-| is_available | INTEGER | no | |
+| is_available | INTEGER | no | Available switch. Delete sets this to 0; Put back sets it to 1. |
+| is_deleted | INTEGER | no | **0021.** Default 0. Deleted dishes remain recoverable with their original IDs, details and references; normal menu queries exclude them. Existing unavailable dishes remain undeleted on upgrade. |
 | sort_order | INTEGER | no | |
 | created_at | INTEGER | no | |
 | updated_at | INTEGER | no | |

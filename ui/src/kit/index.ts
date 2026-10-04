@@ -13,6 +13,7 @@ export {
   Panel,
   Rail,
   RailItem,
+  RailToggle,
   Row,
   Scroller,
   Sections,
@@ -23,6 +24,7 @@ export {
 
 /** Where a new row's id comes from. */
 export { freshId } from './ids';
+export { useRailState } from './rail-state';
 
 /** The icon set. */
 export { Icon } from './Icon';
@@ -37,6 +39,7 @@ export {
   Checkbox,
   Choice,
   Input,
+  TextArea,
   Keypad,
   /** The two fields that have a shape. */
   MoneyInput,

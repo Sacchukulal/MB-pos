@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
   type Ref,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -149,6 +150,12 @@ export function Input({ label, hint, error, className, prefix, size, ...rest }: 
 }
 
 /** A number field. */
+export function TextArea({ label, hint, className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; hint?: string }) {
+  return <FieldShell label={label} hint={hint}>{(id) =>
+    <textarea id={id} className={cx('mb-input', 'mb-input--multiline', className)} rows={2} {...rest} />
+  }</FieldShell>;
+}
+
 export function NumberInput({ className, ...rest }: InputProps) {
   return (
     <Input

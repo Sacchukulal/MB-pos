@@ -288,6 +288,8 @@ describe('the settings screen', () => {
   it('searches across every section and says where each hit lives', async () => {
     draw();
     await screen.findByLabelText('Shop name');
+    const searchButton = screen.queryByRole('button', { name: 'Search settings' });
+    if (searchButton) fireEvent.click(searchButton);
     fireEvent.change(screen.getByPlaceholderText('Search every setting'), {
       target: { value: 'logo' },
     });

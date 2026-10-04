@@ -3,7 +3,7 @@
 .mb-settings {
   /* The page margin is the SHELL's. */
   display: grid;
-  grid-template-columns: var(--settings-rail) minmax(0, 1fr);
+  grid-template-columns: var(--rail-expanded) minmax(0, 1fr);
   /* The sections and the body, then the save bar across the bottom. */
   grid-template-rows: minmax(0, 1fr) auto;
   gap: var(--space-4);
@@ -21,11 +21,20 @@
  */
 .mb-settings__rail {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: var(--space-3);
   min-width: 0;
   min-height: 0;
 }
+
+.mb-settings--collapsed {
+  grid-template-columns: var(--rail-collapsed) minmax(0, 1fr);
+}
+
+.mb-settings__fields:has([data-setting='store.address']) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mb-settings__field[data-setting='store.address'] { grid-column: 1 / -1; }
 
 .mb-settings__sections {
   display: flex;
@@ -56,7 +65,7 @@
 /* Two columns at 1366 and wider, one below it. */
 .mb-settings__fields {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--settings-field), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--settings-field)), 1fr));
   gap: var(--space-4);
   /* Stretched, so the two rules under it can line the boxes up. */
   align-items: stretch;

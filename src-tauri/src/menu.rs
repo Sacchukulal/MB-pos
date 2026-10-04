@@ -120,6 +120,14 @@ pub fn categories_on(app: &App) -> UiResult<Vec<CategoryView>> {
 }
 
 pub fn menu_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
+    rows_on(app, false)
+}
+
+pub fn deleted_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
+    rows_on(app, true)
+}
+
+fn rows_on(app: &App, deleted: bool) -> UiResult<Vec<MenuRowView>> {
     let who = guard::require(app, Permission::MenuManage)?;
     // The margin is a separate permission from the menu.
     let may_see_cost = who.can(Permission::ReportsView);
@@ -131,7 +139,8 @@ pub fn menu_rows_on(app: &App) -> UiResult<Vec<MenuRowView>> {
                 let repos = mb_db::Repos::new(tx);
                 let book = repos.tax_classes().book(OUTLET)?;
                 let mut out = Vec::new();
-                for item in repos.menu().list_items(OUTLET, false)? {
+                let items = if deleted { repos.menu().list_deleted_items(OUTLET)? } else { repos.menu().list_items(OUTLET, false)? };
+                for item in items {
                     let variants = repos
                         .composition()
                         .variants_of(&item.id)?
@@ -349,6 +358,36 @@ fn item_json(item: &MenuItem) -> serde_json::Value {
     })
 }
 
+/// Quick edits change only the selected field, preserving private costs and other settings.
+pub fn edit_item_field_on(app: &App, item_id: String, field: String, value: String) -> UiResult<Vec<MenuRowView>> {
+    let who = guard::require(app, Permission::MenuManage)?;
+    let price = match field.as_str() {
+        "price" => Some(parse_money(&value, "price")?),
+        "shortCode" => None,
+        _ => return Err(UiError::new("menu.field", "Choose price or short code.")),
+    };
+    let at = now();
+    app.with_shop(|shop| {
+        shop.db.transaction(|tx| {
+            let repos = mb_db::Repos::new(tx);
+            let mut item = repos.menu().find_item(&ItemId::new(item_id.clone()))?
+                .ok_or_else(|| mb_db::DbError::invariant("that item is no longer on the menu"))?;
+            let before = item_json(&item);
+            if let Some(price) = price {
+                item.unit_price = price;
+            } else {
+                item.short_code = Some(value.trim().to_owned()).filter(|v| !v.is_empty());
+            }
+            repos.menu().save_item(OUTLET, &item, at)?;
+            repos.audit().append(OUTLET, &AuditEntry::new(
+                at, today(at), Some(who.staff_id.clone()), action::PRICE_CHANGED, "menu_item",
+            ).about(item_id.clone()).changed(before, item_json(&item)))?;
+            Ok(())
+        }).map_err(|e| words::from_db(&e))
+    })?;
+    menu_rows_on(app)
+}
+
 /// "86 it".
 pub fn set_available_on(app: &App, item_id: String, available: bool) -> UiResult<Vec<MenuRowView>> {
     let who = guard::require(app, Permission::MenuManage)?;
@@ -368,7 +407,7 @@ pub fn set_available_on(app: &App, item_id: String, available: bool) -> UiResult
                         at,
                         day,
                         Some(who.staff_id.clone()),
-                        action::PRICE_CHANGED,
+                        action::MENU_AVAILABILITY,
                         "menu_item",
                     )
                     .about(item_id.clone())
@@ -382,8 +421,7 @@ pub fn set_available_on(app: &App, item_id: String, available: bool) -> UiResult
     menu_rows_on(app)
 }
 
-/// Delete an item. One that has been sold is refused: old bills and reports still point at it,
-/// so it is taken off the menu instead.
+/// Delete from the menu, keeping its details and all historical references.
 pub fn delete_item_on(app: &App, item_id: String) -> UiResult<Vec<MenuRowView>> {
     let who = guard::require(app, Permission::MenuManage)?;
     let at = now();
@@ -405,28 +443,35 @@ pub fn delete_item_on(app: &App, item_id: String) -> UiResult<Vec<MenuRowView>> 
                         at,
                         day,
                         Some(who.staff_id.clone()),
-                        action::PRICE_CHANGED,
+                        action::MENU_ITEM_DELETED,
                         "menu_item",
                     )
                     .about(item_id.clone())
-                    .changed(item_json(&before), serde_json::Value::Null),
+                    .changed(item_json(&before), serde_json::json!({ "is_deleted": true, "is_available": false })),
                 )?;
                 Ok(())
             })
-            .map_err(|e| {
-                if e.to_string().contains("cannot be deleted") {
-                    UiError::new(
-                        "menu.sold",
-                        "This item has been sold, so old bills need it. Mark it sold out instead.",
-                    )
-                } else {
-                    words::from_db(&e)
-                }
-            })
+            .map_err(|e| words::from_db(&e))
     })?;
 
     log_info!("{} deleted the menu item {item_id}", who.name);
     menu_rows_on(app)
+}
+
+pub fn restore_item_on(app: &App, item_id: String) -> UiResult<Vec<MenuRowView>> {
+    let who = guard::require(app, Permission::MenuManage)?;
+    let at = now();
+    app.with_shop(|shop| {
+        shop.db.transaction(|tx| {
+            let repos = mb_db::Repos::new(tx);
+            repos.menu().restore_item(OUTLET, &ItemId::new(item_id.clone()), at)?;
+            repos.audit().append(OUTLET, &AuditEntry::new(at, today(at), Some(who.staff_id.clone()), action::MENU_ITEM_RESTORED, "menu_item")
+                .about(item_id.clone())
+                .changed(serde_json::json!({ "is_deleted": true, "is_available": false }), serde_json::json!({ "is_deleted": false, "is_available": true })))?;
+            Ok(())
+        }).map_err(|e| words::from_db(&e))
+    })?;
+    deleted_rows_on(app)
 }
 
 /// Delete a category. The items in it stay on the menu with no category; their tax does not
@@ -627,8 +672,23 @@ pub fn menu_rows(app: tauri::State<'_, App>) -> UiResult<Vec<MenuRowView>> {
 }
 
 #[tauri::command]
+pub fn menu_deleted_rows(app: tauri::State<'_, App>) -> UiResult<Vec<MenuRowView>> {
+    deleted_rows_on(&app)
+}
+
+#[tauri::command]
+pub fn restore_menu_item(app: tauri::State<'_, App>, item_id: String) -> UiResult<Vec<MenuRowView>> {
+    restore_item_on(&app, item_id)
+}
+
+#[tauri::command]
 pub fn save_menu_item(app: tauri::State<'_, App>, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
     save_item_on(&app, edit)
+}
+
+#[tauri::command]
+pub fn edit_menu_item_field(app: tauri::State<'_, App>, item_id: String, field: String, value: String) -> UiResult<Vec<MenuRowView>> {
+    edit_item_field_on(&app, item_id, field, value)
 }
 
 #[tauri::command]
@@ -1328,7 +1388,8 @@ pub fn list_combos_on(app: &App) -> UiResult<Vec<ComboView>> {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
-                let items = repos.menu().list_items(OUTLET, false)?;
+                let mut items = repos.menu().list_items(OUTLET, false)?;
+                items.extend(repos.menu().list_deleted_items(OUTLET)?);
                 let book = repos.tax_classes().book(OUTLET)?;
                 let mut out = Vec::new();
 

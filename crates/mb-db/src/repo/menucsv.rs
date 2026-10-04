@@ -37,8 +37,8 @@ pub enum ImportMode {
     /// Add what is new, change what the file names, leave the rest alone.
     #[default]
     Update,
-    /// The file becomes the menu. Items it does not name are deleted, or taken off the menu
-    /// when a bill, size, combo or recipe still needs them; categories left empty are retired.
+    /// The file becomes the menu. Missing items move to Deleted items;
+    /// categories left empty are retired.
     Replace,
 }
 
@@ -58,7 +58,7 @@ pub struct ImportPlan {
     /// "Tea (TEA COFFEE)". The owner reads this list before agreeing: the file may be about
     /// to overwrite prices they set by hand.
     pub already: Vec<String>,
-    /// REPLACE only: items the file does not name, deleted outright.
+    /// REPLACE only: items the file does not name, moved to Deleted items.
     pub removed: Vec<MenuItem>,
     /// REPLACE only: items the file does not name that something still points at — taken
     /// off the menu, kept for the bills that remember them.
@@ -196,6 +196,7 @@ impl<'a> MenuCsvRepo<'a> {
     pub fn plan(&self, outlet: &str, csv: &str, mode: ImportMode) -> Result<ImportPlan, DbError> {
         let repo = MenuRepo::new(self.tx);
         let existing = repo.list_items(outlet, false)?;
+        let deleted = repo.list_deleted_items(outlet)?;
         let classes = crate::repo::taxclass::TaxClassRepo::new(self.tx).list(outlet)?;
         // The last rung of the tax ladder: item, then category, then the shop's own rate.
         let shop_slab = crate::repo::taxclass::TaxClassRepo::new(self.tx)
@@ -283,6 +284,12 @@ impl<'a> MenuCsvRepo<'a> {
 
             // Which item this row is about, if the shop already has it.
             let id = cell(header.of(ID));
+            if let Some(id) = &id
+                && repo.is_deleted(outlet, &ItemId::new(id.clone()))?
+            {
+                plan.refused.push((line, format!("{name} is in Deleted items. Put it back before importing changes to it.")));
+                continue;
+            }
             let found = match find_existing(
                 &existing,
                 id.as_deref(),
@@ -419,6 +426,7 @@ impl<'a> MenuCsvRepo<'a> {
                         Some(id) => id,
                         None => unique(slug("itm", &name, line), |id| {
                             existing.iter().any(|i| i.id.as_str() == id)
+                                || deleted.iter().any(|i| i.id.as_str() == id)
                                 || plan.new_items.iter().any(|i| i.id.as_str() == id)
                         }),
                     })
@@ -461,19 +469,12 @@ impl<'a> MenuCsvRepo<'a> {
         }
 
         if mode == ImportMode::Replace && plan.is_clean() {
-            // Whatever the file did not speak for goes. Deleted when nothing points at it;
-            // taken off the menu when a bill, a size, a combo or a recipe still does.
+            // Missing dishes all use the same reversible Delete action.
             for item in &existing {
                 if claimed.contains_key(item.id.as_str()) {
                     continue;
                 }
-                if repo.is_in_use(&item.id)? {
-                    if item.is_available {
-                        plan.taken_off.push(item.clone());
-                    }
-                } else {
-                    plan.removed.push(item.clone());
-                }
+                plan.removed.push(item.clone());
             }
             // A category with nothing left in it. What is left: the new items, the changed
             // ones where the file put them, and every existing item that neither goes nor
@@ -529,12 +530,12 @@ impl<'a> MenuCsvRepo<'a> {
         for item in plan.new_items.iter().chain(&plan.updated_items) {
             repo.save_item(outlet, item, at)?;
         }
-        // REPLACE: the same doors the menu page uses — delete, else take off the menu.
+        // REPLACE: the same reversible Delete action the menu page uses.
         for item in &plan.removed {
             repo.delete_item(outlet, &item.id, at)?;
         }
         for item in &plan.taken_off {
-            repo.set_available(outlet, &item.id, false, at)?;
+            repo.delete_item(outlet, &item.id, at)?;
         }
         for category in &plan.retired_categories {
             let mut retired = category.clone();

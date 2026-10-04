@@ -163,6 +163,9 @@ impl<'a> MenuRepo<'a> {
     }
 
     pub fn save_item(&self, outlet: &str, item: &MenuItem, at: Timestamp) -> Result<(), DbError> {
+        if self.is_deleted(outlet, &item.id)? {
+            return Err(DbError::invariant("Put this item back from Deleted items before editing it."));
+        }
         self.tx.execute(
             "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id, price_basis,
                                 hsn, cost_price, short_code, prep_minutes, course,
@@ -205,19 +208,27 @@ impl<'a> MenuRepo<'a> {
     }
 
     pub fn list_items(&self, outlet: &str, available_only: bool) -> Result<Vec<MenuItem>, DbError> {
+        self.items_in(outlet, available_only, false)
+    }
+
+    pub fn list_deleted_items(&self, outlet: &str) -> Result<Vec<MenuItem>, DbError> {
+        self.items_in(outlet, false, true)
+    }
+
+    fn items_in(&self, outlet: &str, available_only: bool, deleted: bool) -> Result<Vec<MenuItem>, DbError> {
         let sql = if available_only {
             "SELECT id, category_id, name, unit_price, tax_class_id, price_basis, hsn,
                     cost_price, short_code, prep_minutes, course, is_open_price, is_available,
                     sort_order
-               FROM items WHERE outlet_id = ?1 AND is_available = 1 ORDER BY sort_order, name"
+               FROM items WHERE outlet_id = ?1 AND is_deleted = ?2 AND is_available = 1 ORDER BY sort_order, name"
         } else {
             "SELECT id, category_id, name, unit_price, tax_class_id, price_basis, hsn,
                     cost_price, short_code, prep_minutes, course, is_open_price, is_available,
                     sort_order
-               FROM items WHERE outlet_id = ?1 ORDER BY sort_order, name"
+               FROM items WHERE outlet_id = ?1 AND is_deleted = ?2 ORDER BY is_available DESC, sort_order, name"
         };
         let mut stmt = self.tx.prepare_cached(sql)?;
-        let rows = stmt.query_map([outlet], |row| {
+        let rows = stmt.query_map(rusqlite::params![outlet, encode::bool_to_sql(deleted)], |row| {
             Ok(ItemRow {
                 id: row.get(0)?,
                 category_id: row.get(1)?,
@@ -271,8 +282,9 @@ impl<'a> MenuRepo<'a> {
         let Some(outlet) = outlet else {
             return Ok(None);
         };
-        Ok(self
-            .list_items(&outlet, false)?
+        let mut items = self.list_items(&outlet, false)?;
+        items.extend(self.list_deleted_items(&outlet)?);
+        Ok(items
             .into_iter()
             .find(|i| &i.id == id))
     }
@@ -285,7 +297,7 @@ impl<'a> MenuRepo<'a> {
     ) -> Result<Option<(String, String)>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, name FROM items
-              WHERE outlet_id = ?1 AND short_code IS NOT NULL
+              WHERE outlet_id = ?1 AND is_deleted = 0 AND is_available = 1 AND short_code IS NOT NULL
                 AND upper(short_code) = upper(?2)
               LIMIT 1",
         )?;
@@ -304,11 +316,12 @@ impl<'a> MenuRepo<'a> {
         at: Timestamp,
     ) -> Result<(), DbError> {
         let n = self.tx.execute(
-            "UPDATE items SET is_available = ?2, updated_at = ?3 WHERE id = ?1",
+            "UPDATE items SET is_available = ?2, updated_at = ?3 WHERE id = ?1 AND outlet_id = ?4 AND is_deleted = 0",
             rusqlite::params![
                 id.as_str(),
                 encode::bool_to_sql(available),
-                encode::timestamp_to_sql(at)
+                encode::timestamp_to_sql(at),
+                outlet
             ],
         )?;
         if n == 0 {
@@ -317,29 +330,40 @@ impl<'a> MenuRepo<'a> {
         OutboxRepo::new(self.tx).enqueue(outlet, "items", id.as_str(), Op::Upsert, at)
     }
 
-    /// Delete an item that has never been sold.
+    pub fn is_deleted(&self, outlet: &str, id: &ItemId) -> Result<bool, DbError> {
+        Ok(self.tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM items WHERE outlet_id = ?1 AND id = ?2 AND is_deleted = 1)",
+            rusqlite::params![outlet, id.as_str()], |r| r.get(0),
+        )?)
+    }
+
+    /// Remove from the working menu without losing bills, sizes, recipes or recovery.
     pub fn delete_item(&self, outlet: &str, id: &ItemId, at: Timestamp) -> Result<(), DbError> {
-        let sold: i64 = self.tx.query_row(
-            "SELECT count(*) FROM order_lines WHERE item_id = ?1",
-            [id.as_str()],
-            |r| r.get(0),
+        let changed = self.tx.execute(
+            "UPDATE items SET is_deleted = 1, is_available = 0, updated_at = ?3 WHERE outlet_id = ?1 AND id = ?2",
+            rusqlite::params![outlet, id.as_str(), encode::timestamp_to_sql(at)],
         )?;
-        if sold > 0 {
-            return Err(DbError::invariant(format!(
-                "{id} has been sold {sold} time(s) and cannot be deleted — \
-                 take it off the menu instead, so old bills and sales reports stay correct"
-            )));
+        if changed == 0 {
+            return Err(DbError::invariant("That item no longer exists."));
         }
-        self.tx
-            .execute("DELETE FROM items WHERE id = ?1", [id.as_str()])?;
-        OutboxRepo::new(self.tx).enqueue_with_tombstone(
-            outlet,
-            "items",
-            id.as_str(),
-            Op::Delete,
-            Some(id.as_str()),
-            at,
-        )
+        OutboxRepo::new(self.tx).enqueue(outlet, "items", id.as_str(), Op::Upsert, at)
+    }
+
+    pub fn restore_item(&self, outlet: &str, id: &ItemId, at: Timestamp) -> Result<(), DbError> {
+        let item = self.list_deleted_items(outlet)?.into_iter().find(|i| &i.id == id)
+            .ok_or_else(|| DbError::invariant("That item is not in Deleted items."))?;
+        // Replacement imports may have retired its original category.
+        if let Some(category_id) = &item.category_id
+            && let Some(mut category) = self.list_categories(outlet)?.into_iter().find(|c| &c.id == category_id && !c.is_active)
+        {
+            category.is_active = true;
+            self.save_category(outlet, &category, at)?;
+        }
+        self.tx.execute(
+            "UPDATE items SET is_deleted = 0, is_available = 1, updated_at = ?3 WHERE outlet_id = ?1 AND id = ?2",
+            rusqlite::params![outlet, id.as_str(), encode::timestamp_to_sql(at)],
+        )?;
+        OutboxRepo::new(self.tx).enqueue(outlet, "items", id.as_str(), Op::Upsert, at)
     }
 
     /// True when something still points at this item: a bill line, a size, a combo, or a

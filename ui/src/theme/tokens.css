@@ -356,6 +356,8 @@
 
   /* The settings screen. */
   --settings-rail: 15rem;
+  --rail-collapsed: 3.5rem;
+  --rail-expanded: 13rem;
   --settings-field: var(--field-md);
   /* A tick box is a line of words, so it packs tighter than a field you type in. */
   --settings-tick: 15rem;
@@ -433,7 +435,9 @@
   --dot-size: 0.625rem;
   --permission-min: 15rem;
   /* The menu screen. */
-  --menu-categories-width: 17rem;
+  --menu-categories-width: 16rem;
+  --menu-name-min: 12rem;
+  --menu-table-min: 34rem;
   --class-min: 18rem;
   --import-box-height: 12rem;
   /* How narrow a table may get before it scrolls sideways instead of wrapping. */

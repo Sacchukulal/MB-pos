@@ -53,6 +53,30 @@ fn bring_down(rows: &[WireRow], down: &mb_db::Db) -> (usize, usize) {
     (written as usize, report.skipped as usize)
 }
 
+#[test]
+fn deleted_menu_items_survive_cloud_restore_and_can_be_put_back() {
+    let source = Scratch::new("wire_deleted_menu");
+    let db = source.open();
+    shop::build(&db);
+    let id = mb_core::ItemId::new("itm_dosa");
+    db.transaction(|tx| Repos::new(tx).menu().delete_item(OUTLET, &id, Timestamp::from_millis(1_900_000_000_000))).expect("delete");
+    let rows = everything_on_the_wire(&db);
+    let item = rows.iter().find(|row| row.table == "menu_items" && row.id == "itm_dosa").expect("item on wire");
+    assert_eq!(item.data["is_available"], false);
+    assert_eq!(item.data[ROW_KEY]["is_deleted"], 1);
+    let target = Scratch::new("wire_deleted_restored");
+    let down = target.open();
+    bring_down(&rows, &down);
+    down.transaction(|tx| {
+        let repos = Repos::new(tx);
+        assert!(!repos.menu().list_items(OUTLET, false)?.iter().any(|item| item.id == id));
+        assert!(repos.menu().list_deleted_items(OUTLET)?.iter().any(|item| item.id == id));
+        repos.menu().restore_item(OUTLET, &id, Timestamp::from_millis(1_900_000_000_001))?;
+        assert!(repos.menu().list_items(OUTLET, true)?.iter().any(|item| item.id == id));
+        Ok(())
+    }).expect("put back after restore");
+}
+
 /// The highest bill number and token the orders of a shop carry.
 fn highest(db: &mb_db::Db) -> (i64, i64) {
     db.read(|c| {

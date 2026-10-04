@@ -3,6 +3,7 @@ import { forwardRef, type ReactNode } from 'react';
 import { cx } from './cx';
 import { Icon, type IconName } from './Icon';
 import { InfoTip } from './InfoTip';
+import { Button } from './controls';
 
 /** The page. Owns the page margin and nothing else owns it. */
 export function Page({
@@ -325,6 +326,17 @@ export function Rail({
 }
 
 /** One place on a rail. */
+export function RailToggle({ collapsed, onChange, label }: {
+  collapsed: boolean; onChange: (collapsed: boolean) => void; label: string;
+}) {
+  return <Button variant="quiet" className="mb-rail__toggle" iconOnly={collapsed}
+    title={`${collapsed ? 'Expand' : 'Collapse'} ${label}`} aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${label}`} aria-expanded={!collapsed}
+    onClick={() => onChange(!collapsed)}>
+    <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} />
+    {!collapsed && <span>Collapse menu</span>}
+  </Button>;
+}
+
 export function RailItem({
   current = false,
   icon,
@@ -344,6 +356,7 @@ export function RailItem({
       type="button"
       className="mb-pick mb-rail__item"
       aria-current={current ? 'page' : undefined}
+      title={typeof children === 'string' ? children : undefined}
       onClick={onClick}
     >
       {icon ? <Icon name={icon} size="md" className="mb-rail__icon" /> : null}

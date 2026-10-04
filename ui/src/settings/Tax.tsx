@@ -260,7 +260,7 @@ export function Tax() {
         ) : (
           <span className="mb-row mb-row--gap-inline">
             {item.name}
-            <Badge tone="warn">Sold out</Badge>
+            <Badge tone="warn">Unavailable</Badge>
           </span>
         ),
     },
@@ -417,4 +417,3 @@ export function Tax() {
     </div>
   );
 }
-

@@ -1,9 +1,8 @@
-/** The menu: categories down the left, items on the right, both typed in a run. */
+/** Categories and quick item entry side by side, with recoverable deletion. */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 import {
-  Badge,
   Button,
   Checkbox,
   Choice,
@@ -15,6 +14,7 @@ import {
   Input,
   Modal,
   MoneyInput,
+  onlyAmount,
   Page,
   PageHeader,
   Panel,
@@ -25,8 +25,10 @@ import {
   SearchField,
   Select,
   Spinner,
+  Switch,
   Table,
   Tabs,
+  Toolbar,
   useToast,
   type Column,
 } from '../kit';
@@ -39,11 +41,14 @@ import { Combos, Composition, ModifierGroups } from './Composition';
 import './menu.css';
 
 /** The three kinds of thing on the menu, as three tabs of one shape. */
-type Tab = 'items' | 'choices' | 'combos';
+type Tab = 'items' | 'choices' | 'combos' | 'deleted';
 
 export function Menu() {
   const [categories, setCategories] = useState<readonly CategoryView[] | null>(null);
   const [rows, setRows] = useState<readonly MenuRowView[]>([]);
+  const [deletedRows, setDeletedRows] = useState<readonly MenuRowView[]>([]);
+  const [availability, setAvailability] = useState('all');
+  const [busyItem, setBusyItem] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const [find, setFind] = useState('');
   const [editing, setEditing] = useState<MenuRowView | null>(null);
@@ -54,6 +59,14 @@ export function Menu() {
   const [importing, setImporting] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('items');
   const toast = useToast();
+  const quickSaves = useRef<Promise<unknown>>(Promise.resolve());
+
+  // Keep consecutive cell edits in order so an older response cannot replace newer rows.
+  const saveField = (itemId: string, field: 'price' | 'shortCode', value: string) => {
+    const saved = quickSaves.current.then(() => call('edit_menu_item_field', { itemId, field, value }));
+    quickSaves.current = saved.then(setRows, () => undefined);
+    return saved;
+  };
 
   const report = useCallback(
     (cause: unknown) => {
@@ -64,8 +77,12 @@ export function Menu() {
 
   const load = useCallback(async () => {
     try {
-      setCategories(await call('menu_categories'));
-      setRows(await call('menu_rows'));
+      const [categories, rows, deleted] = await Promise.all([
+        call('menu_categories'), call('menu_rows'), call('menu_deleted_rows'),
+      ]);
+      setCategories(categories);
+      setRows(rows);
+      setDeletedRows(deleted);
     } catch (cause) {
       report(cause);
     }
@@ -79,48 +96,65 @@ export function Menu() {
 
   const shown = useMemo(() => {
     const wanted = find.trim().toLowerCase();
-    return rows.filter((row) => {
+    return (tab === 'deleted' ? deletedRows : rows).filter((row) => {
       if (chosen && row.categoryId !== chosen) return false;
+      if (tab !== 'deleted' && availability !== 'all' && row.isAvailable !== (availability === 'available')) return false;
       if (wanted === '') return true;
       return (
         row.name.toLowerCase().includes(wanted) ||
         (row.shortCode ?? '').toLowerCase() === wanted
       );
-    });
-  }, [rows, chosen, find]);
+    }).sort((a, b) => Number(b.isAvailable) - Number(a.isAvailable));
+  }, [rows, deletedRows, tab, chosen, find, availability]);
+
+  const changeAvailability = async (row: MenuRowView, available: boolean) => {
+    setBusyItem(row.id);
+    try { setRows(await call('set_item_available', { itemId: row.id, available })); }
+    catch (cause) { report(cause); }
+    finally { setBusyItem(null); }
+  };
+
+  const putBack = async (row: MenuRowView) => {
+    setBusyItem(row.id);
+    try {
+      await call('restore_menu_item', { itemId: row.id });
+      await load();
+      toast.show('ok', `${row.name} is back and available.`);
+    } catch (cause) { report(cause); }
+    finally { setBusyItem(null); }
+  };
 
   const columns: Column<MenuRowView>[] = [
     {
       key: 'name',
       header: 'Item',
-      render: (r) =>
-        r.isAvailable ? (
-          r.name
-        ) : (
-          <span className="mb-row mb-row--gap-inline">
-            {r.name}
-            <Badge tone="warn">Sold out</Badge>
-          </span>
-        ),
+      render: (r) => <span className="mb-menu__itemname">{r.name}</span>,
     },
-    { key: 'code', header: 'Code', optional: true, render: (r) => r.shortCode },
+    {
+      key: 'code', header: 'Short code',
+      render: (r) => tab === 'deleted' ? r.shortCode : <QuickItemField row={r} field="shortCode" onSave={saveField} />,
+    },
     {
       key: 'price',
       header: 'Price',
       numeric: true,
-      render: (r) => <span className="mb-mono">{r.price.text}</span>,
+      render: (r) => tab === 'deleted' ? <span className="mb-mono">{r.price.text}</span> :
+        <QuickItemField row={r} field="price" onSave={saveField} />,
     },
-    { key: 'tax', header: 'GST', render: (r) => r.rate },
+    ...(tab === 'deleted' ? [] : [{
+      key: 'available', header: 'Available', render: (r: MenuRowView) => <Switch
+        aria-label={`Available: ${r.name}`} checked={r.isAvailable} onWord="Yes" offWord="No"
+        disabled={busyItem !== null} onChange={(e) => void changeAvailability(r, e.target.checked)} />,
+    }]),
     {
       key: 'do',
       header: '',
-      render: (r) => (
+      render: (r) => tab === 'deleted' ? (
+        <Button size="sm" disabled={busyItem !== null} onClick={() => void putBack(r)}>Put back</Button>
+      ) : (
         <div className="mb-row">
           <Button size="sm" onClick={() => setEditing(r)}>
             Edit
-          </Button>
-          <Button size="sm" variant="quiet" onClick={() => setDeleting(r)}>
-            Delete
           </Button>
           <RowMenu label={`More for ${r.name}`}>
             <Button size="sm" variant="quiet" onClick={() => setMadeOf(r)}>
@@ -129,13 +163,9 @@ export function Menu() {
             <Button
               size="sm"
               variant="quiet"
-              onClick={() => {
-                call('set_item_available', { itemId: r.id, available: !r.isAvailable })
-                  .then(setRows)
-                  .catch(report);
-              }}
+              onClick={() => setDeleting(r)}
             >
-              {r.isAvailable ? 'Sold out' : 'Put back'}
+              Delete
             </Button>
           </RowMenu>
         </div>
@@ -152,10 +182,10 @@ export function Menu() {
   }
 
   return (
-    <Page className="mb-menu">
+    <Page className="mb-menu" scroll={false}>
       <PageHeader
-        title="Menu"
-        count={rows.length}
+        title={tab === 'deleted' ? 'Deleted items' : 'Menu'}
+        count={tab === 'deleted' ? deletedRows.length : rows.length}
         actions={
           <>
             <div className="mb-menu__find">
@@ -165,7 +195,10 @@ export function Menu() {
                 onChange={(event) => setFind(event.target.value)}
               />
             </div>
-            <RowMenu label="More for the menu" size="md">
+            {tab !== 'deleted' && <RowMenu label="More for the menu" size="md">
+              <Button variant="quiet" onClick={() => { setTab('deleted'); setChosen(null); setFind(''); }}>
+                <Icon name="trash" size="sm" />Deleted items ({deletedRows.length})
+              </Button>
               <Button variant="quiet" onClick={() => setBulkOpen(true)}>
                 <Icon name="tag" size="sm" />
                 Change prices
@@ -197,12 +230,14 @@ export function Menu() {
                 <Icon name="download" size="sm" />
                 Save as a file
               </Button>
-            </RowMenu>
+            </RowMenu>}
           </>
         }
       />
 
-      <Tabs
+      {tab === 'deleted' ? <Toolbar>
+        <Button variant="quiet" onClick={() => { setTab('items'); setChosen(null); setFind(''); }}><Icon name="chevron-left" size="sm" />Back to menu</Button>
+      </Toolbar> : <Tabs
         tabs={[
           { id: 'items', label: 'Items' },
           { id: 'choices', label: 'Choices' },
@@ -210,35 +245,30 @@ export function Menu() {
         ]}
         active={tab}
         onChange={(id) => setTab(id as Tab)}
-      />
+      />}
 
-      {tab === 'items' ? (
-        <div className="mb-menu__body">
-          <Categories
-            categories={live}
-            total={rows.length}
-            chosen={chosen}
-            onChoose={setChosen}
-            onChanged={(fresh) => {
-              setCategories(fresh);
-              // A renamed or deleted category changes the rows too.
-              void load();
-            }}
-            onFailed={report}
-          />
-          <Items
-            categories={live}
-            chosen={chosen}
-            shown={shown}
-            total={rows.length}
-            columns={columns}
-            onAdded={(fresh) => {
-              setRows(fresh);
-              // The count on the category rail moves too.
-              void load();
-            }}
-            onFailed={report}
-          />
+      {tab === 'items' || tab === 'deleted' ? (
+        <div className={`mb-menu__body${tab === 'items' ? ' mb-menu__body--split' : ''}`}>
+          {tab === 'items' && <Categories categories={live} total={rows.length} chosen={chosen} onChoose={setChosen}
+            onChanged={(fresh) => { setCategories(fresh); void load(); }} onFailed={report} />}
+          <Panel title={tab === 'deleted' ? 'Deleted items' : 'Items'} className="mb-menu__pane mb-menu__itempane"
+            actions={<><span className="mb-menu__count">{shown.length} shown</span>
+              {tab === 'items' && <Select aria-label="Filter by availability" value={availability} onChange={(e) => setAvailability(e.target.value)}
+                options={[{ value: 'all', label: 'All items' }, { value: 'available', label: 'Available' }, { value: 'unavailable', label: 'Unavailable' }]} />}</>}>
+          {tab === 'items' && <AddItem categories={live} chosen={chosen}
+            onAdded={(fresh) => { setRows(fresh); void load(); toast.show('ok', 'Item added.'); }} onFailed={report} />}
+          {tab === 'deleted' && <Toolbar>
+            <Select aria-label="Filter by category" value={chosen ?? ''} onChange={(e) => setChosen(e.target.value || null)}
+              options={[{ value: '', label: 'All categories' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]} />
+          </Toolbar>}
+          {tab === 'deleted' && <p className="mb-menu__hint">These items are off the menu. Put back makes an item available again.</p>}
+          <Scroller wide className="mb-menu__list">
+            {shown.length === 0 ? <EmptyState small
+              title={tab === 'deleted' ? 'No deleted items here' : rows.length === 0 ? 'No items yet' : 'No matching items'}
+              hint={rows.length === 0 && tab !== 'deleted' ? 'Type an item above to start your menu.' : 'Try another search or filter.'} /> :
+              <Table rows={shown} columns={columns} rowKey={(r) => r.id} />}
+          </Scroller>
+          </Panel>
         </div>
       ) : tab === 'choices' ? (
         <Scroller className="mb-menu__items">
@@ -268,7 +298,7 @@ export function Menu() {
       <ConfirmDialog
         open={deleting !== null}
         title={deleting ? `Delete ${deleting.name}?` : 'Delete this item?'}
-        body="It goes off the menu for good. An item that has been sold is marked sold out instead."
+        body="You can put it back from Deleted items. Old bills stay unchanged."
         confirmLabel="Delete"
         cancelLabel="Keep it"
         destructive
@@ -327,6 +357,61 @@ export function Menu() {
   );
 }
 
+/** Stable table cells: Enter or leaving the input saves; Escape restores the saved value. */
+function QuickItemField({ row, field, onSave }: {
+  row: MenuRowView;
+  field: 'price' | 'shortCode';
+  onSave: (id: string, field: 'price' | 'shortCode', value: string) => Promise<MenuRowView[]>;
+}) {
+  const savedValue = field === 'price' ? row.price.text : row.shortCode ?? '';
+  const [value, setValue] = useState(savedValue);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const dirty = useRef(false);
+  const pending = useRef(false);
+  const baseline = useRef(savedValue);
+  const label = `${field === 'price' ? 'Price' : 'Short code'} for ${row.name}`;
+  useEffect(() => {
+    baseline.current = savedValue;
+    if (!dirty.current && !pending.current) setValue(savedValue);
+  }, [savedValue]);
+
+  const save = async () => {
+    if (pending.current || !dirty.current) return;
+    const wanted = value.trim();
+    if (wanted === baseline.current) { dirty.current = false; setValue(baseline.current); return; }
+    if (field === 'price' && !wanted) { setError('Enter a price.'); return; }
+    pending.current = true;
+    setSaving(true);
+    setError('');
+    try {
+      const rows = await onSave(row.id, field, wanted);
+      const updated = rows.find((item) => item.id === row.id);
+      const canonical = updated ? field === 'price' ? updated.price.text : updated.shortCode ?? '' : wanted;
+      baseline.current = canonical;
+      dirty.current = false;
+      setValue(canonical);
+    } catch (cause) {
+      setError(isUiError(cause) ? cause.message : 'Could not save. Try again.');
+    } finally { pending.current = false; setSaving(false); }
+  };
+  return <div className="mb-menu__quickedit">
+    <Input className={`mb-menu__cellinput${field === 'price' ? ' mb-menu__cellinput--price' : ''}`}
+      aria-label={label} title="Click to edit. Enter or click away to save."
+      inputMode={field === 'price' ? 'decimal' : 'text'} placeholder={field === 'shortCode' ? '—' : undefined}
+      value={value} error={error} readOnly={saving} aria-busy={saving}
+      onFocus={(event) => event.target.select()}
+      onChange={(event) => { dirty.current = true; setError(''); setValue(field === 'price' ? onlyAmount(event.target.value) : event.target.value); }}
+      onBlur={() => void save()}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') { event.preventDefault(); void save(); event.currentTarget.blur(); }
+        if (event.key === 'Escape' && !pending.current) {
+          event.preventDefault(); event.stopPropagation(); dirty.current = false; setValue(baseline.current); setError(''); event.currentTarget.blur();
+        }
+      }} />
+  </div>;
+}
+
 /** The left pane: a box to add a category, and the list under it. */
 function Categories({
   categories,
@@ -377,6 +462,7 @@ function Categories({
     <Panel title="Categories" className="mb-menu__pane">
       <form className="mb-menu__add" onSubmit={(event) => void add(event)}>
         <Input
+          label="New category"
           aria-label="New category"
           placeholder="New category"
           value={name}
@@ -438,28 +524,28 @@ function Categories({
                   <span className="mb-menu__catname">{category.name}</span>
                   <span className="mb-menu__catcount">{category.itemCount}</span>
                 </button>
-                <div className="mb-menu__catdo">
+                <RowMenu label={`More for category ${category.name}`}>
                   <Button
                     size="sm"
                     variant="quiet"
-                    iconOnly
-                    title={`Rename ${category.name}`}
+                    aria-label={`Rename ${category.name}`}
                     disabled={busy}
                     onClick={() => setRenaming({ id: category.id, name: category.name })}
                   >
                     <Icon name="pencil" size="sm" />
+                    Rename
                   </Button>
                   <Button
                     size="sm"
                     variant="quiet"
-                    iconOnly
-                    title={`Delete ${category.name}`}
+                    aria-label={`Delete ${category.name}`}
                     disabled={busy}
                     onClick={() => setDeleting(category)}
                   >
                     <Icon name="trash" size="sm" />
+                    Delete
                   </Button>
-                </div>
+                </RowMenu>
               </div>
             ),
           )}
@@ -490,26 +576,21 @@ function Categories({
   );
 }
 
-/** The right pane: a row to add an item, and the table under it. */
-function Items({
+/** Quick entry stays open and clears after each item, ready for the next one. */
+function AddItem({
   categories,
   chosen,
-  shown,
-  total,
-  columns,
   onAdded,
   onFailed,
 }: {
   categories: readonly CategoryView[];
   chosen: string | null;
-  shown: readonly MenuRowView[];
-  total: number;
-  columns: readonly Column<MenuRowView>[];
   onAdded: (rows: readonly MenuRowView[]) => void;
   onFailed: (cause: unknown) => void;
 }) {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
+  const [shortCode, setShortCode] = useState('');
   const [categoryId, setCategoryId] = useState(chosen ?? '');
   const [busy, setBusy] = useState(false);
   const nameBox = useRef<HTMLInputElement>(null);
@@ -535,7 +616,7 @@ function Items({
             taxClassId: null,
             priceBasis: null,
             hsn: null,
-            shortCode: null,
+            shortCode: shortCode.trim() || null,
             cost: null,
             isOpenPrice: false,
             isAvailable: true,
@@ -546,6 +627,7 @@ function Items({
       );
       setName('');
       setPrice('');
+      setShortCode('');
       nameBox.current?.focus();
     } catch (cause) {
       onFailed(cause);
@@ -555,22 +637,24 @@ function Items({
   };
 
   return (
-    <Panel title="Items" className="mb-menu__pane">
-      <form className="mb-menu__add mb-menu__add--item" onSubmit={(event) => void add(event)}>
+      <form className="mb-menu__add mb-menu__add--item" aria-label="Add item" onSubmit={(event) => void add(event)}>
         <Input
           ref={nameBox}
+          label="Item name"
           aria-label="Item name"
           placeholder="Item name"
           value={name}
           onChange={(event) => setName(event.target.value)}
         />
         <MoneyInput
+          label="Price"
           aria-label="Price"
           placeholder="Price"
           value={price}
           onChange={setPrice}
         />
         <Select
+          label="Category"
           aria-label="Category"
           value={categoryId}
           onChange={(event) => setCategoryId(event.target.value)}
@@ -579,24 +663,12 @@ function Items({
             ...categories.map((c) => ({ value: c.id, label: c.name })),
           ]}
         />
+        <Input label="Short code" placeholder="Optional" value={shortCode} onChange={(e) => setShortCode(e.target.value)} />
         <Button type="submit" variant="primary" disabled={busy || name.trim() === ''}>
           <Icon name="plus" size="sm" />
           Add
         </Button>
       </form>
-
-      <Scroller className="mb-menu__list">
-        {shown.length === 0 ? (
-          <EmptyState
-            small
-            title={total === 0 ? 'No items yet' : 'Nothing here'}
-            hint={total === 0 ? 'Type a name and a price above.' : 'Try another word or category.'}
-          />
-        ) : (
-          <Table dense rows={shown} columns={columns} rowKey={(r) => r.id} />
-        )}
-      </Scroller>
-    </Panel>
   );
 }
 
@@ -714,7 +786,7 @@ function EditItem({
           onChange={(e) => setOpenPrice(e.target.checked)}
         />
         <Checkbox
-          label="On the menu"
+          label="Available"
           checked={available}
           onChange={(e) => setAvailable(e.target.checked)}
         />
@@ -846,7 +918,7 @@ function ImportMenu({
       />
       <p className="mb-import__shape">
         {replacing
-          ? 'The file becomes the menu. Anything not in it is removed — or taken off the menu when old bills still need it.'
+          ? 'The file becomes the menu. Anything not in it moves to Deleted items, where you can put it back.'
           : 'New items are added and items already on the menu take the file’s price. Nothing is removed.'}
       </p>
 
@@ -855,8 +927,7 @@ function ImportMenu({
           <strong>{plan.summary}</strong>
           <Named label="New categories" names={plan.newCategories} />
           <Named label="Already on the menu, the file’s values win" names={plan.already} />
-          <Named label="Removed" names={plan.removed} tone="danger" />
-          <Named label="Taken off the menu, kept for old bills" names={plan.takenOff} tone="danger" />
+          <Named label="Moved to Deleted items" names={[...plan.removed, ...plan.takenOff]} tone="danger" />
           <Named label="Categories left empty and removed" names={plan.retiredCategories} tone="danger" />
           {shown.length > 0 ? (
             <ul className="mb-import__refused">

@@ -216,6 +216,7 @@ describe('the menu screen', () => {
           return Promise.resolve([tiffin]);
         case 'menu_rows':
         case 'save_menu_item':
+        case 'edit_menu_item_field':
         case 'delete_menu_item':
           return Promise.resolve(rows);
         default:
@@ -229,27 +230,32 @@ describe('the menu screen', () => {
     );
   }
 
-  it('adds an item from the row at the top, with Enter, and never asks about tax', async () => {
+  it('adds items with short codes and keeps the form ready for the next item', async () => {
     open([]);
     const name = await screen.findByLabelText('Item name');
+    expect(screen.getByLabelText('New category')).toBeVisible();
+    expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.change(name, { target: { value: 'Idli' } });
     fireEvent.change(screen.getByLabelText('Price'), { target: { value: '40' } });
+    fireEvent.change(screen.getByLabelText('Short code'), { target: { value: ' ID1 ' } });
     fireEvent.submit(name.closest('form')!);
 
     await waitFor(() =>
       expect(call.mock.calls.filter(([n]) => n === 'save_menu_item')).toHaveLength(1),
     );
     const sent = (call.mock.calls.find(([n]) => n === 'save_menu_item')![1] as {
-      edit: { name: string; price: string; taxClassId: string | null; categoryId: string | null };
+      edit: { name: string; price: string; shortCode: string | null; taxClassId: string | null; categoryId: string | null };
     }).edit;
     expect(sent.name).toBe('Idli');
     expect(sent.price).toBe('40');
+    expect(sent.shortCode).toBe('ID1');
     // Rust decides the tax from the category and the shop.
     expect(sent.taxClassId).toBeNull();
     expect(screen.queryByLabelText('Tax slab')).toBeNull();
 
     // Empty and ready for the next one; the second item is a NEW item.
     await waitFor(() => expect((name as HTMLInputElement).value).toBe(''));
+    expect(screen.getByLabelText('Short code')).toHaveValue('');
     fireEvent.change(name, { target: { value: 'Vada' } });
     fireEvent.submit(name.closest('form')!);
     await waitFor(() =>
@@ -261,12 +267,118 @@ describe('the menu screen', () => {
     expect(ids[0]).not.toBe(ids[1]);
   });
 
-  it('puts a new item in the category chosen on the left', async () => {
+  it('keeps available dishes first and offers a direct availability switch', async () => {
+    open([{ ...dosa, id: 'off', name: 'Apple juice', isAvailable: false }, dosa]);
+    await screen.findByRole('switch', { name: 'Available: Masala dosa' });
+    const rows = screen.getAllByRole('row');
+    expect(rows[1]).toHaveTextContent('Masala dosa');
+    expect(rows[2]).toHaveTextContent('Apple juice');
+    expect(screen.queryByText('Sold out')).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Available: Apple juice' }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('set_item_available', { itemId: 'off', available: true }));
+  });
+
+  it('hides GST in the list and keeps it in the full editor', async () => {
+    open();
+    await screen.findByText(dosa.name);
+    expect(screen.queryByText(dosa.rate)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(within(screen.getByRole('dialog')).getByText(`GST ${dosa.rate}`)).toBeVisible();
+  });
+
+  it('edits a price and a missing short code directly without resending other item fields', async () => {
+    open();
+    const price = await screen.findByLabelText(`Price for ${dosa.name}`);
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    fireEvent.change(price, { target: { value: '125.50' } });
+    fireEvent.keyDown(price, { key: 'Enter' });
+    fireEvent.blur(price);
+    await waitFor(() => expect(call).toHaveBeenCalledWith('edit_menu_item_field', { itemId: dosa.id, field: 'price', value: '125.50' }));
+    expect(call.mock.calls.filter(([name]) => name === 'edit_menu_item_field')).toHaveLength(1);
+    const code = screen.getByLabelText(`Short code for ${dosa.name}`);
+    expect(code.closest('td')).not.toBe(screen.getByText(dosa.name).closest('td'));
+    fireEvent.change(code, { target: { value: ' MD ' } });
+    fireEvent.blur(code);
+    await waitFor(() => expect(call).toHaveBeenCalledWith('edit_menu_item_field', { itemId: dosa.id, field: 'shortCode', value: 'MD' }));
+    expect(call.mock.calls.some(([name]) => name === 'save_menu_item')).toBe(false);
+  });
+
+  it('cancels inline changes and keeps a failed edit open for correction', async () => {
+    open();
+    const input = await screen.findByLabelText(`Price for ${dosa.name}`);
+    fireEvent.change(input, { target: { value: '132' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.blur(input);
+    expect(input).toHaveValue('120.00');
+    expect(call.mock.calls.some(([name]) => name === 'edit_menu_item_field')).toBe(false);
+    fireEvent.change(input, { target: { value: '131' } });
+    call.mockRejectedValueOnce(new Error('save failed'));
+    fireEvent.blur(input);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not save');
+    expect(input).toHaveValue('131');
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(input).toHaveValue('120.00');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('leaves unchanged cells alone and refuses an empty price without silently changing it to zero', async () => {
+    open();
+    const input = await screen.findByLabelText(`Price for ${dosa.name}`);
+    fireEvent.blur(input);
+    expect(call.mock.calls.some(([name]) => name === 'edit_menu_item_field')).toBe(false);
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter a price');
+    expect(call.mock.calls.some(([name]) => name === 'edit_menu_item_field')).toBe(false);
+  });
+
+  it('queues quick edits without disabling the next cell or losing its draft', async () => {
+    open();
+    const price = await screen.findByLabelText(`Price for ${dosa.name}`);
+    let finish!: (rows: MenuRowView[]) => void;
+    call.mockImplementationOnce(() => new Promise<MenuRowView[]>((resolve) => { finish = resolve; }));
+    fireEvent.change(price, { target: { value: '130' } });
+    fireEvent.blur(price);
+    await waitFor(() => expect(finish).toBeDefined());
+    const code = screen.getByLabelText(`Short code for ${dosa.name}`);
+    expect(code).not.toHaveAttribute('readonly');
+    fireEvent.change(code, { target: { value: 'MD' } });
+    fireEvent.blur(code);
+    expect(call.mock.calls.filter(([name]) => name === 'edit_menu_item_field')).toHaveLength(1);
+    finish([{ ...dosa, price: money(13000, '130.00') }]);
+    await waitFor(() => expect(call).toHaveBeenCalledWith('edit_menu_item_field', { itemId: dosa.id, field: 'shortCode', value: 'MD' }));
+  });
+
+  it('keeps deleted dishes separate and puts them back through the restore command', async () => {
+    let active = [dosa];
+    let deleted: MenuRowView[] = [];
+    call.mockImplementation((name: string) => {
+      if (name === 'delete_menu_item') { active = []; deleted = [{ ...dosa, isAvailable: false }]; }
+      if (name === 'restore_menu_item') { active = [dosa]; deleted = []; }
+      return Promise.resolve(name === 'menu_categories' ? [tiffin] :
+        name === 'menu_deleted_rows' || name === 'restore_menu_item' ? deleted : active);
+    });
+    render(<ToastProvider><Menu /></ToastProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: `More for ${dosa.name}` }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('You can put it back from Deleted items');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByRole('switch', { name: `Available: ${dosa.name}` })).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'More for the menu' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Deleted items (1)' }));
+    expect(await screen.findByText(dosa.name)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Put back' }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('restore_menu_item', { itemId: dosa.id }));
+    await screen.findByText('No deleted items here');
+    fireEvent.click(screen.getByRole('button', { name: 'Back to menu' }));
+    expect(await screen.findByRole('switch', { name: `Available: ${dosa.name}` })).toBeChecked();
+  });
+
+  it('puts a new item in the selected category', async () => {
     open([]);
-    const tiffin = (await screen.findAllByText('Tiffin')).find((el) =>
-      el.classList.contains('mb-menu__catname'),
-    )!;
-    fireEvent.click(tiffin.closest('button')!);
+    fireEvent.click(await screen.findByRole('button', { name: /^Tiffin/ }));
     const name = screen.getByLabelText('Item name');
     fireEvent.change(name, { target: { value: 'Upma' } });
     fireEvent.submit(name.closest('form')!);
@@ -293,6 +405,7 @@ describe('the menu screen', () => {
 
   it('renames and deletes a category in place', async () => {
     open([]);
+    fireEvent.click(await screen.findByRole('button', { name: 'More for category Tiffin' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Rename Tiffin' }));
     const box = screen.getByLabelText('Category name');
     fireEvent.change(box, { target: { value: 'Breakfast' } });
@@ -305,6 +418,7 @@ describe('the menu screen', () => {
       }),
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'More for category Tiffin' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete Tiffin' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() =>
@@ -327,6 +441,7 @@ describe('the menu screen', () => {
       ),
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: `More for ${dosa.name}` }));
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
     const ask = screen.getByRole('dialog');
     fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }));
@@ -436,8 +551,7 @@ describe('the menu screen', () => {
       mode: 'replace',
     });
     expect(await screen.findByText(replacing.summary)).toBeTruthy();
-    expect(screen.getByText(/Removed: Masala dosa/)).toBeTruthy();
-    expect(screen.getByText(/Taken off the menu.*Idli/)).toBeTruthy();
+    expect(screen.getByText(/Moved to Deleted items: Masala dosa, Idli/)).toBeTruthy();
     expect(screen.getByText(/Categories left empty and removed: Tiffin/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Replace the menu' }));

@@ -48,6 +48,9 @@ pub mod action {
     pub const DISCOUNT_GIVEN: AuditAction = "discount.given";
     pub const DISCOUNT_REFUSED: AuditAction = "discount.refused";
     pub const PRICE_CHANGED: AuditAction = "price.changed";
+    pub const MENU_ITEM_DELETED: AuditAction = "menu.item_deleted";
+    pub const MENU_ITEM_RESTORED: AuditAction = "menu.item_restored";
+    pub const MENU_AVAILABILITY: AuditAction = "menu.availability";
     pub const SETTING_CHANGED: AuditAction = "setting.changed";
     pub const COUNTER_CHANGED: AuditAction = "counter.changed";
     pub const DRAWER_OPENED: AuditAction = "drawer.opened";
@@ -158,6 +161,9 @@ pub mod action {
         DISCOUNT_GIVEN,
         DISCOUNT_REFUSED,
         PRICE_CHANGED,
+        MENU_ITEM_DELETED,
+        MENU_ITEM_RESTORED,
+        MENU_AVAILABILITY,
         SETTING_CHANGED,
         COUNTER_CHANGED,
         DRAWER_OPENED,
@@ -244,6 +250,9 @@ pub mod action {
             DISCOUNT_GIVEN => "Gave a discount",
             DISCOUNT_REFUSED => "Tried to give too big a discount",
             PRICE_CHANGED => "Changed a price",
+            MENU_ITEM_DELETED => "Deleted a menu item",
+            MENU_ITEM_RESTORED => "Put a menu item back",
+            MENU_AVAILABILITY => "Changed item availability",
             SETTING_CHANGED => "Changed a setting",
             COUNTER_CHANGED => "Changed the bill counter",
             DRAWER_OPENED => "Opened the cash drawer",

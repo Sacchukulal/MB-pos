@@ -269,7 +269,10 @@ export interface Commands {
   // The menu.
   menu_categories: { args: void; returns: CategoryView[] };
   menu_rows: { args: void; returns: MenuRowView[] };
+  menu_deleted_rows: { args: void; returns: MenuRowView[] };
+  restore_menu_item: { args: { itemId: string }; returns: MenuRowView[] };
   save_menu_item: { args: { edit: MenuEdit }; returns: MenuRowView[] };
+  edit_menu_item_field: { args: { itemId: string; field: 'price' | 'shortCode'; value: string }; returns: MenuRowView[] };
   set_item_available: {
     args: { itemId: string; available: boolean };
     returns: MenuRowView[];

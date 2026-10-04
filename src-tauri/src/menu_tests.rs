@@ -72,6 +72,45 @@ fn price_of(app: &App, id: &str) -> String {
         .text
 }
 
+#[test]
+fn inline_item_edits_preserve_other_fields_and_refuse_deleted_items() {
+    let scratch = Scratch::new("inline_menu");
+    let app = a_shop_with_a_menu(&scratch);
+    let id = ItemId::new("itm_tea");
+    let original = app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repo = Repos::new(tx);
+        let mut item = repo.menu().find_item(&id)?.expect("tea");
+        item.cost_price = Some(Money::from_paise(725));
+        item.hsn = Some("1234".to_owned());
+        item.course = Some("Drinks".to_owned());
+        item.prep_minutes = Some(4);
+        item.is_available = false;
+        repo.menu().save_item(OUTLET, &item, crate::flows::now())?;
+        Ok(item)
+    }).map_err(|e| crate::words::from_db(&e))).expect("original details");
+
+    let edit = |field: &str, value: &str| crate::menu::edit_item_field_on(
+        &app, "itm_tea".to_owned(), field.to_owned(), value.to_owned(),
+    );
+    edit("price", "25.50").expect("price saved");
+    edit("shortCode", " TEA ").expect("code saved");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let item = Repos::new(tx).menu().find_item(&id)?.expect("tea");
+        let mut expected = original.clone();
+        expected.unit_price = Money::from_paise(2550);
+        expected.short_code = Some("TEA".to_owned());
+        assert_eq!(item, expected, "only the two requested fields changed");
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("preserved details");
+    edit("shortCode", " ").expect("code cleared");
+    assert!(menu_rows_on(&app).expect("rows").iter().find(|r| r.id == "itm_tea").expect("tea").short_code.is_none());
+    assert!(edit("price", "bad").is_err());
+    assert!(edit("isAvailable", "true").is_err());
+    assert_eq!(price_of(&app, "itm_tea"), "25.50");
+    crate::menu::delete_item_on(&app, "itm_tea".to_owned()).expect("deleted");
+    assert!(edit("price", "30").is_err());
+}
+
 /// Just the percentage. The row also carries the treatment in words — "5% · Tax added on top" —
 /// and that half is asserted where it matters.
 fn rate_of(app: &App, id: &str) -> String {
@@ -486,13 +525,13 @@ fn replacing_the_menu_keeps_only_what_the_file_names() {
     assert_eq!((plan.new_items, plan.updated_items), (2, 0));
     assert_eq!(
         plan.removed,
-        vec!["Tea".to_owned(), "Water bottle".to_owned()],
+        vec!["Masala dosa".to_owned(), "Tea".to_owned(), "Water bottle".to_owned()],
         "{plan:?}"
     );
     assert_eq!(
         plan.taken_off,
-        vec!["Masala dosa".to_owned()],
-        "the dosa has a size"
+        Vec::<String>::new(),
+        "all removed items now go to Deleted items"
     );
     assert_eq!(plan.retired_categories, vec!["Bottles".to_owned()]);
     assert!(
@@ -508,22 +547,22 @@ fn replacing_the_menu_keeps_only_what_the_file_names() {
     let said = run_import_on(&app, file, ImportMode::Replace).expect("replaced");
     assert_eq!(
         said,
-        "2 items imported. One category was added. 2 not in the file removed and 1 taken off \
-         the menu."
+        "2 items imported. One category was added. 3 not in the file removed."
     );
     let rows = menu_rows_on(&app).expect("rows");
     let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
     assert!(
-        names.contains(&"Idli") && names.contains(&"Masala dosa"),
+        names.contains(&"Idli") && !names.contains(&"Masala dosa"),
         "{names:?}"
     );
     assert!(!names.contains(&"Water bottle"), "{names:?}");
     assert_eq!(rows.iter().filter(|r| r.name == "Tea").count(), 1);
-    let dosa = rows
+    let deleted = crate::menu::deleted_rows_on(&app).expect("deleted items");
+    let dosa = deleted
         .iter()
         .find(|r| r.id == "itm_dosa")
         .expect("kept for its size");
-    assert!(!dosa.is_available, "taken off the menu, not deleted");
+    assert!(!dosa.is_available, "deleted and not sellable");
     let categories = crate::menu::categories_on(&app).expect("categories");
     let bottles = categories
         .iter()
@@ -535,6 +574,9 @@ fn replacing_the_menu_keeps_only_what_the_file_names() {
     let out = exported(&app, &scratch, "menu.csv");
     let again = plan_import_on(&app, &out, ImportMode::Replace).expect("planned");
     assert!(again.is_clean && again.is_empty, "{again:?}");
+    crate::menu::restore_item_on(&app, "itm_dosa".to_owned()).expect("put back");
+    assert!(menu_rows_on(&app).expect("menu").iter().any(|r| r.id == "itm_dosa" && r.is_available));
+    assert!(!crate::menu::item_composition_on(&app, "itm_dosa".to_owned()).expect("sizes").variants.is_empty());
 }
 
 /// A plain list without categories updates by name; a name the shop has twice is asked about

@@ -18,6 +18,24 @@ fn every_version() -> Vec<u32> {
     MIGRATIONS.iter().map(|m| m.version).collect()
 }
 
+#[test]
+fn menu_deletion_upgrade_does_not_guess_why_an_item_was_unavailable() {
+    let scratch = Scratch::new("menu_deletion_upgrade");
+    let mut conn = Connection::open(scratch.db_path()).expect("open");
+    conn.execute_batch("CREATE TABLE schema_version (
+        version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL,
+        applied_at INTEGER NOT NULL, run_ms INTEGER NOT NULL) STRICT;").expect("ledger");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 21) {
+        run_single(&mut conn, migration).expect("previous schema");
+    }
+    conn.execute_batch("INSERT INTO items (id, outlet_id, name, unit_price, tax_class_id, is_available, created_at, updated_at)
+        VALUES ('old_off', 'outlet_default', 'Old unavailable dish', 4500, 'tax_food_5', 0, 1, 1),
+               ('old_on', 'outlet_default', 'Available dish', 5500, 'tax_food_5', 1, 1, 1);").expect("old menu");
+    migrate::apply_all(&mut conn).expect("upgrade");
+    check(&conn, "items", "old_off", &[("is_deleted", num(0)), ("is_available", num(0)), ("unit_price", num(4500))]);
+    check(&conn, "items", "old_on", &[("is_deleted", num(0)), ("is_available", num(1)), ("unit_price", num(5500))]);
+}
+
 /// What `apply_all` has left to do on a database standing one step before `from`. Written from
 /// `MIGRATIONS` rather than as a list of numbers, so adding a migration does not break three
 /// tests that are not about it.

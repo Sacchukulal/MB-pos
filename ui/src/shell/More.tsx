@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-import { Rail, RailItem } from '../kit';
+import { cx, Rail, RailItem, RailToggle, Scroller, useRailState } from '../kit';
 import type { Screen } from './Shell';
 
 export function More({
@@ -18,9 +18,13 @@ export function More({
   /** The chosen screen, drawn. */
   children: ReactNode;
 }) {
+  const [collapsed, setCollapsed] = useRailState('more');
   return (
-    <div className="mb-railpage">
-      <Rail label="More screens" className="mb-more__rail">
+    <div className={cx('mb-railpage', collapsed && 'mb-railpage--collapsed')}>
+      <div className={cx('mb-navrail', collapsed && 'mb-navrail--collapsed')}>
+        <RailToggle collapsed={collapsed} onChange={setCollapsed} label="More menu" />
+        <Scroller inset>
+        <Rail label="More screens" className="mb-more__rail">
         {screens.map((item) => (
           <RailItem
             key={item.id}
@@ -32,6 +36,8 @@ export function More({
           </RailItem>
         ))}
       </Rail>
+        </Scroller>
+      </div>
       <div className="mb-more__body">{children}</div>
     </div>
   );

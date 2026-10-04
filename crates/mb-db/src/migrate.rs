@@ -143,6 +143,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0020_billing_accounts",
         sql: include_str!("migrations/0020_billing_accounts.sql"),
     },
+    Migration {
+        version: 21,
+        name: "0021_deleted_menu_items",
+        sql: include_str!("migrations/0021_deleted_menu_items.sql"),
+    },
 ];
 
 /// The highest version this build understands.

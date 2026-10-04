@@ -505,7 +505,10 @@ macro_rules! commands {
             // The menu.
             $crate::menu::menu_categories,
             $crate::menu::menu_rows,
+            $crate::menu::menu_deleted_rows,
+            $crate::menu::restore_menu_item,
             $crate::menu::save_menu_item,
+            $crate::menu::edit_menu_item_field,
             $crate::menu::set_item_available,
             $crate::menu::delete_menu_item,
             $crate::menu::delete_menu_category,
@@ -2505,6 +2508,9 @@ pub fn audit_trail_on(
                     names.insert(person.id.as_str().to_owned(), person.name);
                 }
                 for item in repos.menu().list_items(OUTLET, false)? {
+                    names.insert(item.id.as_str().to_owned(), item.name);
+                }
+                for item in repos.menu().list_deleted_items(OUTLET)? {
                     names.insert(item.id.as_str().to_owned(), item.name);
                 }
                 for table in repos.floor().list_tables(OUTLET)? {

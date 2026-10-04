@@ -12,6 +12,7 @@ import {
   Choice,
   InfoTip,
   Input,
+  TextArea,
   MoneyInput,
   NumberInput,
   PhoneInput,
@@ -127,7 +128,8 @@ function linesOf(settings: SettingView[]): { row: string; settings: SettingView[
     if (setting.row !== '' && last && last.row === setting.row) last.settings.push(setting);
     else lines.push({ row: setting.row, settings: [setting] });
   }
-  return lines;
+  // The address gets its own full-width row after the shop's shorter details.
+  return lines.sort((a, b) => Number(a.settings[0]?.key === 'store.address') - Number(b.settings[0]?.key === 'store.address'));
 }
 
 /** Whether a run is nothing but tick boxes — see the note where it is used. */
@@ -202,6 +204,8 @@ export function Field({
   // On a shared line the heading beside it says "Total"; the control says "Size".
   const shown = inLine ? setting.short : setting.label;
   const body = (() => {
+    if (setting.key === 'store.address') return <TextArea label={setting.label} hint={hint}
+      value={value} disabled={disabled} maxLength={200} onChange={(event) => onChange(event.currentTarget.value)} />;
     switch (setting.control) {
       case 'tick':
         return (
@@ -313,6 +317,7 @@ export function Field({
 
   return (
     <div
+      data-setting={setting.key}
       className={cx(
         'mb-settings__field',
         changed && 'mb-settings__field--changed',

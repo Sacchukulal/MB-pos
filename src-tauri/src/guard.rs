@@ -126,7 +126,10 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     // The menu.
     ("menu_categories", Access::Needs(Permission::MenuManage)),
     ("menu_rows", Access::Needs(Permission::MenuManage)),
+    ("menu_deleted_rows", Access::Needs(Permission::MenuManage)),
+    ("restore_menu_item", Access::Needs(Permission::MenuManage)),
     ("save_menu_item", Access::Needs(Permission::MenuManage)),
+    ("edit_menu_item_field", Access::Needs(Permission::MenuManage)),
     ("set_item_available", Access::Needs(Permission::MenuManage)),
     ("delete_menu_item", Access::Needs(Permission::MenuManage)),
     (
