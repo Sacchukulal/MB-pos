@@ -351,7 +351,7 @@ fn every_line_of_a_day_file_restores_the_same_bills_refunds_and_reverts() {
     assert_eq!(reverts.len(), 1);
     assert_eq!(lines.len(), 1);
     assert_eq!(payments.len(), 1);
-    // And the day's totals are there for the day-wise report.
+    // Restored bills take precedence over their cached summary.
     let days = down
         .read_transaction(|tx| {
             Repos::new(tx)
@@ -359,7 +359,7 @@ fn every_line_of_a_day_file_restores_the_same_bills_refunds_and_reverts() {
                 .cloud_days(OUTLET, mb_db::repo::reports::Period::one_day(day(0)))
         })
         .expect("cloud days");
-    assert_eq!(days.len(), 1);
+    assert!(days.is_empty(), "restored bills must suppress the cached cloud total");
 
     // The fixture the phone's test reads, when the phone's repo is beside this one.
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -501,12 +501,15 @@ fn build(
         Kind::Sales(by) => {
             let buckets = reports.sales_by(OUTLET, period, by)?;
             let wants_qty = matches!(by, SalesBy::Item | SalesBy::Category);
+            let wants_tax = by != SalesBy::PaymentMode;
             let mut columns = vec![column(label_for(by), false), column("Bills", true)];
             if wants_qty {
                 columns.push(column("Quantity", true));
             }
-            columns.push(column("Discount", true));
-            columns.push(column("Tax", true));
+            if wants_tax {
+                columns.push(column("Discount", true));
+                columns.push(column("Tax", true));
+            }
             columns.push(column("Total", true));
 
             let mut gross = Money::ZERO;
@@ -528,23 +531,28 @@ fn build(
                     if wants_qty {
                         row.push(b.qty.map(|q| q.to_string()).unwrap_or_default());
                     }
-                    row.push(b.discount.to_plain_string());
-                    row.push(b.tax.to_plain_string());
+                    if wants_tax {
+                        row.push(b.discount.to_plain_string());
+                        row.push(b.tax.to_plain_string());
+                    }
                     row.push(b.gross.to_plain_string());
                     row
                 })
                 .collect();
 
+            if wants_qty || by == SalesBy::PaymentMode {
+                bills = reports.sold_count(OUTLET, period)?;
+                notes.push("A bill can appear in more than one row; the total counts each bill once.".to_owned());
+            }
             // Every column that has figures in it gets a total.
             let mut totals = vec!["Total".to_owned(), bills.to_string()];
             if wants_qty {
                 totals.push(qty.to_string());
             }
-            totals.extend([
-                discount.to_plain_string(),
-                tax.to_plain_string(),
-                gross.to_plain_string(),
-            ]);
+            if wants_tax {
+                totals.extend([discount.to_plain_string(), tax.to_plain_string()]);
+            }
+            totals.push(gross.to_plain_string());
 
             // The comparison, from the same query over the previous period.
             let previous = period.previous();
@@ -1725,7 +1733,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
     let one_day = period.days() == 1;
 
     // The figures, summed day by day from the same rows the day close freezes.
-    let (bills, net, voids, voided_bills, cash, electronic, spent, position) =
+    let (bills, net, voids, voided_bills, cash, electronic, spent, position, has_archived) =
         app.with_shop(|shop| {
             shop.db
                 .read_transaction(|tx| {
@@ -1736,7 +1744,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
                     while day <= period.to {
                         let totals = repos.corrections().day_totals(OUTLET, day)?;
                         let figures = repos.days().figures(OUTLET, day)?;
-                        bills = bills.saturating_add(totals.bills);
+                        bills = bills.saturating_add(totals.bills.saturating_sub(totals.voided_bills));
                         net = net.saturating_add(totals.net.paise());
                         voids = voids.saturating_add(totals.voids.paise());
                         voided = voided.saturating_add(totals.voided_bills);
@@ -1744,6 +1752,11 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
                         upi = upi.saturating_add(figures.upi_and_card.paise());
                         spent = spent.saturating_add(figures.expenses.paise());
                         day = day.next();
+                    }
+                    let archived = repos.wire().cloud_days(OUTLET, period)?;
+                    for day in &archived {
+                        bills = bills.saturating_add(day.bills);
+                        net = net.saturating_add(day.gross.paise());
                     }
                     // The drawer is a thing a single day has.
                     let position = if one_day {
@@ -1760,6 +1773,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
                         Money::from_paise(upi),
                         Money::from_paise(spent),
                         position,
+                        !archived.is_empty(),
                     ))
                 })
                 .map_err(|e| words::from_db(&e))
@@ -1776,6 +1790,10 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
     // A day left open is the gate's business, not a card: it is asked at sign-in and cannot be
     // ignored.
     let mut attention = Vec::new();
+    if has_archived {
+        attention.push(needs_you("info", "Archived days in this period",
+            "Takings and average bill include saved daily totals. Detailed charts cover bills stored on this counter; drawer, spending, void amounts and margin are unavailable for the full period.".to_owned()));
+    }
 
     // Paper that did not come out.
     let parked = app.with_shop(|shop| {
@@ -2075,6 +2093,12 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
             None => "Add recipes to your dishes and this fills in.".to_owned(),
         },
     });
+    if has_archived {
+        for stat in &mut stats[2..] {
+            stat.value = "—".to_owned();
+            stat.note = "Detailed bills unavailable for archived days.".to_owned();
+        }
+    }
 
     Ok(DashboardView {
         title: dashboard_title(period, today),

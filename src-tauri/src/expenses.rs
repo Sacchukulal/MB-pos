@@ -284,7 +284,7 @@ pub fn expenses_on(app: &App) -> UiResult<ExpensesView> {
                         suppliers_paid: MoneyView::from(position.suppliers_paid),
                         expected: MoneyView::from(position.expected),
                         says: format!(
-                            "{} float + {} cash sales + {} top-ups − {} expenses − {} payouts − {} to the bank − {} to suppliers",
+                            "{} float + {} cash received + {} top-ups − {} expenses − {} payouts − {} to the bank − {} to suppliers − {} cash refunded + {} credit collected − {} with riders",
                             position.opening_float.to_plain_string(),
                             position.cash_sales.to_plain_string(),
                             position.top_ups.to_plain_string(),
@@ -292,6 +292,9 @@ pub fn expenses_on(app: &App) -> UiResult<ExpensesView> {
                             position.payouts.to_plain_string(),
                             position.bank_drops.to_plain_string(),
                             position.suppliers_paid.to_plain_string(),
+                            position.cash_refunds.to_plain_string(),
+                            position.credit_collected.to_plain_string(),
+                            position.with_riders.to_plain_string(),
                         ),
                     },
                     total: MoneyView::from(total),

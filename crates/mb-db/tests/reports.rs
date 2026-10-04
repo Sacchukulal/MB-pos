@@ -213,6 +213,77 @@ fn every_grouping_of_a_period_sums_to_the_same_gross() {
 }
 
 #[test]
+fn identical_bill_taxes_and_discounts_are_counted_per_bill() {
+    let scratch = Scratch::new("reports-identical-figures");
+    let db = scratch.open();
+    shop::build(&db);
+    let at = Timestamp::from_millis(1_785_000_000_000);
+    let first = settle_on(&db, "ord_equal_1", day(40), at, 1, 0);
+    settle_on(&db, "ord_equal_2", day(40), at, 1, 0);
+    db.transaction(|tx| {
+        // Identical discounts on different issued bills must not be deduplicated by value.
+        tx.execute("UPDATE bills SET total_discount = 100 WHERE order_id IN ('ord_equal_1', 'ord_equal_2')", [])?;
+        for by in [SalesBy::Day, SalesBy::Hour, SalesBy::OrderType, SalesBy::Cashier, SalesBy::Section, SalesBy::Terminal] {
+            let rows = Repos::new(tx).reports().sales_by(OUTLET, Period::one_day(day(40)), by)?;
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].bills, 2);
+            assert_eq!(rows[0].gross, first.bill.grand_total.add(first.bill.grand_total).expect("sum"));
+            assert_eq!(rows[0].discount.paise(), 200, "{by:?} lost one discount");
+            assert_eq!(rows[0].tax.paise(), 1_000, "{by:?} lost one identical tax");
+        }
+        Ok(())
+    }).expect("reports");
+}
+
+#[test]
+fn a_day_with_only_voided_bills_does_not_revive_cached_cloud_sales() {
+    let scratch = Scratch::new("reports-voided-cloud");
+    let db = scratch.open();
+    shop::build(&db);
+    let at = Timestamp::from_millis(1_785_000_000_000);
+    let sale = settle_on(&db, "ord_cloud_void", day(40), at, 1, 0);
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        repos.wire().restore_row(OUTLET, "day_totals", &day(40).to_string(), at,
+            &serde_json::json!({ "business_day": day(40).days_since_epoch(), "bills": 1,
+                "gross_paise": sale.bill.grand_total.paise(), "discount_paise": 0, "tax_paise": 500 }))?;
+        let voided = sale.clone().void("Duplicate bill", StaffId::new("staff_1"), at).expect("void");
+        repos.orders().save(OUTLET, TERMINAL, &mb_core::AnyOrder::Voided(voided))?;
+        assert_eq!(repos.corrections().day_totals(OUTLET, day(40))?.net, Money::ZERO);
+        assert!(repos.reports().sales_by(OUTLET, Period::one_day(day(40)), SalesBy::Day)?.is_empty(),
+            "the stale cloud total resurrected a voided sale");
+        Ok(())
+    }).expect("void and report");
+}
+
+#[test]
+fn refund_cash_moves_on_the_refund_day_and_only_for_the_owning_till() {
+    let scratch = Scratch::new("reports-refund-drawer");
+    let db = scratch.open();
+    shop::build(&db);
+    let at = Timestamp::from_millis(1_785_000_000_000);
+    let sale = settle_on(&db, "ord_refund_day", day(40), at, 1, 0);
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let voided = sale.clone().void("Cancelled", StaffId::new("staff_1"), at).expect("void");
+        repos.orders().save(OUTLET, TERMINAL, &mb_core::AnyOrder::Voided(voided))?;
+        for (id, mode) in [("ref_cash", "Cash"), ("ref_card", "Card")] {
+            repos.corrections().record_refund(OUTLET, &mb_db::repo::corrections::Refund {
+                id: id.to_owned(), order_id: sale.core.id.clone(), amount: Money::from_paise(100),
+                mode: mode.to_owned(), reason: "Part returned".to_owned(), refunded_at: at,
+                refunded_by: Some(StaffId::new("staff_1")),
+            }, day(41))?;
+        }
+        let money = repos.money();
+        assert_eq!(money.cash_position(OUTLET, day(40))?.expected, sale.bill.grand_total);
+        assert_eq!(money.cash_position(OUTLET, day(41))?.expected.paise(), -100);
+        assert_eq!(money.cash_position_of(OUTLET, day(41), Some(TERMINAL))?.expected.paise(), -100);
+        assert_eq!(money.cash_position_of(OUTLET, day(41), Some("other_till"))?.expected, Money::ZERO);
+        Ok(())
+    }).expect("refund positions");
+}
+
+#[test]
 fn the_rate_wise_tax_report_equals_what_the_bills_printed() {
     let scratch = Scratch::new("reports-tax");
     let db = scratch.open();

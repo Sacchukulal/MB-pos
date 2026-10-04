@@ -298,13 +298,12 @@ fn a_whole_day_reconciles_against_itself() {
         every_bill.sub(mixed_total).expect("in range"),
         "net takings is gross less voids, computed once"
     );
-    // And the drawer follows.
+    // A void changes sales; the cash stays until it is actually returned.
     let drawer = cash(&app);
-    assert_eq!(
-        drawer.cash_sales,
-        cash_bills.sub(mixed_total).expect("in range"),
-        "a voided cash bill is no longer cash the drawer holds"
-    );
+    assert_eq!(drawer.cash_sales, cash_bills);
+    crate::corrections::refund_on(&app, voided.order_id, mixed_total.paise(),
+        "Cash".to_owned(), "Returned after void".to_owned()).expect("refunded");
+    assert_eq!(cash(&app).expected, drawer.expected.sub(mixed_total).expect("in range"));
 
     // 5. the tax summary.
     let tax =

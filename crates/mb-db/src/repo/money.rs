@@ -98,7 +98,10 @@ pub struct Recurring {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CashPosition {
     pub opening_float: Money,
+    /// Cash receipts including tips and voided bills; returns are separate below.
     pub cash_sales: Money,
+    /// Cash actually returned after a void; correction returns are already netted in payments.
+    pub cash_refunds: Money,
     pub top_ups: Money,
     pub cash_expenses: Money,
     pub payouts: Money,
@@ -109,7 +112,7 @@ pub struct CashPosition {
     /// Cash handed over against a credit account.
     pub credit_collected: Money,
     /// Float + sales + credit collected + top-ups − expenses − payouts − drops − suppliers paid
-    /// − what riders are still carrying.
+    /// − cash refunds − what riders are still carrying.
     pub expected: Money,
 }
 
@@ -966,7 +969,7 @@ impl<'a> MoneyRepo<'a> {
             "SELECT COALESCE(SUM(p.amount + p.tip), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
               WHERE o.outlet_id = ?1 AND p.business_day = ?2 AND p.mode = 'cash'
-                AND o.state = 'settled'
+                AND o.state IN ('settled', 'voided')
                 AND (?3 IS NULL OR COALESCE(o.terminal_id, ?4) = ?3)",
             rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
@@ -975,7 +978,18 @@ impl<'a> MoneyRepo<'a> {
             "SELECT COALESCE(SUM(p.tip), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
               WHERE o.outlet_id = ?1 AND p.business_day = ?2 AND p.mode = 'cash'
-                AND o.state = 'settled'
+                AND o.state IN ('settled', 'voided')
+                AND (?3 IS NULL OR COALESCE(o.terminal_id, ?4) = ?3)",
+            rusqlite::params![outlet, day_sql, terminal, master],
+            |r| r.get(0),
+        )?;
+        // Voiding cancels a sale, but does not itself hand any money back. Adjustment
+        // returns must not be subtracted again: replacement payments already exclude them.
+        let refunded: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(r.amount), 0)
+               FROM refunds r JOIN orders o ON o.id = r.order_id
+              WHERE r.outlet_id = ?1 AND r.business_day = ?2 AND LOWER(r.mode) = 'cash'
+                AND r.is_adjustment = 0
                 AND (?3 IS NULL OR COALESCE(o.terminal_id, ?4) = ?3)",
             rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
@@ -1013,7 +1027,7 @@ impl<'a> MoneyRepo<'a> {
             "SELECT COALESCE(SUM(p.amount + p.tip), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
               WHERE o.outlet_id = ?1 AND p.business_day = ?2 AND p.mode = 'cash'
-                AND o.state = 'settled'
+                AND o.state IN ('settled', 'voided')
                 AND o.order_type = 'delivery'
                 AND o.delivery_state IN ('out', 'delivered')
                 AND o.delivery_rider IS NOT NULL
@@ -1047,6 +1061,7 @@ impl<'a> MoneyRepo<'a> {
         Ok(CashPosition {
             opening_float: encode::money_from_sql(float),
             cash_sales: encode::money_from_sql(taken),
+            cash_refunds: encode::money_from_sql(refunded),
             top_ups: encode::money_from_sql(top_ups),
             cash_expenses: encode::money_from_sql(spent),
             payouts: encode::money_from_sql(payouts),
@@ -1056,7 +1071,7 @@ impl<'a> MoneyRepo<'a> {
             with_riders: encode::money_from_sql(with_riders),
             credit_collected: encode::money_from_sql(credit_collected),
             expected: encode::money_from_sql(
-                float + taken + credit_collected + top_ups
+                float + taken + credit_collected + top_ups - refunded
                     - spent
                     - payouts
                     - drops

@@ -136,3 +136,125 @@ fn the_report_comes_out_of_the_printer() {
     assert!(text.contains("Total"), "the total is missing:\n{text}");
     assert!(text.contains("Printed"), "the date is missing:\n{text}");
 }
+
+fn assert_live_sales(app: &App, paise: i64, count: i64) {
+    let amount = mb_core::Money::from_paise(paise).to_plain_string();
+    for id in ["sales_day", "sales_hour", "sales_type", "sales_mode",
+        "sales_cashier", "sales_section", "sales_terminal"] {
+        let report = crate::reports::report_on(app, id.to_owned(), today()).expect("report");
+        let totals = report.totals.expect("totals");
+        assert_eq!(totals[1], count.to_string(), "{id} double-counted a bill");
+        assert_eq!(totals.last(), Some(&amount), "{id} has the wrong sales");
+    }
+    let dashboard = crate::reports::dashboard_on(app, Some(today())).expect("dashboard");
+    let stat = |label: &str| dashboard.stats.iter().find(|s| s.label == label).expect("stat");
+    assert_eq!(stat("Takings").value, amount);
+    for id in ["trend", "payment", "types", "cashiers"] {
+        let chart = dashboard.charts.iter().find(|chart| chart.id == id).expect("chart");
+        let sum: i64 = chart.points.iter().map(|point|
+            mb_core::Money::parse(&point.value).expect("chart money").paise()).sum();
+        assert_eq!(sum, paise, "{id} chart disagrees with report totals");
+    }
+    let average = if count > 0 { paise.checked_div(count).expect("nonzero") } else { 0 };
+    assert_eq!(stat("Average bill").value, mb_core::Money::from_paise(average).to_plain_string());
+}
+
+fn drawer(app: &App) -> mb_db::repo::money::CashPosition {
+    app.with_shop(|shop| shop.db.read_transaction(|tx| {
+        mb_db::Repos::new(tx).money().cash_position(crate::state::OUTLET,
+            crate::flows::today(crate::flows::now()))
+    }).map_err(|e| crate::words::from_db(&e))).expect("drawer")
+}
+
+#[test]
+fn reports_follow_one_bill_through_repeated_edits_void_and_partial_refunds() {
+    let scratch = Scratch::new("report_correction_lifecycle");
+    let app = a_licensed_shop(&scratch, "report_correction_lifecycle");
+    sell_a_tea(&app);
+    let row = crate::corrections::list_bills_on(&app).expect("bills").remove(0);
+    let original = drawer(&app).expected.paise();
+    assert_live_sales(&app, original, 1);
+
+    let mut issued = original;
+    for qty in [4, 1, 1] {
+        crate::corrections::revert_bill_on(&app, row.order_id.clone(),
+            "Correct quantity".to_owned(), None, None).expect("revert");
+        app.with_cart_mut(|state| {
+            state.cart.set_qty(0, mb_core::Qty::from_whole(qty).expect("qty"))
+                .map_err(|e| crate::words::UiError::new("test", e.to_string()))
+        }).expect("edit");
+        // Editing has no financial effect until the replacement is committed.
+        assert_live_sales(&app, issued, 1);
+        assert_eq!(drawer(&app).expected.paise(), issued);
+        let replacement = app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total.paise())).expect("bill");
+        let number = crate::flows::complete_bill_with_return_on(&app,
+            Some("Cash".to_owned()), Some("Cash".to_owned())).expect("finish correction");
+        assert_eq!(number, row.number);
+        issued = replacement;
+        assert_live_sales(&app, issued, 1);
+        assert_eq!(drawer(&app).expected.paise(), issued, "adjustment refund deducted twice");
+        assert_eq!(crate::corrections::list_bills_on(&app).expect("bills").len(), 1);
+    }
+
+    // Another equal bill makes the average sensitive to including voids in its denominator.
+    sell_a_tea(&app);
+    crate::corrections::void_bill_on(&app, row.order_id.clone(),
+        "Customer cancelled".to_owned(), None, None).expect("void");
+    assert_live_sales(&app, original, 1);
+    assert_eq!(drawer(&app).expected.paise(), original + issued,
+        "voiding is not itself a cash refund");
+    crate::corrections::refund_on(&app, row.order_id.clone(), 100,
+        "Cash".to_owned(), "Part returned".to_owned()).expect("partial refund");
+    assert_eq!(drawer(&app).expected.paise(), original + issued - 100);
+    assert_live_sales(&app, original, 1);
+    crate::corrections::refund_on(&app, row.order_id, issued - 100,
+        "cash".to_owned(), "Remainder returned".to_owned()).expect("remaining refund");
+    assert_eq!(drawer(&app).expected.paise(), original);
+    assert_live_sales(&app, original, 1);
+}
+
+#[test]
+fn split_payments_count_one_bill_and_do_not_repeat_bill_tax() {
+    let scratch = Scratch::new("report_split_counts");
+    let app = a_licensed_shop(&scratch, "report_split_counts");
+    crate::ipc::cart_add_on(&app, "itm_tea".to_owned(), Some("4".to_owned()), None).expect("tea");
+    let total = app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total)).expect("bill");
+    app.with_cart_mut(|state| {
+        for (mode, amount) in [(mb_core::PaymentMode::Cash, 1_000),
+            (mb_core::PaymentMode::Cash, 1_000), (mb_core::PaymentMode::Card, total.paise() - 2_000)] {
+            state.settlement.add(mb_core::Payment::new(mode, mb_core::Money::from_paise(amount)).expect("payment"))
+                .map_err(|e| crate::words::UiError::new("test", e.to_string()))?;
+        }
+        Ok(())
+    }).expect("paid");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
+    assert_live_sales(&app, total.paise(), 1);
+    let report = crate::reports::report_on(&app, "sales_mode".to_owned(), today()).expect("report");
+    assert_eq!(report.rows.len(), 2);
+    assert_eq!(report.columns.len(), 3, "payment modes have no tax allocation");
+}
+
+#[test]
+fn archived_daily_totals_agree_with_dashboard_sales_and_active_bill_count() {
+    let scratch = Scratch::new("report_archived_dashboard");
+    let app = a_licensed_shop(&scratch, "report_archived_dashboard");
+    let at = crate::flows::now();
+    let day = crate::flows::today(at);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        mb_db::Repos::new(tx).wire().restore_row(crate::state::OUTLET, "day_totals",
+            &day.to_string(), at, &serde_json::json!({
+                "business_day": day.days_since_epoch(), "bills": 3, "voids": 1,
+                "gross_paise": 13_000, "net_paise": 13_000
+            }))
+    }).map_err(|e| crate::words::from_db(&e))).expect("archive");
+    let report = crate::reports::report_on(&app, "sales_day".to_owned(), today()).expect("report");
+    let totals = report.totals.expect("totals");
+    assert_eq!(totals[1], "2");
+    assert_eq!(totals.last().map(String::as_str), Some("130.00"));
+    let dashboard = crate::reports::dashboard_on(&app, Some(today())).expect("dashboard");
+    let stat = |label: &str| dashboard.stats.iter().find(|s| s.label == label).expect("stat");
+    assert_eq!(stat("Takings").value, "130.00");
+    assert_eq!(stat("Average bill").value, "65.00");
+    assert_eq!(stat("In the drawer").value, "—", "a summary cannot reconstruct a drawer");
+    assert!(dashboard.attention.iter().any(|a| a.title.contains("Archived")));
+}

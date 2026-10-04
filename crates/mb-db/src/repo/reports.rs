@@ -233,12 +233,20 @@ impl<'a> ReportsRepo<'a> {
                 } else {
                     "COALESCE(SUM(b.grand_total), 0)"
                 };
+                let (discount, tax) = if by == SalesBy::PaymentMode {
+                    // A split payment has no tax/discount allocation. These columns are
+                    // omitted from the payment report, rather than repeating the bill.
+                    ("0", "0")
+                } else {
+                    ("COALESCE(SUM(b.total_discount), 0)",
+                     "COALESCE(SUM(b.total_cgst + b.total_sgst + b.total_igst), 0)")
+                };
                 format!(
                     "SELECT {key} AS k, {label} AS lbl,
                             COUNT(DISTINCT o.id),
                             {amount},
-                            COALESCE(SUM(DISTINCT b.total_discount), 0),
-                            COALESCE(SUM(DISTINCT b.total_cgst + b.total_sgst + b.total_igst), 0),
+                            {discount},
+                            {tax},
                             0
                        FROM orders o
                        JOIN bills b ON b.order_id = o.id
@@ -287,6 +295,17 @@ impl<'a> ReportsRepo<'a> {
             out.sort_by_key(|b| b.key.parse::<i64>().unwrap_or(0));
         }
         Ok(out)
+    }
+
+    /// Unique live bills, even when one bill appears in multiple report buckets.
+    pub fn sold_count(&self, outlet: &str, period: Period) -> Result<i64, DbError> {
+        Ok(self.tx.query_row(
+            "SELECT COUNT(*) FROM orders WHERE outlet_id = ?1
+             AND business_day BETWEEN ?2 AND ?3 AND state = 'settled'",
+            rusqlite::params![outlet, encode::business_day_to_sql(period.from),
+                encode::business_day_to_sql(period.to)],
+            |row| row.get(0),
+        )?)
     }
 
     /// Rate-wise taxable value and tax, from the per-line figures `compute_bill` produced —

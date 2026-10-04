@@ -1142,6 +1142,7 @@ pub fn drawer_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DrawerVie
                         .unwrap_or(position.cash_sales),
                 ),
                 line("Tips in the drawer", position.cash_tips),
+                line("Cash refunded", position.cash_refunds),
                 line("Credit collected in cash", position.credit_collected),
                 line("Put in", position.top_ups),
                 line("Spent from the drawer", position.cash_expenses),

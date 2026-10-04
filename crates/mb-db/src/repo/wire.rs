@@ -1256,17 +1256,20 @@ impl<'a> WireRepo<'a> {
         Ok(())
     }
 
-    /// Days the report can only know from the cloud: everything in the period that has a
-    /// totals row here. The caller drops the days it has bills for.
+    /// Days known only from the cloud. Local issued bills take precedence, including days
+    /// whose bills have all been voided; a stale cloud total must not revive those sales.
     pub fn cloud_days(
         &self,
         outlet: &str,
         period: Period,
     ) -> Result<Vec<crate::repo::reports::Bucket>, DbError> {
         let mut stmt = self.tx.prepare_cached(
-            "SELECT business_day, bills, gross, discount, tax
-               FROM cloud_day_totals
+            "SELECT business_day, MAX(bills - voids, 0), gross, discount, tax
+               FROM cloud_day_totals c
               WHERE outlet_id = ?1 AND business_day BETWEEN ?2 AND ?3
+                AND NOT EXISTS (SELECT 1 FROM orders o
+                    WHERE o.outlet_id = c.outlet_id AND o.business_day = c.business_day
+                      AND (o.state IN ('settled', 'voided') OR o.bill_number_value IS NOT NULL))
               ORDER BY business_day",
         )?;
         let rows = stmt.query_map(
