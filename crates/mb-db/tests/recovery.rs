@@ -260,10 +260,14 @@ fn t4_a_failed_restore_rolls_back_to_the_safety_copy() {
     std::fs::copy(dir.join("good.db"), &sabotaged).expect("copy");
     {
         let conn = rusqlite::Connection::open(&sabotaged).expect("open");
-        conn.execute("DELETE FROM schema_version", [])
-            .expect("wipe the ledger");
+        // Keep the declared schema and manifest counts coherent so preflight succeeds.
+        // A changed migration checksum is rejected only when the restored file opens,
+        // which exercises putting the safety copy back after replacement.
+        conn.execute("UPDATE schema_version SET checksum = 'sabotaged' WHERE version = 1", [])
+            .expect("damage migration history");
     }
     remanifest(&sabotaged, &dir.join("good.db"));
+    assert!(backup::verify(&sabotaged).expect("coherent preflight fixture").is_ok());
 
     let report = backup::restore(&sabotaged, &scratch.db_path()).expect("restore runs");
     assert!(

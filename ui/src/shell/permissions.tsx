@@ -11,6 +11,11 @@ import { createContext, useCallback, useContext, type ReactNode } from 'react';
 /** `null` outside the shell — a screen drawn on its own (a test, the gallery) hides nothing. */
 const Held = createContext<readonly string[] | null>(null);
 
+/** Mirrors guard::BILL_LOOKUP_PERMISSIONS; actions keep their own permission checks. */
+export const BILL_LOOKUP_PERMISSIONS = [
+  'reports.view', 'bill.revert', 'bill.revert.approve', 'bill.void', 'bill.reprint',
+] as const;
+
 export function MayProvider({
   held,
   children,

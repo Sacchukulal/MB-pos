@@ -326,3 +326,6 @@
   margin: 0;
 }
 
+.mb-reports__gate[hidden] {
+  display: none;
+}

@@ -220,6 +220,8 @@
    */
   --motion-beat: 1000ms;
   --beats: 3;
+  /* An arrival stays visible this long even when its motion is disabled. */
+  --arrival-duration: 3000ms;
   /*
    * The second exception, for the same reason: a late order's dot breathes slowly for as long
    * as the order is late, so a cashier looking at the queue sees it without a red box round

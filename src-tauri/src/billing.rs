@@ -494,6 +494,8 @@ pub fn bill_for(
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct CartView {
+    /// An issued bill's editing draft, not an ordinary open order with a printed number.
+    pub is_correction: bool,
     pub lines: Vec<CartLineView>,
     pub bill: BillView,
     pub order_type: String,
@@ -614,6 +616,8 @@ pub struct PaymentView {
     pub index: usize,
     /// "Cash", "Card", "UPI", "Credit" — the label a report groups by.
     pub mode: String,
+    /// Stable return identifier; custom payment names cannot alias cash/card/UPI.
+    pub refund_mode: String,
     pub amount: MoneyView,
     pub reference: Option<String>,
 }
@@ -661,6 +665,10 @@ pub struct TableView {
     pub by: Option<String>,
     pub by_id: Option<String>,
     pub order_id: Option<String>,
+    /// Stable identity of the food and notes, independent of timers, payments and selection.
+    /// A same-price substitution or another quantity still deserves an arrival cue.
+    #[ts(optional)]
+    pub arrival_key: Option<String>,
     /// The letter, when this tile is a second party on its table ("B" of "4B"). With no
     /// `order_id` beside it, it is the party the cart has just opened and not yet saved —
     /// pressing it re-joins the same seat.
@@ -742,6 +750,7 @@ pub(crate) fn payment_views(settlement: &Settlement) -> Vec<PaymentView> {
         .map(|(index, p)| PaymentView {
             index,
             mode: p.mode.report_label().to_owned(),
+            refund_mode: p.mode.refund_code(),
             amount: p.amount.into(),
             reference: p.reference.clone(),
         })
@@ -768,6 +777,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         .map_err(money_error)?;
 
     Ok(CartView {
+        is_correction: state.bill_number.is_some() && state.account.revision > 0 && state.account.billed_into.is_none(),
         lines,
         bill: bill_view(&bill)?,
         order_type: order_type_label(state.order_type).to_owned(),
@@ -1084,6 +1094,7 @@ fn free_tile(
         by: None,
         by_id: None,
         order_id: None,
+        arrival_key: None,
         seat,
         token: None,
         bill_number: None,
@@ -1149,6 +1160,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         by: None,
         by_id: Some(core.created_by.as_str().to_owned()),
         order_id: Some(id.clone()),
+        arrival_key: Some(arrival_key(&core.cart, core.note.as_deref())),
         seat: core.seat().map(|s| s.as_str().to_owned()),
         token: order.token().map(|claimed| claimed.formatted.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
@@ -1163,6 +1175,16 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         section_order: section.order,
         seats: crate::ipc::count(seats),
     }
+}
+
+/// The persisted order contents are the source of arrival identity. Billing revision only
+/// changes on bill corrections, and a monetary total misses equal-price item changes.
+fn arrival_key(cart: &Cart, note: Option<&str>) -> String {
+    let lines: Vec<_> = cart.lines().iter().map(|line| (line.identity(), line.qty)).collect();
+    // These concrete types contain no fallible map keys or floating-point values.
+    let contents = serde_json::to_vec(&(lines, note)).unwrap_or_default();
+    let digest = ring::digest::digest(&ring::digest::SHA256, &contents);
+    digest.as_ref().iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The room a tile sits in: its name, and where the shop puts it. The two always travel
@@ -1289,6 +1311,22 @@ mod tests {
 
     fn one() -> Qty {
         Qty::from_whole(1).expect("qty")
+    }
+
+    #[test]
+    fn arrival_identity_detects_equal_price_substitutions_quantities_and_notes() {
+        let first = item("itm_one", "First", 10_000, mb_core::TaxSpec::exempt());
+        let second = item("itm_two", "Second", 10_000, mb_core::TaxSpec::exempt());
+        let mut cart = Cart::new();
+        cart.add(first, one(), None, vec![]).expect("first item");
+        let baseline = arrival_key(&cart, None);
+        assert_eq!(baseline, arrival_key(&cart.clone(), None), "unchanged rereads are stable");
+        assert_ne!(baseline, arrival_key(&cart, Some("Takeaway containers")));
+        cart.set_qty(0, Qty::from_whole(2).expect("two")).expect("quantity");
+        assert_ne!(baseline, arrival_key(&cart, None));
+        let mut swapped = Cart::new();
+        swapped.add(second, one(), None, vec![]).expect("substitute");
+        assert_ne!(baseline, arrival_key(&swapped, None), "the same price is not the same food");
     }
 
     /// A registered shop — a blank GST number bills without GST, by design.

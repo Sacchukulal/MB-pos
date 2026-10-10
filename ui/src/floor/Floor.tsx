@@ -3,7 +3,7 @@
  * operations (1.21, 1.22, 1.23).
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   Button,
@@ -31,7 +31,7 @@ import { useMay } from '../shell/permissions';
 /* The one table tile in the product. */
 import { AddTile, Tile } from '../billing/TableGrid';
 import { MergeConfirmation, mergeCandidates } from '../billing/MergeBill';
-import { hasArrived, useArrivals } from '../billing/arrivals';
+import { arrivalFor, useArrivals, type Arrivals } from '../billing/arrivals';
 import type { FloorView } from '../ipc/generated/FloorView';
 import type { SectionView } from '../ipc/generated/SectionView';
 import type { TableRowView } from '../ipc/generated/TableRowView';
@@ -44,6 +44,7 @@ type Filter = 'all' | 'busy' | 'attention';
 
 export function Floor() {
   const [floor, setFloor] = useState<FloorView | null>(null);
+  const floorRead = useRef(0);
   /** The orders that landed, or grew, while this screen was open: their tiles beat for a moment. */
   const landed = useArrivals(floor?.tiles ?? null, {
     beat: floor?.arrivalBeat ?? true,
@@ -68,6 +69,7 @@ export function Floor() {
 
   /** One place the floor comes back from Rust, and the one place a stale tick is dropped. */
   const arrived = useCallback((fresh: FloorView) => {
+    floorRead.current += 1;
     setFloor(fresh);
     setPicked((was) => {
       const kept = was.filter((id) => fresh.tables.some((t) => t.id === id));
@@ -77,7 +79,10 @@ export function Floor() {
   }, []);
 
   const load = useCallback(() => {
-    call('floor_plan').then(arrived).catch(report);
+    const read = ++floorRead.current;
+    call('floor_plan').then((fresh) => {
+      if (read === floorRead.current) arrived(fresh);
+    }).catch(report);
   }, [arrived, report]);
 
   const may = useMay();
@@ -100,15 +105,21 @@ export function Floor() {
   useEffect(load, [load]);
   // A change arrives by push — a settle at the counter, a phone, a merge on another till.
   useEffect(() => {
+    let disposed = false;
     let stop: (() => void) | undefined;
     subscribe((message) => {
-      if (message.kind === 'floor') load();
+      if (!disposed && (message.kind === 'floor' || message.kind === 'floorChanged')) load();
     })
       .then((off) => {
-        stop = off;
+        if (disposed) off();
+        else stop = off;
       })
       .catch(() => undefined);
-    return () => stop?.();
+    return () => {
+      disposed = true;
+      floorRead.current += 1;
+      stop?.();
+    };
   }, [load]);
 
   /** Carry the bill to this table, from the Floor screen too. */
@@ -832,7 +843,7 @@ function Grid({
   canTick: (tile: TableView) => boolean;
   onPrintBill: (tile: TableView) => void;
   /** See `useArrivals`. */
-  landed: ReadonlySet<string>;
+  landed: Arrivals;
   /** True when the shop has no tables at all, rather than none in this view. */
   none?: boolean;
   canArrange: boolean;
@@ -866,7 +877,7 @@ function Grid({
           onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
           onDelete={canTick(tile) ? () => onDelete(tile) : undefined}
           onPrintBill={() => onPrintBill(tile)}
-          arrived={hasArrived(landed, tile)}
+          arrived={arrivalFor(landed, tile)}
         />
       ))}
       {onAddTable ? <AddTile onAdd={onAddTable} /> : null}
@@ -902,7 +913,7 @@ function Plan({
   onDelete: (tile: TableView) => void;
   canTick: (tile: TableView) => boolean;
   onPrintBill: (tile: TableView) => void;
-  landed: ReadonlySet<string>;
+  landed: Arrivals;
 }) {
   const [dragging, setDragging] = useState<string | null>(null);
   const placed = useMemo(
@@ -940,7 +951,7 @@ function Plan({
                 onEdit={canTick(tile) ? () => onEdit(tile) : undefined}
                 onDelete={canTick(tile) ? () => onDelete(tile) : undefined}
                 onPrintBill={() => onPrintBill(tile)}
-                arrived={hasArrived(landed, tile)}
+                arrived={arrivalFor(landed, tile)}
               />
             </div>
           ) : null}

@@ -237,11 +237,9 @@ fn the_account_is_the_sum_of_its_movements() {
         .transaction(|tx| Repos::new(tx).money().customer_balance(&who))
         .expect("balance");
     assert_eq!(
-        repo_balance
-            .add(Money::from_rupees(900).expect("money"))
-            .expect("sum"),
+        repo_balance,
         balance(&movements).expect("balance"),
-        "customer_balance counts sales and repayments; the ledger adds the adjustments",
+        "the customer snapshot and ledger both include opening balances, write-offs and returns",
     );
 }
 

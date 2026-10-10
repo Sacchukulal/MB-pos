@@ -36,11 +36,11 @@ pub struct PendingDayView {
     pub day: String,
     /// "Tuesday 2 September".
     pub day_says: String,
-    pub bills: u32,
-    pub net: MoneyView,
-    pub cash: MoneyView,
-    pub upi_and_card: MoneyView,
-    pub expenses: MoneyView,
+    pub bills: Option<u32>,
+    pub net: Option<MoneyView>,
+    pub cash: Option<MoneyView>,
+    pub upi_and_card: Option<MoneyView>,
+    pub expenses: Option<MoneyView>,
     /// "Table 7 #12", "Parcel #13" — what nobody finished that day.
     pub open_orders: Vec<String>,
     /// The same as one sentence, or empty. A day with this cannot be closed from the gate.
@@ -87,8 +87,8 @@ pub struct DayRowView {
     /// `trading` or `holiday`.
     pub kind: String,
     pub is_locked: bool,
-    pub bills: u32,
-    pub net: MoneyView,
+    pub bills: Option<u32>,
+    pub net: Option<MoneyView>,
     /// "9:02 am" — when the first order of the day was started; empty on a day with none.
     pub opened_says: String,
     /// "Closed 3 Sep, 11:14 pm by Ravi.", "Holiday, marked 1 Sep by Ravi.", "Never closed.",
@@ -264,10 +264,17 @@ fn count_of(bills: i64) -> u32 {
     u32::try_from(bills).unwrap_or(u32::MAX)
 }
 
+/// Day operations remain available; historical sales figures are paid reporting.
+fn may_read_figures(app: &App, who: &mb_auth::Actor) -> bool {
+    who.must(Permission::ReportsView).is_ok()
+        && crate::licensing::gate(app, mb_license::Feature::Reports).is_ok()
+}
+
 /// The gate. `holidays` is what the person has switched to Holiday so far, so the button's
 /// words follow their choice; `None` means the suggestions stand.
 pub fn day_state_on(app: &App, holidays: Option<Vec<String>>) -> UiResult<DayStateView> {
     let who = guard::require_signed_in(app)?;
+    let may_figures = may_read_figures(app, &who);
     let closes_days = app.closes_days();
     let may_act = closes_days && who.must(Permission::DayClose).is_ok();
     let today = today(now());
@@ -303,11 +310,11 @@ pub fn day_state_on(app: &App, holidays: Option<Vec<String>>) -> UiResult<DaySta
                     pending.push(PendingDayView {
                         day: day.to_string(),
                         day_says: words::day_with_weekday(day, today),
-                        bills: count_of(look.figures.bills),
-                        net: MoneyView::from(look.figures.net),
-                        cash: MoneyView::from(look.figures.cash),
-                        upi_and_card: MoneyView::from(look.figures.upi_and_card),
-                        expenses: MoneyView::from(look.figures.expenses),
+                        bills: may_figures.then(|| count_of(look.figures.bills)),
+                        net: may_figures.then(|| MoneyView::from(look.figures.net)),
+                        cash: may_figures.then(|| MoneyView::from(look.figures.cash)),
+                        upi_and_card: may_figures.then(|| MoneyView::from(look.figures.upi_and_card)),
+                        expenses: may_figures.then(|| MoneyView::from(look.figures.expenses)),
                         open_says: open_words(&look.open_orders),
                         open_orders: look.open_orders,
                         looks_like_holiday,
@@ -403,7 +410,15 @@ fn day_runs_words(starts_at_minutes: u32) -> String {
 
 /// The Day open/close screen.
 pub fn days_on(app: &App) -> UiResult<DaysView> {
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
+    days_view(app, true)
+}
+
+/// A successful operational close still returns its current status without exposing
+/// Reports history to an expired shop.
+fn days_view(app: &App, include_history: bool) -> UiResult<DaysView> {
     let who = guard::require_any(app, &[Permission::ReportsView, Permission::DayClose])?;
+    let may_figures = may_read_figures(app, &who);
     let closes_days = app.closes_days();
     // With the switch off there is nothing here to press, whoever is looking.
     let may_act = closes_days && who.must(Permission::DayClose).is_ok();
@@ -424,7 +439,7 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                 let mut upcoming = Vec::new();
                 // With the switch off no day is listed: the figures are in the reports, and a
                 // row saying "Never closed" would be a question nobody is being asked.
-                if closes_days {
+                if closes_days && include_history {
                     let tables = repos.floor().list_tables(OUTLET)?;
                     let open = repos.orders().list_open(OUTLET)?;
                     // The list starts where the shop did: a day before its first bill,
@@ -439,7 +454,7 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                     let mut day = today;
                     while day >= from {
                         let look = look_at(&repos, &tables, &open, day)?;
-                        days.push(row_view(&repos, &look, today, may_act)?);
+                        days.push(row_view(&repos, &look, today, may_act, may_figures)?);
                         day = day.previous();
                     }
                     for row in repos.days().locked_after(OUTLET, today)? {
@@ -450,7 +465,7 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                             row: Some(row),
                             opened_at: None,
                         };
-                        upcoming.push(row_view(&repos, &look, today, may_act)?);
+                        upcoming.push(row_view(&repos, &look, today, may_act, may_figures)?);
                     }
                 }
 
@@ -482,7 +497,7 @@ pub fn days_on(app: &App) -> UiResult<DaysView> {
                     },
                     days,
                     upcoming,
-                    may_plan_holiday: may_act,
+                    may_plan_holiday: may_act && include_history,
                     rules: is_owner
                         .then(|| crate::settings::ipc::group_view(app, &config, Group::Day)),
                 })
@@ -496,6 +511,7 @@ fn row_view(
     look: &Look,
     today: BusinessDay,
     may_act: bool,
+    may_figures: bool,
 ) -> Result<DayRowView, mb_db::DbError> {
     let locked = look.row.as_ref().filter(|r| r.is_locked);
     let (state, closed_says) = match locked {
@@ -519,8 +535,8 @@ fn row_view(
             .as_str()
             .to_owned(),
         is_locked: locked.is_some(),
-        bills: count_of(bills),
-        net: MoneyView::from(net),
+        bills: may_figures.then(|| count_of(bills)),
+        net: may_figures.then(|| MoneyView::from(net)),
         opened_says: look.opened_at.map(words::clock_of).unwrap_or_default(),
         closed_says,
         state,
@@ -756,12 +772,13 @@ pub fn close_day_on(
 
     close_one(app, &who, at, day)?;
     crate::settings::backup::after_day_close(app);
-    days_on(app)
+    days_view(app, crate::licensing::gate(app, mb_license::Feature::Reports).is_ok())
 }
 
 /// Mark days as holidays, or take the mark off. A day with a bill or an expense on it was not
 /// a holiday, and the refusal says so.
 pub fn set_holiday_on(app: &App, days: Vec<String>, on: bool) -> UiResult<DaysView> {
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::DayClose)?;
     closing_must_be_on(app)?;
     let at = now();
@@ -880,6 +897,7 @@ pub fn set_holiday_on(app: &App, days: Vec<String>, on: bool) -> UiResult<DaysVi
 
 /// Open a locked day again — the override, and it leaves a mark.
 pub fn reopen_day_on(app: &App, day: String, reason: String) -> UiResult<DaysView> {
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::DayClose)?;
     closing_must_be_on(app)?;
     let at = now();
@@ -1047,6 +1065,7 @@ pub struct DrawerView {
 /// The drawer as it stands, with an optional count laid over it.
 pub fn drawer_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DrawerView> {
     let who = guard::require_any(app, &[Permission::ReportsView, Permission::DayClose])?;
+    let may_figures = may_read_figures(app, &who);
     let may_count = who.must(Permission::DayClose).is_ok();
     let day = today(now());
     let config = app.shop_config();
@@ -1121,12 +1140,12 @@ pub fn drawer_on(app: &App, counts: Option<Vec<CountArg>>) -> UiResult<DrawerVie
         Ok(DrawerView {
             day: day.to_string(),
             day_says: format!("Today, {}", words::day_with_weekday(day, day)),
-            takings: vec![
+            takings: if may_figures { vec![
                 line("Bills", totals.gross),
                 line("Voided", totals.voids),
                 line("Refunded", totals.refunded),
                 line("Net takings", totals.net),
-            ],
+            ] } else { Vec::new() },
             // Every line that makes the expected figure, and nothing that does not.
             drawer: vec![
                 line("Opening float", position.opening_float),

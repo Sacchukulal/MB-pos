@@ -5,4 +5,8 @@ export type PaymentView = { index: number,
 /**
  * "Cash", "Card", "UPI", "Credit" — the label a report groups by.
  */
-mode: string, amount: MoneyView, reference: string | null, };
+mode: string, 
+/**
+ * Stable return identifier; custom payment names cannot alias cash/card/UPI.
+ */
+refundMode: string, amount: MoneyView, reference: string | null, };

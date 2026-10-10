@@ -25,6 +25,7 @@ import type { BillFilter } from './generated/BillFilter';
 import type { BillsView } from './generated/BillsView';
 import type { BillDetailView } from './generated/BillDetailView';
 import type { ReasonView } from './generated/ReasonView';
+import type { BillCorrectionOffer } from './generated/BillCorrectionOffer';
 import type { MenuRowView } from './generated/MenuRowView';
 import type { MenuEdit } from './generated/MenuEdit';
 import type { CategoryView } from './generated/CategoryView';
@@ -187,7 +188,7 @@ export interface Commands {
   /** The cook lost the paper. */
   reprint_kitchen_ticket: { args: void; returns: string };
   /** settle() — one transaction — and THEN the print. */
-  complete_bill: { args: { mode: string | null; refundMode?: string; refundAmounts?: [string, string][] }; returns: string };
+  complete_bill: { args: { mode: string | null; refundMode?: string; refundAmounts?: [string, string][]; approverStaffId?: string; approverPin?: string; proposalToken?: string }; returns: string };
   /** The bill a waiter carries to the table, before anybody has paid. */
   print_open_bill: { args: { orderId: string }; returns: string };
   /** The settle desk: what the phones asked the counter to settle, oldest first. */
@@ -232,6 +233,12 @@ export interface Commands {
   bills_csv: { args: { filter: BillFilter }; returns: SavedFileView };
   bills_pdf: { args: { filter: BillFilter }; returns: SavedFileView };
   bill_detail: { args: { orderId: string }; returns: BillDetailView };
+  bill_correction_offer: { args: { orderId: string }; returns: BillCorrectionOffer };
+  return_bill_money: { args: { orderId: string; amounts: [string, string][]; reason: string; requestId: string }; returns: void };
+  return_closed_bill: { args: { orderId: string; amounts: [string, string][]; reason: string; requestId: string;
+    approverStaffId: string | null; approverPin: string | null }; returns: void };
+  void_and_return_bill: { args: { orderId: string; amounts: [string, string][]; reason: string;
+    approverStaffId: string | null; approverPin: string | null }; returns: void };
   revert_bill: {
     args: {
       orderId: string;
@@ -242,6 +249,9 @@ export interface Commands {
     returns: string;
   };
   approve_revert: { args: { revertId: string }; returns: void };
+  discard_bill_correction: { args: { orderId: string }; returns: CartView };
+  save_bill_correction_draft: { args: void; returns: void };
+  correction_save_preview: { args: void; returns: import('./generated/CorrectionSaveView').CorrectionSaveView };
   reasons: { args: { kind: string }; returns: ReasonView[] };
   void_bill: {
     args: {
@@ -256,15 +266,6 @@ export interface Commands {
   void_line: { args: { index: number; reason: string; expectedLine?: string }; returns: CartView };
   reprint_bill: { args: { orderId: string; reason: string }; returns: string };
   bill_pdf: { args: { orderId: string }; returns: SavedFileView };
-  refund_bill: {
-    args: {
-      orderId: string;
-      amountPaise: number;
-      mode: string;
-      reason: string;
-    };
-    returns: BillRowView[];
-  };
 
   // The menu.
   menu_categories: { args: void; returns: CategoryView[] };

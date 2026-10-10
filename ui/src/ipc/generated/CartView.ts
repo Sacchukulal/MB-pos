@@ -8,7 +8,11 @@ import type { PaymentView } from "./PaymentView";
 /**
  * The whole cart region, in one value.
  */
-export type CartView = { lines: Array<CartLineView>, bill: BillView, orderType: string, table: string | null, payments: Array<PaymentView>, 
+export type CartView = { 
+/**
+ * An issued bill's editing draft, not an ordinary open order with a printed number.
+ */
+isCorrection: boolean, lines: Array<CartLineView>, bill: BillView, orderType: string, table: string | null, payments: Array<PaymentView>, 
 /**
  * What has been taken so far.
  */

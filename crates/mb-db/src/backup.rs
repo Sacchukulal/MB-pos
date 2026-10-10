@@ -18,6 +18,8 @@ pub const COUNTED: &[&str] = &[
     "audit_log",
     "bill_charges",
     "bill_lines",
+    "bill_return_lines",
+    "bill_returns",
     "bill_revert_lines",
     "bill_revert_payments",
     "bill_reverts",
@@ -823,7 +825,13 @@ fn read_schema_version(conn: &Connection) -> Result<u32, DbError> {
 
 fn count_rows(conn: &Connection) -> Result<Vec<(String, i64)>, DbError> {
     let mut out = Vec::with_capacity(COUNTED.len());
+    let version = read_schema_version(conn)?;
     for table in COUNTED {
+        // Verification runs before migration. Backups made before historical returns
+        // legitimately have neither table; a current backup must contain both.
+        if version < 22 && matches!(*table, "bill_returns" | "bill_return_lines") {
+            continue;
+        }
         let n: i64 = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))?;
         out.push(((*table).to_owned(), n));
     }

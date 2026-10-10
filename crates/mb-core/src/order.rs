@@ -383,7 +383,7 @@ impl SettledOrder {
         if let Ok(change) = self.settlement.change_due(self.bill.grand_total)
             && change.is_positive()
         {
-            let _ = self.core.billing.settlement.return_to("Cash", change);
+            let _ = self.core.billing.settlement.return_to("cash", change);
         }
         self.core.billing.revision = self.core.billing.revision.saturating_add(1);
         OpenOrder {

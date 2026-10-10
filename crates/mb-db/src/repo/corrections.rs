@@ -85,6 +85,8 @@ pub struct DayTotals {
     pub gross: Money,
     /// What was taken back out by voiding.
     pub voids: Money,
+    /// Earlier closed sales returned on this day, without changing the original day.
+    pub returned: Money,
     /// `gross - voids`. Computed here so nothing else has to remember to.
     pub net: Money,
     /// Money physically handed back.
@@ -223,13 +225,49 @@ impl<'a> CorrectionsRepo<'a> {
         Ok(out)
     }
 
-    /// Record money going back.
+    /// Remaining receipts by their original tender. Adjustment returns have already
+    /// reduced the replacement bill's payments and must not be subtracted twice.
+    pub fn refundable_payments(&self, order_id: &OrderId) -> Result<Vec<(String, Money)>, DbError> {
+        let mut stmt = self.tx.prepare_cached(
+            "WITH receipts AS (
+               SELECT CASE WHEN p.mode = 'other' THEN 'other:' || lower(trim(p.mode_label)) ELSE lower(p.mode) END AS mode,
+                      SUM(p.amount) AS amount
+                 FROM payments p WHERE p.order_id = ?1 AND lower(p.mode) != 'credit'
+                GROUP BY CASE WHEN p.mode = 'other' THEN 'other:' || lower(trim(p.mode_label)) ELSE lower(p.mode) END
+             )
+             SELECT receipts.mode, MAX(0, receipts.amount - COALESCE((
+               SELECT SUM(r.amount) FROM refunds r WHERE r.order_id = ?1 AND r.is_adjustment = 0
+                 AND (lower(trim(r.mode)) = receipts.mode
+                   OR (receipts.mode LIKE 'other:%' AND
+                       (lower(trim(r.mode)) = 'other' OR
+                        (substr(receipts.mode, 7) NOT IN ('cash', 'card', 'upi', 'credit', 'other')
+                         AND lower(trim(r.mode)) = substr(receipts.mode, 7)))))
+             ), 0)) FROM receipts ORDER BY receipts.mode")?;
+        let rows = stmt.query_map([order_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, encode::money_from_sql(row.get(1)?)))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Record money going back, validating the actual tender inside the transaction.
     pub fn record_refund(
         &self,
         outlet: &str,
         refund: &Refund,
         business_day: BusinessDay,
     ) -> Result<(), DbError> {
+        if super::DaysRepo::new(self.tx).is_locked(outlet, business_day)? {
+            return Err(DbError::invariant("The business day is closed. Open today's day before returning money."));
+        }
+        if !refund.amount.is_positive() || refund.reason.trim().is_empty() {
+            return Err(DbError::invariant("A refund needs a positive amount and a reason."));
+        }
+        let mode = refund.mode.trim().to_ascii_lowercase();
+        let remaining = self.refundable_payments(&refund.order_id)?.into_iter()
+            .find(|(original, _)| *original == mode).map_or(Money::ZERO, |(_, left)| left);
+        if refund.amount > remaining {
+            return Err(DbError::invariant(format!("Only {} can be returned by {mode} on this bill.", remaining.to_plain_string())));
+        }
         let state: Option<String> = self
             .tx
             .query_row(
@@ -241,10 +279,11 @@ impl<'a> CorrectionsRepo<'a> {
 
         match state.as_deref() {
             Some("voided") => {}
+            Some("settled") if super::returns::ReturnsRepo::new(self.tx).contains(&refund.order_id)? => {}
             Some(other) => {
                 return Err(DbError::invariant(format!(
                     "this bill is {other}, and money is only given back against a bill \
-                     that has been voided"
+                     that has been voided or returned"
                 )));
             }
             None => return Err(DbError::invariant("there is no such bill")),
@@ -280,7 +319,7 @@ impl<'a> CorrectionsRepo<'a> {
                 outlet,
                 refund.order_id.as_str(),
                 wanted,
-                refund.mode,
+                mode,
                 refund.reason,
                 encode::timestamp_to_sql(refund.refunded_at),
                 refund.refunded_by.as_ref().map(StaffId::as_str),
@@ -395,7 +434,7 @@ impl<'a> CorrectionsRepo<'a> {
             "INSERT INTO bill_reverts (id, outlet_id, order_id, business_day, reason,
                                        reverted_at, reverted_by, before_total,
                                        before_settled_at, before_settled_by, approved_at, approved_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, NULL)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
                 revert.id,
                 outlet,
@@ -407,6 +446,8 @@ impl<'a> CorrectionsRepo<'a> {
                 encode::money_to_sql(revert.before_total),
                 encode::timestamp_to_sql(revert.before_settled_at),
                 revert.before_settled_by.as_ref().map(StaffId::as_str),
+                revert.approved_at.map(encode::timestamp_to_sql),
+                revert.approved_by.as_ref().map(StaffId::as_str),
             ],
         )?;
         for (seq, line) in lines.iter().enumerate() {
@@ -682,10 +723,14 @@ impl<'a> CorrectionsRepo<'a> {
             |row| row.get(0),
         )?;
 
+        let returned = super::returns::ReturnsRepo::new(self.tx).total_for_day(
+            outlet, encode::business_day_from_sql(day, "orders.business_day")?)?;
         Ok(DayTotals {
             gross: encode::money_from_sql(gross),
             voids: encode::money_from_sql(voids),
-            net: encode::money_from_sql(gross.saturating_sub(voids)),
+            returned,
+            net: encode::money_from_sql(gross.saturating_sub(voids)).sub(returned)
+                .map_err(|e| DbError::invariant(e.to_string()))?,
             refunded: encode::money_from_sql(refunded),
             bills,
             voided_bills,

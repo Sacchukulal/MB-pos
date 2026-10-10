@@ -255,19 +255,8 @@ impl<'a> MoneyRepo<'a> {
 
     /// What the customer owes, right now, from the ledger.
     pub fn customer_balance(&self, id: &CustomerId) -> Result<Money, DbError> {
-        let taken: i64 = self.tx.query_row(
-            "SELECT COALESCE(SUM(p.amount), 0)
-               FROM payments p JOIN orders o ON o.id = p.order_id
-              WHERE p.customer_id = ?1 AND p.mode = 'credit' AND o.state = 'settled'",
-            [id.as_str()],
-            |r| r.get(0),
-        )?;
-        let repaid: i64 = self.tx.query_row(
-            "SELECT COALESCE(SUM(amount), 0) FROM customer_payments WHERE customer_id = ?1",
-            [id.as_str()],
-            |r| r.get(0),
-        )?;
-        Ok(encode::money_from_sql(taken - repaid))
+        mb_core::credit::balance(&self.credit_movements(id)?)
+            .map_err(|e| DbError::invariant(e.to_string()))
     }
 
     /// Who owns this phone number, if anybody.
@@ -966,7 +955,7 @@ impl<'a> MoneyRepo<'a> {
         // `?3` is the till being asked about (NULL = the whole shop) and `?4` is the master,
         // which owns every row written before this shop had a second till.
         let taken: i64 = self.tx.query_row(
-            "SELECT COALESCE(SUM(p.amount + p.tip), 0)
+            "SELECT COALESCE(SUM(p.amount), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
               WHERE o.outlet_id = ?1 AND p.business_day = ?2 AND p.mode = 'cash'
                 AND o.state IN ('settled', 'voided')
@@ -988,9 +977,10 @@ impl<'a> MoneyRepo<'a> {
         let refunded: i64 = self.tx.query_row(
             "SELECT COALESCE(SUM(r.amount), 0)
                FROM refunds r JOIN orders o ON o.id = r.order_id
+               LEFT JOIN bill_returns br ON br.order_id = r.order_id
               WHERE r.outlet_id = ?1 AND r.business_day = ?2 AND LOWER(r.mode) = 'cash'
                 AND r.is_adjustment = 0
-                AND (?3 IS NULL OR COALESCE(o.terminal_id, ?4) = ?3)",
+                AND (?3 IS NULL OR COALESCE(br.terminal_id, o.terminal_id, ?4) = ?3)",
             rusqlite::params![outlet, day_sql, terminal, master],
             |r| r.get(0),
         )?;
@@ -1024,7 +1014,7 @@ impl<'a> MoneyRepo<'a> {
 
         // What the riders are still carrying.
         let collected: i64 = self.tx.query_row(
-            "SELECT COALESCE(SUM(p.amount + p.tip), 0)
+            "SELECT COALESCE(SUM(p.amount), 0)
                FROM payments p JOIN orders o ON o.id = p.order_id
               WHERE o.outlet_id = ?1 AND p.business_day = ?2 AND p.mode = 'cash'
                 AND o.state IN ('settled', 'voided')

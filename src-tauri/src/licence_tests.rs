@@ -142,6 +142,143 @@ pub(crate) fn a_bill_is_taken(app: &App) -> String {
 
 // BILLING NEVER STOPS.
 
+#[test]
+fn expired_license_locks_all_reports_but_keeps_new_billing_and_operational_drawer() {
+    let scratch = Scratch::new("expired_bill_work");
+    let app = a_trading_shop(&scratch, "expired_bill_work");
+    a_bill_is_taken(&app);
+    let id = crate::corrections::list_bills_on(&app).expect("paid lookup")[0].order_id.clone();
+    app.use_licensing(licence_in(&scratch, "expired", Status::Active, -100));
+    let denied = [
+        crate::reports::list_on(&app).expect_err("Reports list"),
+        crate::corrections::bills_on(&app, Default::default()).expect_err("Bills list"),
+        crate::corrections::bill_detail_on(&app, id.clone()).expect_err("history"),
+        crate::refunds::offer_on(&app, id.clone()).expect_err("refund offer"),
+        crate::corrections::revert_bill_on(&app, id.clone(), "Edit".into(), None, None).expect_err("edit"),
+        crate::corrections::void_bill_on(&app, id.clone(), "Void".into(), None, None).expect_err("void"),
+        crate::refunds::refund_batch_on(&app, id.clone(), vec![("cash".into(), mb_core::Money::from_paise(100))], "Return".into()).expect_err("refund"),
+        crate::refunds::return_closed_bill_on(&app, id.clone(), vec![], "Return".into(), "expired-return".into(), None, None).expect_err("historical return"),
+        crate::corrections::reprint_bill_on(&app, id.clone(), "Copy".into()).expect_err("reprint"),
+        crate::flows::bill_pdf_on(&app, id.clone()).expect_err("historical invoice"),
+        crate::flows::preview_order_on(&app, Some(id)).expect_err("historical preview"),
+        crate::dayclose::days_on(&app).expect_err("Days history"),
+        crate::reports::dashboard_on(&app, None).expect_err("dashboard"),
+    ];
+    for refusal in denied { assert_eq!(refusal.code, "licence.not_operating"); }
+    a_bill_is_taken(&app);
+    let drawer = crate::dayclose::drawer_on(&app, None).expect("drawer counting remains available");
+    assert!(drawer.takings.is_empty(), "drawer must not bundle sales summaries");
+    assert!(drawer.expected.paise > 0, "operational expected cash is still available");
+}
+
+#[test]
+fn configured_grace_keeps_reports_and_history_open_until_it_ends() {
+    let scratch = Scratch::new("reports_grace");
+    let app = a_trading_shop(&scratch, "reports_grace");
+    a_bill_is_taken(&app);
+    app.use_licensing(licence_in(&scratch, "grace", Status::Active, -1));
+    assert!(app.entitlement().operating());
+    crate::reports::list_on(&app).expect("Reports in grace");
+    let bill = crate::corrections::list_bills_on(&app).expect("Bills in grace").remove(0);
+    crate::corrections::bill_detail_on(&app, bill.order_id.clone()).expect("history in grace");
+    crate::refunds::offer_on(&app, bill.order_id.clone()).expect("offer in grace");
+    crate::corrections::revert_bill_on(&app, bill.order_id.clone(), "Fix".into(), None, None).expect("edit in grace");
+    crate::correction_draft::discard_on(&app, bill.order_id).expect("discard");
+    app.use_licensing(licence_in(&scratch, "past_grace", Status::Active, -100));
+    assert_eq!(crate::reports::list_on(&app).expect_err("grace ended").code, "licence.not_operating");
+}
+
+#[test]
+fn expired_shop_prints_and_previews_an_unpaid_order_even_with_a_preassigned_number() {
+    let scratch = Scratch::new("expired_unpaid_print");
+    let app = a_trading_shop(&scratch, "expired_unpaid_print");
+    app.use_licensing(licence_in(&scratch, "expired", Status::Active, -100));
+    crate::ipc::cart_add_on(&app, "itm_tea".into(), None, None).expect("new order");
+    let mut open = crate::flows::park_open_order(&app).expect("park ordinary order");
+    let id = open.core.id.as_str().to_owned();
+    // The current print flow does not allocate an invoice number early, but the core
+    // supports old/preassigned unpaid orders. A number alone is not an issued sale.
+    open.bill_number = Some(mb_core::Claimed { value: 42, formatted: "PRE/0042".into(), business_day: open.core.business_day });
+    crate::flows::save_order(&app, &mb_core::AnyOrder::Open(open)).expect("preassigned unpaid order");
+    let (printed, jobs) = crate::signin_tests::queue_took(&app, || crate::flows::print_open_bill_on(&app, id.clone()));
+    printed.expect("free unpaid printing");
+    assert!(jobs.contains(&mb_print::queue::JobKind::Bill));
+    crate::flows::preview_order_on(&app, Some(id)).expect("free unpaid preview");
+    let (_, jobs) = crate::signin_tests::queue_took(&app, || a_bill_is_taken(&app));
+    assert!(jobs.contains(&mb_print::queue::JobKind::Bill), "ordinary final receipt still prints after expiry");
+}
+
+#[test]
+fn expiry_rechecks_an_open_correction_before_writes_but_allows_discard_and_new_billing() {
+    let scratch = Scratch::new("stale_correction_licence");
+    let app = a_trading_shop(&scratch, "stale_correction_licence");
+    a_bill_is_taken(&app);
+    let id = crate::corrections::list_bills_on(&app).expect("bill")[0].order_id.clone();
+    crate::corrections::revert_bill_on(&app, id.clone(), "Fix".into(), None, None).expect("edit while paid");
+    crate::ipc::cart_add_on(&app, "itm_tea".into(), None, None).expect("edit before expiry");
+    let before = app.with_cart(|cart| Ok(cart.clone())).expect("snapshot");
+    app.use_licensing(licence_in(&scratch, "expired", Status::Active, -100));
+    let denied = [
+        crate::correction_draft::preview_on(&app).expect_err("review"),
+        crate::correction_draft::save_on(&app).expect_err("explicit save"),
+        crate::flows::complete_bill_on(&app, Some("Cash".into())).expect_err("stale completion"),
+        crate::ipc::cart_add_on(&app, "itm_tea".into(), None, None).expect_err("stale item edit"),
+        crate::ipc::take_payment(&app, "Cash".into(), 100, None).expect_err("stale payment"),
+    ];
+    for refusal in denied { assert_eq!(refusal.code, "licence.not_operating"); }
+    assert_eq!(app.with_cart(|cart| Ok(cart.clone())).expect("unchanged"), before);
+    crate::correction_draft::discard_on(&app, id).expect("safe discard stays free");
+    crate::ipc::cart_add_on(&app, "itm_tea".into(), Some("2".into()), None).expect("ordinary item addition stays free");
+    crate::corrections::change_line_on(&app, 0, None, String::new()).expect("ordinary item cancellation stays free");
+    a_bill_is_taken(&app);
+}
+
+#[test]
+fn expired_correction_with_money_can_be_parked_without_trapping_new_bills() {
+    let scratch = Scratch::new("expired_correction_exit");
+    let app = a_trading_shop(&scratch, "expired_correction_exit");
+    a_bill_is_taken(&app);
+    let id = crate::corrections::list_bills_on(&app).expect("bill")[0].order_id.clone();
+    crate::corrections::revert_bill_on(&app, id.clone(), "Add tea".into(), None, None).expect("edit");
+    crate::ipc::cart_add_on(&app, "itm_tea".into(), None, None).expect("item");
+    crate::ipc::take_payment(&app, "Cash".into(), 100, None).expect("partial new payment");
+    app.use_licensing(licence_in(&scratch, "expired", Status::Active, -100));
+    assert_eq!(crate::correction_draft::discard_on(&app, id.clone()).expect_err("money must not disappear").code, "revert.money_changed");
+    crate::ipc::cart_clear_on(&app, false).expect("park and leave safely");
+    assert_eq!(crate::ipc::open_order_on(&app, id).expect_err("correction is Reports work").code, "licence.not_operating");
+    a_bill_is_taken(&app);
+}
+
+#[test]
+fn expired_cashier_gets_license_refusal_before_report_permission_fallback() {
+    let scratch = Scratch::new("expired_report_cashier");
+    let app = a_trading_shop(&scratch, "expired_report_cashier");
+    crate::signin_tests::hire(&app, "staff_cashier", "Cashier", mb_auth::RolePreset::Cashier, "1357");
+    crate::ipc::lock_now_on(&app).expect("lock");
+    crate::ipc::login_on(&app, "staff_cashier".into(), "1357".into()).expect("cashier");
+    assert_eq!(crate::reports::list_on(&app).expect_err("paid permission fallback").code, "auth.denied");
+    app.use_licensing(licence_in(&scratch, "expired", Status::Active, -100));
+    assert_eq!(crate::reports::list_on(&app).expect_err("expired Reports").code, "licence.not_operating");
+    assert_eq!(crate::corrections::bills_on(&app, Default::default()).expect_err("expired cashier Bills").code, "licence.not_operating");
+}
+
+#[test]
+fn default_cashier_can_find_and_read_receipts_without_reports_permission() {
+    let scratch = Scratch::new("cashier_bill_work");
+    let app = a_trading_shop(&scratch, "cashier_bill_work");
+    a_bill_is_taken(&app);
+    crate::signin_tests::hire(&app, "staff_cashier", "Cashier", mb_auth::RolePreset::Cashier, "1357");
+    crate::ipc::lock_now_on(&app).expect("lock");
+    crate::ipc::login_on(&app, "staff_cashier".to_owned(), "1357".to_owned()).expect("cashier signs in");
+    let bills = crate::corrections::bills_on(&app, Default::default()).expect("cashier lookup");
+    assert_eq!(bills.rows.len(), 1);
+    assert!(bills.can_revert && bills.can_reprint);
+    assert!(bills.totals.is_none());
+    assert!(!bills.can_export);
+    crate::corrections::bill_detail_on(&app, bills.rows[0].order_id.clone()).expect("cashier receipt");
+    assert_eq!(crate::reports::list_on(&app).expect_err("reports stay denied").code, "auth.denied");
+}
+
 /// 1 of 5 — no internet.
 #[test]
 fn a_shop_bills_with_no_internet() {
@@ -430,7 +567,8 @@ fn a_plan_with_no_phones_refuses_them_by_the_count() {
     let _ = a_bill_is_taken(&app);
 }
 
-// The licence is not allowed anywhere near the billing path.
+// Primitive new-order paths never gate. Flows also hosts historical documents and
+// corrections, so its free new-bill path is covered by the expiry tests above.
 
 /// PERFORMANCE §2.2: "Nothing in this table may ever be blocked by a > report, a sync, a print
 /// job, a licence check or a backup.
@@ -438,7 +576,6 @@ fn a_plan_with_no_phones_refuses_them_by_the_count() {
 fn the_billing_path_does_not_ask_about_the_licence() {
     for (name, source) in [
         ("billing.rs", include_str!("billing.rs")),
-        ("flows.rs", include_str!("flows.rs")),
         ("orders.rs", include_str!("orders.rs")),
         ("search.rs", include_str!("search.rs")),
     ] {

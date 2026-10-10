@@ -339,6 +339,8 @@ fn t8_every_named_index_exists() {
         "idx_cloud_notices_unseen",
         // Working menu and Deleted items, with available dishes first.
         "items_menu_state",
+        // Current-day returns must not scan the complete historical bill book.
+        "idx_bill_returns_day",
     ];
 
     let db = Scratch::new("t8").open();

@@ -212,7 +212,7 @@ impl<'a> DeliveryRepo<'a> {
                     COALESCE(o.delivery_state, 'pending'),
                     o.delivery_failure,
                     COALESCE(b.grand_total, 0),
-                    COALESCE((SELECT SUM(p.amount + p.tip) FROM payments p
+                    COALESCE((SELECT SUM(p.amount) FROM payments p
                                WHERE p.order_id = o.id AND p.mode = 'cash'), 0),
                     c.name,
                     c.phone,
@@ -327,7 +327,7 @@ impl<'a> DeliveryRepo<'a> {
                     SUM(CASE WHEN o.delivery_state = 'delivered' THEN 1 ELSE 0 END),
                     SUM(CASE WHEN o.delivery_state = 'failed' THEN 1 ELSE 0 END),
                     COALESCE(SUM(CASE WHEN o.delivery_state IN ('out', 'delivered')
-                                      THEN (SELECT COALESCE(SUM(p.amount + p.tip), 0)
+                                      THEN (SELECT COALESCE(SUM(p.amount), 0)
                                               FROM payments p
                                              WHERE p.order_id = o.id AND p.mode = 'cash')
                                       ELSE 0 END), 0)

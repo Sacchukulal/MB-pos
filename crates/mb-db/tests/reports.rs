@@ -262,25 +262,159 @@ fn refund_cash_moves_on_the_refund_day_and_only_for_the_owning_till() {
     let db = scratch.open();
     shop::build(&db);
     let at = Timestamp::from_millis(1_785_000_000_000);
-    let sale = settle_on(&db, "ord_refund_day", day(40), at, 1, 0);
+    let mut sale = settle_on(&db, "ord_refund_day", day(40), at, 1, 0);
+    sale.settlement
+        .return_to("Cash", Money::from_paise(100))
+        .expect("part was card");
+    sale.settlement
+        .add(
+            mb_core::Payment::new(mb_core::PaymentMode::Card, Money::from_paise(100))
+                .expect("card"),
+        )
+        .expect("split payment");
     db.transaction(|tx| {
         let repos = Repos::new(tx);
-        let voided = sale.clone().void("Cancelled", StaffId::new("staff_1"), at).expect("void");
-        repos.orders().save(OUTLET, TERMINAL, &mb_core::AnyOrder::Voided(voided))?;
+        let voided = sale
+            .clone()
+            .void("Cancelled", StaffId::new("staff_1"), at)
+            .expect("void");
+        repos
+            .orders()
+            .save(OUTLET, TERMINAL, &mb_core::AnyOrder::Voided(voided))?;
         for (id, mode) in [("ref_cash", "Cash"), ("ref_card", "Card")] {
-            repos.corrections().record_refund(OUTLET, &mb_db::repo::corrections::Refund {
-                id: id.to_owned(), order_id: sale.core.id.clone(), amount: Money::from_paise(100),
-                mode: mode.to_owned(), reason: "Part returned".to_owned(), refunded_at: at,
-                refunded_by: Some(StaffId::new("staff_1")),
-            }, day(41))?;
+            repos.corrections().record_refund(
+                OUTLET,
+                &mb_db::repo::corrections::Refund {
+                    id: id.to_owned(),
+                    order_id: sale.core.id.clone(),
+                    amount: Money::from_paise(100),
+                    mode: mode.to_owned(),
+                    reason: "Part returned".to_owned(),
+                    refunded_at: at,
+                    refunded_by: Some(StaffId::new("staff_1")),
+                },
+                day(41),
+            )?;
         }
         let money = repos.money();
-        assert_eq!(money.cash_position(OUTLET, day(40))?.expected, sale.bill.grand_total);
+        assert_eq!(
+            money.cash_position(OUTLET, day(40))?.expected,
+            sale.bill
+                .grand_total
+                .sub(Money::from_paise(100))
+                .expect("cash share")
+        );
         assert_eq!(money.cash_position(OUTLET, day(41))?.expected.paise(), -100);
-        assert_eq!(money.cash_position_of(OUTLET, day(41), Some(TERMINAL))?.expected.paise(), -100);
-        assert_eq!(money.cash_position_of(OUTLET, day(41), Some("other_till"))?.expected, Money::ZERO);
+        assert_eq!(
+            money
+                .cash_position_of(OUTLET, day(41), Some(TERMINAL))?
+                .expected
+                .paise(),
+            -100
+        );
+        assert_eq!(
+            money
+                .cash_position_of(OUTLET, day(41), Some("other_till"))?
+                .expected,
+            Money::ZERO
+        );
         Ok(())
-    }).expect("refund positions");
+    })
+    .expect("refund positions");
+}
+
+#[test]
+fn net_receipts_preserve_reprint_change_tip_and_later_payment_confirmation() {
+    let scratch = Scratch::new("reports-net-receipts");
+    let db = scratch.open();
+    shop::build(&db);
+    let at = Timestamp::from_millis(1_785_000_000_000);
+    let mut sale = settle_on(&db, "ord_net_receipts", day(44), at, 1, 0);
+    assert_eq!(sale.bill.grand_total.paise(), 10_500);
+    let mut receipt = Settlement::with_tip(Money::from_paise(500)).expect("tip");
+    receipt
+        .add(Payment::new(PaymentMode::Cash, Money::from_paise(6_000)).expect("cash"))
+        .expect("cash");
+    receipt
+        .add(Payment::new(PaymentMode::Card, Money::from_paise(10_000)).expect("card"))
+        .expect("card");
+    sale.settlement = receipt;
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        repos.orders().save(OUTLET, TERMINAL, &mb_core::AnyOrder::Settled(sale.clone()))?;
+        assert_eq!(repos.money().cash_position(OUTLET, day(44))?.expected.paise(), 1_000);
+        let stored = repos.orders().find(&sale.core.id)?.expect("saved");
+        assert_eq!(stored, mb_core::AnyOrder::Settled(sale.clone()), "raw receipt is preserved");
+        tx.execute("UPDATE payments SET confirmed_at = ?2, reference = 'verified-card' WHERE order_id = ?1 AND mode = 'card'", rusqlite::params![sale.core.id.as_str(), at.millis()])?;
+        let mb_core::AnyOrder::Settled(loaded) = repos.orders().find(&sale.core.id)?.expect("saved") else { panic!("settled"); };
+        assert!(loaded.settlement.payments()[1].confirmed);
+        assert_eq!(loaded.settlement.payments()[1].reference.as_deref(), Some("verified-card"));
+        assert_eq!(loaded.settlement.change_due(loaded.bill.grand_total).expect("change").paise(), 5_000);
+        assert_eq!(repos.corrections().refundable_payments(&sale.core.id)?, vec![("card".to_owned(), Money::from_paise(10_000)), ("cash".to_owned(), Money::from_paise(1_000))]);
+        Ok(())
+    }).expect("net receipts and original printed values");
+}
+
+#[test]
+fn legacy_receipt_migration_is_atomic_and_reopening_cannot_subtract_change_again() {
+    let scratch = Scratch::new("reports-legacy-receipts");
+    let at = Timestamp::from_millis(1_785_000_000_000);
+    let original = {
+        let db = scratch.open();
+        shop::build(&db);
+        let mut sale = settle_on(&db, "ord_legacy_receipt", day(45), at, 1, 0);
+        let mut receipt = Settlement::with_tip(Money::from_paise(500)).expect("tip");
+        receipt
+            .add(Payment::new(PaymentMode::Cash, Money::from_paise(20_000)).expect("cash"))
+            .expect("cash");
+        sale.settlement = receipt;
+        db.transaction(|tx| {
+            Repos::new(tx).orders().save(OUTLET, TERMINAL, &mb_core::AnyOrder::Settled(sale.clone()))?;
+            // Recreate the actual pre-23 storage shape: gross payment, included tip,
+            // no preserved receipt metadata. Only this disposable fixture is downgraded.
+            tx.execute("UPDATE payments SET amount = 20000, tip = 500 WHERE order_id = ?1", [sale.core.id.as_str()])?;
+            tx.execute("UPDATE orders SET billing_account = json_remove(billing_account, '$.issued_receipt') WHERE id = ?1", [sale.core.id.as_str()])?;
+            tx.execute("DELETE FROM schema_version WHERE version = 23", [])?;
+            tx.execute_batch("CREATE TRIGGER fail_receipt_projection BEFORE UPDATE OF amount ON payments WHEN NEW.order_id = 'ord_legacy_receipt' BEGIN SELECT RAISE(ABORT, 'fixture migration failure'); END;")?;
+            Ok(())
+        }).expect("legacy fixture");
+        sale
+    };
+    assert!(mb_db::Db::open(&scratch.config()).is_err(), "failed projection must refuse migration");
+    {
+        let connection = rusqlite::Connection::open(scratch.db_path()).expect("inspect failed fixture");
+        let amount: i64 = connection.query_row("SELECT amount FROM payments WHERE order_id = 'ord_legacy_receipt'", [], |r| r.get(0)).expect("legacy receipt intact");
+        assert_eq!(amount, 20_000);
+        let applied: i64 = connection.query_row("SELECT COUNT(*) FROM schema_version WHERE version = 23", [], |r| r.get(0)).expect("migration ledger");
+        assert_eq!(applied, 0);
+        connection.execute_batch("DROP TRIGGER fail_receipt_projection;").expect("allow retry");
+    }
+    for _ in 0..2 {
+        let db = scratch.open();
+        db.transaction(|tx| {
+            let repos = Repos::new(tx);
+            assert_eq!(
+                repos
+                    .money()
+                    .cash_position(OUTLET, day(45))?
+                    .expected
+                    .paise(),
+                11_000
+            );
+            assert_eq!(
+                repos.orders().find(&original.core.id)?.expect("bill"),
+                mb_core::AnyOrder::Settled(original.clone())
+            );
+            let count: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM schema_version WHERE version = 23",
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(count, 1);
+            Ok(())
+        })
+        .expect("migration preserved receipt and normalized once");
+    }
 }
 
 #[test]

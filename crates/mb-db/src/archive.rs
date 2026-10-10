@@ -144,11 +144,12 @@ impl<'a> ArchiveRepo<'a> {
     pub fn pending(&self, outlet: &str, today: BusinessDay, limit: usize) -> Result<Vec<BusinessDay>, DbError> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT DISTINCT o.business_day
-               FROM orders o
+               FROM (SELECT outlet_id, business_day FROM orders
+                     WHERE state IN ('settled', 'voided') OR (state = 'cancelled' AND bill_number_value IS NOT NULL)
+                     UNION SELECT outlet_id, business_day FROM bill_returns) o
                LEFT JOIN archive_days a ON a.outlet_id = o.outlet_id AND a.business_day = o.business_day
                LEFT JOIN business_days d ON d.outlet_id = o.outlet_id AND d.business_day = o.business_day
               WHERE o.outlet_id = ?1
-                AND (o.state IN ('settled', 'voided') OR (o.state = 'cancelled' AND o.bill_number_value IS NOT NULL))
                 AND (a.uploaded_at IS NULL OR a.dirty_at > a.uploaded_at)
                 AND (o.business_day <= ?2 OR d.is_locked = 1)
               ORDER BY o.business_day
@@ -267,24 +268,39 @@ impl<'a> ArchiveRepo<'a> {
             .query_map(rusqlite::params![outlet, encode::business_day_to_sql(day)], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
 
+        // A return-only day still has a complete, restorable file. Include the referenced
+        // original bill as a dependency, without counting it as a new sale on this day.
+        let mut stmt = self.tx.prepare_cached("SELECT order_id FROM bill_returns WHERE outlet_id = ?1 AND business_day = ?2 ORDER BY returned_at, id")?;
+        let returned = stmt.query_map(rusqlite::params![outlet, encode::business_day_to_sql(day)], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
         let mut lines: Vec<WireRow> = Vec::with_capacity(ids.len());
         let mut bills = 0_usize;
-        for id in &ids {
+        for id in ids.iter().chain(returned.iter()) {
             let Some(bill) = wire.order_row(outlet, id)? else {
                 continue;
             };
-            bills += 1;
+            if ids.contains(id) { bills += 1; }
             lines.push(bill);
             for (table, sql) in [
                 ("refunds", "SELECT id FROM refunds WHERE order_id = ?1 ORDER BY refunded_at, id"),
                 ("bill_reverts", "SELECT id FROM bill_reverts WHERE order_id = ?1 ORDER BY reverted_at, id"),
+                ("bill_returns", "SELECT id FROM bill_returns WHERE order_id = ?1 ORDER BY returned_at, id"),
+                ("credit_adjustments", "SELECT a.id FROM credit_adjustments a JOIN bill_returns r
+                    ON a.id = r.id || '_credit_' || a.customer_id WHERE r.order_id = ?1 ORDER BY a.id"),
             ] {
                 let mut stmt = self.tx.prepare_cached(sql)?;
                 let children = stmt
                     .query_map([id], |r| r.get::<_, String>(0))?
                     .collect::<Result<Vec<_>, _>>()?;
                 for child in children {
-                    lines.extend(wire.whole_rows(table, &child, sealed_at)?);
+                    // Use the same typed/boxed builder as cloud sync. In particular an
+                    // account credit must retain its signed customer_ledger shape and raw
+                    // restore row, not just have its table name translated.
+                    lines.extend(wire.read(outlet, &OutboxRow {
+                        id: child.clone(), table_name: table.to_owned(), row_id: child,
+                        op: crate::repo::outbox::Op::Upsert, tombstone: None,
+                        created_at: sealed_at, attempts: 0,
+                    })?);
                 }
             }
         }

@@ -18,7 +18,7 @@ import { FirstRun } from '../setup/FirstRun';
 import { AlertsPanel, alertKey, loudest, type Alert } from './Alerts';
 import { DayGate } from './DayGate';
 import { More } from './More';
-import { MayProvider } from './permissions';
+import { BILL_LOOKUP_PERMISSIONS, MayProvider } from './permissions';
 import { Billing } from '../billing/Billing';
 import { SettleDesk } from '../billing/SettleDesk';
 import { Health } from '../health/Health';
@@ -166,7 +166,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     // `go` so a licence refusal can hand somebody straight to the Account screen instead of
     // leaving them to find it; `sub` so an alert can land on Day open/close.
     render: (go, sub) => <Reports onGoTo={go} initial={sub} />,
-    needsAny: ['reports.view', 'day.close'],
+    needsAny: [...BILL_LOOKUP_PERMISSIONS, 'day.close'],
   },
   {
     // In the bar, after Reports: the owner opens it to check the plan, take a backup, or
@@ -356,6 +356,7 @@ export function Shell() {
    * order from yesterday is settled; it lasts until the next ask.
    */
   const [dayState, setDayState] = useState<DayStateView | null>(null);
+  const dayRequest = useRef(0);
   const [gateWaived, setGateWaived] = useState(false);
   /**
    * `asking` is a fresh ask — signing in, or the hour turning — and only those put the gate
@@ -364,9 +365,11 @@ export function Shell() {
    */
   const reloadDay = useCallback((asking: boolean) => {
     if (!inApp()) return;
+    const generation = ++dayRequest.current;
     call('day_state', { holidays: null })
       // Checked, not trusted, like every other answer the shell draws.
       .then((fresh) => {
+        if (generation !== dayRequest.current) return;
         if (fresh && Array.isArray(fresh.pending)) {
           setDayState(fresh);
           if (asking) setGateWaived(false);
@@ -377,6 +380,7 @@ export function Shell() {
   const askedAt = useRef(0);
   useEffect(() => {
     if (lock === null || lock.signedInAs === null) {
+      dayRequest.current += 1;
       setDayState(null);
       return;
     }
@@ -410,6 +414,8 @@ export function Shell() {
       if (message.kind === 'phones') setPhones({ connected: message.connected, waiting: message.waiting });
       if (message.kind === 'licence') {
         setStatus((was) => (was ? { ...was, licence: message.says, licenceTone: message.tone } : was));
+        setDayState((old) => old ? { ...old, pending: old.pending.map((day) => ({ ...day, bills: null, net: null, cash: null, upiAndCard: null, expenses: null })) } : old);
+        reloadDay(false);
       }
       if (message.kind === 'version') setUpdate(message.available);
     })
@@ -418,7 +424,7 @@ export function Shell() {
       })
       .catch(() => undefined);
     return () => stop?.();
-  }, [reloadLock, reloadNotices]);
+  }, [reloadLock, reloadNotices, reloadDay]);
 
   /** The keys of the counter's own alerts on show right now — what opening the bell marks read. */
   const ownKeys = useRef<string[]>([]);

@@ -26,7 +26,9 @@ pub mod status;
 pub use clock::{ClockSays, Watch};
 pub use cloud::{Cloud, CloudError};
 pub use deadline::{Timedout, within};
-pub use emergency::{Code, EmergencyError, mint, redeem};
+#[cfg(any(test, debug_assertions))]
+pub use emergency::mint;
+pub use emergency::{Code, EmergencyError, redeem};
 pub use entitlement::{DEFAULT_GRACE_DAYS, Entitlement, billing_is_always_allowed, decide};
 pub use error::LicenceError;
 pub use gate::{Feature, Refusal, Why};

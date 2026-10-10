@@ -318,7 +318,7 @@ pub fn licence_banner(
         mb_license::Standing::Ending { days_left } => format!(
             "Renewal is switched off. Your plan runs until {renews} ({}); after \
              that reports and phone ordering pause — billing and printing carry on. \
-             Choose a plan at magicbill.in to carry on.",
+             Choose a plan at magicbill.in to keep the paid features.",
             if days_left == 0 {
                 "today".to_owned()
             } else {
@@ -354,7 +354,7 @@ pub fn licence_banner(
                 .to_owned()
         }
         mb_license::Standing::Emergency { until } => format!(
-            "Emergency unlock: everything works until {}. Please renew or move \
+            "Emergency unlock: your plan's features work until {}. Please renew or move \
              your licence before then.",
             when(until)
         ),

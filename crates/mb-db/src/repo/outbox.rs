@@ -274,6 +274,7 @@ pub const SYNCED: &[(&str, &str)] = &[
     ("reasons", "id"),
     ("reprints", "id"),
     ("refunds", "id"),
+    ("bill_returns", "id"),
     ("bill_reverts", "id"),
     ("recurring_expenses", "id"),
     ("day_closes", "id"),

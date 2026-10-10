@@ -1330,16 +1330,16 @@ fn a_wrong_bill_is_reverted_fixed_and_billed_again_under_the_same_number() {
     let again = crate::flows::complete_bill_with_return_on(&app, None, Some("Cash".to_owned())).expect("return the difference and finish");
     assert_eq!(again, number, "the number changed on the way back");
 
-    // The list: one bill, paid, marked as edited and waiting.
+    // No configured threshold: the final save authorizes this correction once.
     let view = bills_on(&app, BillFilter::default()).expect("the list");
     assert_eq!(view.rows.len(), 1);
     let row = &view.rows[0];
     assert_eq!(row.number, number);
     assert_eq!(row.state, "settled");
     assert!(row.edited);
-    assert_eq!(row.approval.as_deref(), Some("waiting"));
+    assert_eq!(row.approval.as_deref(), Some("approved"));
     assert_eq!(row.paid_by, "Cash");
-    assert_eq!(view.waiting, 1);
+    assert_eq!(view.waiting, 0);
 
     // The register says what it was and what changed.
     let detail = bill_detail_on(&app, order_id.clone()).expect("the detail");
@@ -1355,7 +1355,7 @@ fn a_wrong_bill_is_reverted_fixed_and_billed_again_under_the_same_number() {
         "the quantity change is not in the register: {:?}",
         edit.changes
     );
-    assert!(detail.can_approve, "the owner cannot approve");
+    assert!(!detail.can_approve, "a completed authorized edit needs no second review");
 
     // Filters are Rust's.
     let only_edited = bills_on(
@@ -1377,8 +1377,7 @@ fn a_wrong_bill_is_reverted_fixed_and_billed_again_under_the_same_number() {
     .expect("searched");
     assert_eq!(by_number.rows.len(), 1);
 
-    // Signed off, once.
-    approve_revert_on(&app, edit.id.clone()).expect("approved");
+    // Signed off in the settlement transaction, once.
     let after = bill_detail_on(&app, order_id).expect("the detail again");
     assert_eq!(after.row.approval.as_deref(), Some("approved"));
     assert!(!after.can_approve);
@@ -1501,7 +1500,7 @@ fn money_goes_back_only_after_a_void() {
         refused
             .detail
             .unwrap_or_default()
-            .contains("left to give back")
+            .contains("can be returned by cash")
     );
 
     let after = refund_on(

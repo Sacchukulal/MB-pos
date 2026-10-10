@@ -472,6 +472,9 @@ macro_rules! commands {
             $crate::flows::reprint_kitchen_ticket,
             $crate::flows::bill_pdf,
             $crate::flows::complete_bill,
+            $crate::correction_draft::discard_bill_correction,
+            $crate::correction_draft::save_bill_correction_draft,
+            $crate::correction_draft::correction_save_preview,
             $crate::flows::print_open_bill,
             // The settle desk: what the phones asked, and the cashier's answer.
             $crate::orders::settle_requests,
@@ -501,7 +504,10 @@ macro_rules! commands {
             $crate::corrections::cancel_order,
             $crate::corrections::void_line,
             $crate::corrections::reprint_bill,
-            $crate::corrections::refund_bill,
+            $crate::refunds::bill_correction_offer,
+            $crate::refunds::return_bill_money,
+            $crate::refunds::void_and_return_bill,
+            $crate::refunds::return_closed_bill,
             // The menu.
             $crate::menu::menu_categories,
             $crate::menu::menu_rows,
@@ -836,6 +842,7 @@ pub fn cart_add_on(
 ) -> UiResult<CartView> {
     let _one_at_a_time = app.begin_action();
     guard::require(app, Permission::BillCreate)?;
+    crate::correction_draft::require_edit_access(app)?;
     let item = app.find_menu_item(&item_id)?;
     let qty = match qty {
         Some(text) => mb_core::Qty::parse(&text).map_err(|e| {
@@ -920,6 +927,7 @@ pub fn cart_set_order_type(
 ) -> UiResult<CartView> {
     let _one_at_a_time = app.begin_action();
     guard::require(&app, Permission::BillCreate)?;
+    crate::correction_draft::require_edit_access(&app)?;
     let kind = order_type_from_label(&order_type).ok_or_else(|| {
         UiError::new(
             "cart.order_type",
@@ -966,6 +974,7 @@ pub fn take_payment(
     reference: Option<String>,
 ) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
+    crate::correction_draft::require_edit_access(app)?;
     let mode = match mode.as_str() {
         "Cash" => mb_core::PaymentMode::Cash,
         "Card" => mb_core::PaymentMode::Card,
@@ -1038,6 +1047,7 @@ pub fn cart_clear_payments(
 ) -> UiResult<CartView> {
     let _one_at_a_time = app.begin_action();
     guard::require(&app, Permission::BillCreate)?;
+    crate::correction_draft::require_edit_access(&app)?;
     let view = app.with_cart_mut(|state| {
         state.settlement = state.account.settlement.clone();
         cart_view(state, &app.shop_config())
@@ -1054,6 +1064,7 @@ pub fn cart_cash_given(
 ) -> UiResult<CartView> {
     let _one_at_a_time = app.begin_action();
     guard::require(&app, Permission::BillCreate)?;
+    crate::correction_draft::require_edit_access(&app)?;
     let typed = amount.trim().to_owned();
     let cleared = app.with_cart_mut(|state| {
         state.settlement = state.account.settlement.clone();
@@ -1103,6 +1114,7 @@ pub fn cart_set_discount_checked_on(
     expected_line: Option<String>,
 ) -> UiResult<CartView> {
     let _one_at_a_time = app.begin_action();
+    crate::correction_draft::require_edit_access(app)?;
     let who = guard::require(app, guard::discount_permission(line))?;
     refresh_for_line_edit(app, line, expected_line.as_deref())?;
     let config = app.shop_config();
@@ -1185,6 +1197,7 @@ pub fn cart_clear_discount_on(app: &App, line: Option<usize>) -> UiResult<CartVi
 
 pub fn cart_clear_discount_checked_on(app: &App, line: Option<usize>, expected_line: Option<String>) -> UiResult<CartView> {
     let _one_at_a_time = app.begin_action();
+    crate::correction_draft::require_edit_access(app)?;
     guard::require(app, guard::discount_permission(line))?;
     refresh_for_line_edit(app, line, expected_line.as_deref())?;
     app.with_cart_mut(|state| {
@@ -1359,6 +1372,9 @@ pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
     crate::flows::park_current(app)?;
     let table = TableId::new(table_id);
     let (label, found) = table_and_its_order(app, &table)?;
+    if found.as_ref().is_some_and(|order| order.core().billing.revision > 0) {
+        crate::licensing::gate(app, mb_license::Feature::Reports)?;
+    }
     if found.as_ref().is_some_and(|o| o.core().billing.billed_into.is_some()) {
         return Err(UiError::new("order.combined", "This table belongs to a combined bill; release it after the guests leave."));
     }
@@ -1495,6 +1511,7 @@ pub fn open_order_on(app: &App, order_id: String) -> UiResult<CartView> {
     guard::require(app, Permission::BillCreate)?;
     crate::flows::park_current(app)?;
     if app.with_cart(|state| Ok(state.order_id() == Some(order_id.as_str())))? {
+        crate::correction_draft::require_edit_access(app)?;
         return app.with_cart(|state| cart_view(state, &app.shop_config()));
     }
     let order = crate::flows::find_order(app, &OrderId::new(&order_id))?;
@@ -1508,6 +1525,9 @@ pub fn open_order_on(app: &App, order_id: String) -> UiResult<CartView> {
     };
     if order.core().billing.billed_into.is_some() {
         return Err(UiError::new("order.combined", "This table belongs to a combined bill; release it after the guests leave."));
+    }
+    if order.core().billing.revision > 0 {
+        crate::licensing::gate(app, mb_license::Feature::Reports)?;
     }
     let label = order
         .core()

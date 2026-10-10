@@ -265,7 +265,7 @@ fn money_only_goes_back_against_a_voided_bill_and_never_more_than_came_in() {
         })
         .expect_err("more went back than came in");
     assert!(
-        refused.to_string().contains("left to give back"),
+        refused.to_string().contains("can be returned by cash"),
         "{refused}"
     );
 
@@ -287,7 +287,7 @@ fn money_only_goes_back_against_a_voided_bill_and_never_more_than_came_in() {
         })
         .expect_err("the second refund ignored the first");
     assert!(
-        refused.to_string().contains("left to give back"),
+        refused.to_string().contains("can be returned by cash"),
         "{refused}"
     );
 

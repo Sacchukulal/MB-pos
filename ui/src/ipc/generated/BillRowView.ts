@@ -23,6 +23,10 @@ stateWord: string,
  */
 voidReason: string | null, refunded: MoneyView | null, 
 /**
+ * A linked return posted on a later business day; the issued bill is unchanged.
+ */
+returned: boolean, dayClosed: boolean, correctionOpen: boolean, 
+/**
  * How many pieces of paper this bill has produced beyond the first.
  */
 reprints: number, 

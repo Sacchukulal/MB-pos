@@ -35,10 +35,11 @@ pub struct PendingRelease {
 pub struct LicenceFile {
     pub snapshot: Option<SignedSnapshot>,
     pub watch: Watch,
-    /// Fingerprints, never codes — see `emergency::Code::fingerprint`.
+    /// Fingerprints of redeemed grants, for replay detection.
     pub used_codes: Vec<String>,
-    /// While this is in the future, the shop is unlocked whatever else says.
-    pub emergency_until: Option<Timestamp>,
+    /// A signed, machine/licence-bound authorization, never an unsigned expiry.
+    /// The retired `emergency_until` JSON field is ignored on load.
+    pub emergency_grant: Option<emergency::Code>,
     pub pending_release: Option<PendingRelease>,
     pub last_transfer_on: Option<BusinessDay>,
     pub emergency_tries: u32,
@@ -212,32 +213,27 @@ impl Licensing {
     /// What the shop is entitled to, right now.
     #[must_use]
     pub fn entitlement(&self, now: Timestamp, today: BusinessDay) -> Entitlement {
-        // The emergency unlock beats everything, including a snapshot that has gone stale and
-        // including a machine that is not the bound one — it exists precisely for the case
-        // where the PC has changed and there is no internet to say so.
-        if let Some(until) = self.file.emergency_until
-            && now.millis() < until.millis()
-        {
-            return match self.stored() {
-                Some(snap) => Entitlement::from_licence(
-                    &snap.licence,
-                    Standing::Emergency { until },
-                    self.file.watch.last_online,
-                    until,
-                ),
-                None => {
-                    let mut open = Entitlement::unactivated(now);
-                    open.standing = Standing::Emergency { until };
-                    open.good_until = until;
-                    open
-                }
-            };
-        }
-
         let Some(snap) = self.stored() else {
             // No licence, or one this build cannot verify.
             return Entitlement::unactivated(now);
         };
+
+        // Support may temporarily restore an existing plan on a replacement computer.
+        // Neither an outer expiry nor an unchecked serialized grant can authorize it.
+        if let Some(grant) = &self.file.emergency_grant
+            && let Ok(until) = grant.verify(
+                &self.machine,
+                &snap.licence.key,
+                self.file.watch.as_late_as(now),
+            )
+        {
+            return Entitlement::from_licence(
+                &snap.licence,
+                Standing::Emergency { until },
+                self.file.watch.last_online,
+                until,
+            );
+        }
 
         let good_until = snap.good_until(&self.file.watch);
 
@@ -344,10 +340,15 @@ impl Licensing {
         };
         // The old shop's login must not write rows under the new licence's name.
         let shop = self.stored().and_then(|s| s.licence.restaurant_id);
-        if self.file.device.as_ref().is_some_and(|d| Some(&d.restaurant_id) != shop.as_ref()) {
+        if self
+            .file
+            .device
+            .as_ref()
+            .is_some_and(|d| Some(&d.restaurant_id) != shop.as_ref())
+        {
             self.file.device = None;
         }
-        self.file.emergency_until = None;
+        self.file.emergency_grant = None;
         let ask = self.ask(&old);
         let cloud = Arc::clone(&self.cloud);
         let released = matches!(
@@ -378,7 +379,7 @@ impl Licensing {
         );
 
         self.file.snapshot = None;
-        self.file.emergency_until = None;
+        self.file.emergency_grant = None;
         self.file.device = None;
         self.file.extras = None;
         self.file.pending_release = if released {
@@ -426,7 +427,7 @@ impl Licensing {
         self.file.save(&self.dir)
     }
 
-    /// The code support read out.
+    /// The signed code support supplied. Ordinary billing never needs one.
     pub fn use_emergency_code(
         &mut self,
         typed: &str,
@@ -441,13 +442,24 @@ impl Licensing {
             return Err(emergency::EmergencyError::TooManyTries { wait }.into());
         }
 
-        match emergency::redeem(typed, &self.machine, now, &self.file.used_codes) {
+        let key = self.key().unwrap_or_default();
+        match emergency::redeem(
+            typed,
+            &self.machine,
+            &key,
+            self.file.watch.as_late_as(now),
+            &self.file.used_codes,
+        ) {
             Ok((code, until)) => {
-                self.file.used_codes.push(code.fingerprint());
-                self.file.emergency_until = Some(until);
-                self.file.emergency_tries = 0;
-                self.file.tries_locked_until = None;
-                self.file.save(&self.dir)?;
+                // Do not leave an in-memory unlock after a failed durable save.
+                let mut updated = self.file.clone();
+                updated.used_codes.push(code.fingerprint());
+                updated.emergency_grant = Some(code);
+                updated.emergency_tries = 0;
+                updated.tries_locked_until = None;
+                updated.watch.saw(now);
+                updated.save(&self.dir)?;
+                self.file = updated;
                 Ok(until)
             }
             Err(problem) => {
@@ -647,7 +659,11 @@ mod tests {
         licensing
             .refresh(now_on(TODAY_DAYS + 1), quick())
             .expect("refreshes");
-        assert_eq!(licensing.device(), Some(&first), "a refresh does not churn the login");
+        assert_eq!(
+            licensing.device(),
+            Some(&first),
+            "a refresh does not churn the login"
+        );
         assert_eq!(stub.logins(), 1);
 
         // Lost the tokens: the next refresh asks for a new pair.
@@ -884,14 +900,17 @@ mod tests {
     #[test]
     fn an_emergency_code_is_single_use_across_a_restart() {
         let (dir, _stub, mut licensing) = setup("emergency");
-        let code = emergency::mint(&a_machine(), TODAY_DAYS, 72);
+        licensing
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
+            .expect("activate");
+        let code = emergency::mint(&a_machine(), "MB-STUB-0001", TODAY_DAYS, 72).expect("grant");
 
         let until = licensing
             .use_emergency_code(&code.to_read_out(), now_on(TODAY_DAYS))
             .expect("accepted");
         assert!(until.millis() > now_on(TODAY_DAYS).millis());
 
-        // Unlocked, with no licence at all.
+        // Only the already signed plan is unlocked.
         let entitlement = licensing.entitlement(now_on(TODAY_DAYS), day(TODAY_DAYS));
         assert!(entitlement.operating());
         assert!(matches!(entitlement.standing, Standing::Emergency { .. }));
@@ -908,6 +927,12 @@ mod tests {
             "0.1.0",
         );
         assert!(matches!(
+            again
+                .entitlement(now_on(TODAY_DAYS), day(TODAY_DAYS))
+                .standing,
+            Standing::Emergency { .. }
+        ));
+        assert!(matches!(
             again.use_emergency_code(&code.to_read_out(), now_on(TODAY_DAYS)),
             Err(LicenceError::Emergency(
                 emergency::EmergencyError::AlreadyUsed
@@ -919,8 +944,14 @@ mod tests {
     /// And the unlock runs out on its own.
     #[test]
     fn an_emergency_unlock_expires() {
-        let (dir, _stub, mut licensing) = setup("emergency-expiry");
-        let code = emergency::mint(&a_machine(), TODAY_DAYS, 72);
+        let (dir, stub, mut licensing) = setup("emergency-expiry");
+        let mut licence = stub.licence();
+        licence.renews_on = day(TODAY_DAYS - 30);
+        stub.set_licence(licence);
+        licensing
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
+            .expect("activate");
+        let code = emergency::mint(&a_machine(), "MB-STUB-0001", TODAY_DAYS, 72).expect("grant");
         licensing
             .use_emergency_code(&code.to_read_out(), now_on(TODAY_DAYS))
             .expect("accepted");
@@ -931,11 +962,151 @@ mod tests {
                 .standing,
             Standing::Emergency { .. }
         ));
-        // Past them: back to whatever the licence really says, which on a counter that never
-        // activated is "not activated".
+        // Past them: back to the expired licence, with ordinary billing still allowed.
         let after = licensing.entitlement(now_on(TODAY_DAYS + 4), day(TODAY_DAYS + 4));
         assert!(!matches!(after.standing, Standing::Emergency { .. }));
-        assert_eq!(after.standing, Standing::NeverActivated);
+        assert_eq!(after.standing, Standing::Expired);
+        assert!(crate::billing_is_always_allowed());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unsigned_legacy_expiry_is_ignored_without_losing_the_signed_snapshot() {
+        let (dir, stub, mut licensing) = setup("emergency-legacy");
+        let mut licence = stub.licence();
+        licence.renews_on = day(TODAY_DAYS - 30);
+        stub.set_licence(licence);
+        licensing
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
+            .expect("activate");
+        let mut file = serde_json::to_value(licensing.file()).expect("json");
+        file["emergency_until"] = serde_json::json!(now_on(TODAY_DAYS + 3650));
+        std::fs::write(LicenceFile::path(&dir), file.to_string()).expect("test fixture");
+        let again = Licensing::new(dir.clone(), a_machine(), stub, "test");
+        assert!(again.snapshot().is_some());
+        let entitlement = again.entitlement(now_on(TODAY_DAYS), day(TODAY_DAYS));
+        assert_eq!(entitlement.standing, Standing::Expired);
+        assert!(entitlement.may(Feature::Reports).is_err());
+        assert!(crate::billing_is_always_allowed());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saved_grant_is_reverified_for_tampering_and_machine_binding() {
+        let (dir, stub, mut licensing) = setup("emergency-tamper");
+        let mut licence = stub.licence();
+        licence.renews_on = day(TODAY_DAYS - 30);
+        stub.set_licence(licence);
+        licensing
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
+            .expect("activate");
+        let code = emergency::mint(&a_machine(), "MB-STUB-0001", TODAY_DAYS, 72).expect("grant");
+        licensing
+            .use_emergency_code(&code.to_read_out(), now_on(TODAY_DAYS))
+            .expect("redeem");
+        let other = Licensing::new(
+            dir.clone(),
+            MachineId::for_tests("another-machine"),
+            stub.clone(),
+            "test",
+        );
+        assert_eq!(
+            other
+                .entitlement(now_on(TODAY_DAYS), day(TODAY_DAYS))
+                .standing,
+            Standing::BoundElsewhere
+        );
+
+        let mut file = LicenceFile::load(&dir);
+        let grant = file.emergency_grant.as_mut().expect("saved grant");
+        let mut payload: serde_json::Value = serde_json::from_str(&grant.payload).expect("json");
+        payload["not_after"] = serde_json::json!(now_on(TODAY_DAYS + 3650));
+        grant.payload = payload.to_string();
+        file.save(&dir).expect("save edited fixture");
+        let again = Licensing::new(dir.clone(), a_machine(), stub, "test");
+        assert_eq!(
+            again
+                .entitlement(now_on(TODAY_DAYS), day(TODAY_DAYS))
+                .standing,
+            Standing::Expired
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn emergency_clock_rollback_does_not_revive_an_expired_grant() {
+        let (dir, _stub, mut licensing) = setup("emergency-clock");
+        licensing
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
+            .expect("activate");
+        let code = emergency::mint(&a_machine(), "MB-STUB-0001", TODAY_DAYS, 72).expect("grant");
+        licensing
+            .use_emergency_code(&code.to_read_out(), now_on(TODAY_DAYS))
+            .expect("redeem");
+        licensing.tick(now_on(TODAY_DAYS + 4)).expect("clock tick");
+        assert!(!matches!(
+            licensing
+                .entitlement(now_on(TODAY_DAYS), day(TODAY_DAYS))
+                .standing,
+            Standing::Emergency { .. }
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn grant_needs_a_verified_licence_and_does_not_cross_a_licence_change() {
+        let (dir, stub, mut licensing) = setup("emergency-key");
+        let code = emergency::mint(&a_machine(), "MB-STUB-0001", TODAY_DAYS, 72).expect("grant");
+        assert!(
+            licensing
+                .use_emergency_code(&code.to_read_out(), now_on(TODAY_DAYS))
+                .is_err()
+        );
+        licensing
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
+            .expect("activate");
+        licensing
+            .use_emergency_code(&code.to_read_out(), now_on(TODAY_DAYS))
+            .expect("redeem");
+        let mut licence = stub.licence();
+        licence.key = "MB-ANOTHER".to_owned();
+        licence.renews_on = day(TODAY_DAYS - 30);
+        stub.set_licence(licence);
+        licensing
+            .activate("MB-ANOTHER", now_on(TODAY_DAYS), quick())
+            .expect("activate other");
+        assert_eq!(
+            licensing
+                .entitlement(now_on(TODAY_DAYS), day(TODAY_DAYS))
+                .standing,
+            Standing::Expired
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_grant_save_does_not_unlock_the_running_counter() {
+        let (dir, _stub, mut licensing) = setup("emergency-save-failure");
+        licensing
+            .activate("MB-STUB-0001", now_on(TODAY_DAYS), quick())
+            .expect("activate");
+        let blocked = dir.join("not-a-directory");
+        std::fs::write(&blocked, "test file").expect("write fixture");
+        licensing.dir = blocked;
+        let code = emergency::mint(&a_machine(), "MB-STUB-0001", TODAY_DAYS, 72).expect("grant");
+        assert!(
+            licensing
+                .use_emergency_code(&code.to_read_out(), now_on(TODAY_DAYS))
+                .is_err()
+        );
+        assert!(licensing.file.emergency_grant.is_none());
+        assert!(!licensing.file.used_codes.contains(&code.fingerprint()));
+        assert!(!matches!(
+            licensing
+                .entitlement(now_on(TODAY_DAYS), day(TODAY_DAYS))
+                .standing,
+            Standing::Emergency { .. }
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

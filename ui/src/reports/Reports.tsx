@@ -19,7 +19,8 @@ import {
 } from '../kit';
 import { call, isLicenceRefusal, isUiError } from '../ipc/call';
 import { keep, remember } from '../remember';
-import { useMay } from '../shell/permissions';
+import { BILL_LOOKUP_PERMISSIONS, useMay } from '../shell/permissions';
+import { useLicenceRevision } from '../shell/licence';
 import { Bills } from './Bills';
 import { Days } from './Days';
 import type { PeriodChoiceView } from '../ipc/generated/PeriodChoiceView';
@@ -43,21 +44,25 @@ export function Reports({
   onGoTo?: (screen: string) => void;
   initial?: string | null;
 }) {
+  const licenceRevision = useLicenceRevision();
+  const may = useMay();
+  const mayBills = BILL_LOOKUP_PERMISSIONS.some(may);
+  const mayDays = may('reports.view') || may('day.close');
   const [list, setList] = useState<ReportListView | null>(null);
   /** Taking a report out of the building is its own permission on top of reading it. */
-  const mayExport = useMay()('reports.export');
+  const mayExport = may('reports.export');
   /** The licence saying no, held rather than flashed. */
   const [locked, setLocked] = useState<string>('');
-  /**
-   * Whether this person reads reports at all. A cashier who may close the day but not read
-   * reports comes here for Day open/close and sees nothing else.
-   */
-  const [mayReport, setMayReport] = useState(true);
+  /** The whole Reports area waits for Rust's current licence decision. */
+  const [checkedRevision, setCheckedRevision] = useState<number | null>(null);
+  const [allowed, setAllowed] = useState(false);
+  const initialOrderId = initial?.startsWith('bills/') ? initial.slice('bills/'.length) : undefined;
   // The dashboard has its own home in the logo; Reports opens on the bill history.
-  const [chosen, setChosen] = useState<string>(initial === DAYS ? DAYS : BILLS);
+  const [chosen, setChosen] = useState<string>(initial === DAYS || !mayBills ? DAYS : BILLS);
   useEffect(() => {
     if (initial === DAYS) setChosen(DAYS);
-  }, [initial]);
+    else if (initial === BILLS || initialOrderId) setChosen(BILLS);
+  }, [initial, initialOrderId]);
   // Which groups are unfolded. The rail is nine groups long; folded is how a person finds
   // anything in it, and which ones are open is a look preference, not a fact about the shop.
   const [unfolded, setUnfolded] = useState<readonly string[]>(() => opened());
@@ -80,6 +85,7 @@ export function Reports({
       // A refusal is an answer, not a fault: it belongs on the screen, and a toast on top of it
       // would say the same thing twice and then vanish.
       if (isLicenceRefusal(cause)) {
+        setAllowed(false);
         setLocked(cause.message);
         return;
       }
@@ -91,8 +97,15 @@ export function Reports({
   // The list, and with it the period presets — which come from Rust because "today" is the
   // shop's business day and only Rust knows when that starts.
   useEffect(() => {
+    let current = true;
+    setList(null);
+    setReport(null);
+    setLocked('');
     call('report_list')
       .then((fresh) => {
+        if (!current) return;
+        setCheckedRevision(licenceRevision);
+        setAllowed(true);
         setList(fresh);
         const today = fresh.periods[0];
         if (today) {
@@ -101,29 +114,37 @@ export function Reports({
         }
       })
       .catch((cause) => {
-        // No permission is an answer too: the rail keeps the one entry this person may open.
+        if (!current) return;
+        // Rust checks the licence before report permissions. A denied report list may still
+        // expose licensed bill work or day closing according to this person's permissions.
         if (isUiError(cause) && cause.code === 'auth.denied') {
-          setMayReport(false);
-          setChosen(DAYS);
+          setCheckedRevision(licenceRevision);
+          setAllowed(true);
+          if (!mayBills) setChosen(DAYS);
           return;
         }
+        if (isLicenceRefusal(cause)) setCheckedRevision(licenceRevision);
         complain(cause);
       });
-  }, [complain]);
+    return () => { current = false; };
+  }, [complain, licenceRevision, mayBills]);
 
   // One effect, one call: whenever the report or the period changes, ask again.
   useEffect(() => {
-    // The bills and the days are not reports.
-    if (!from || !to || chosen === DAYS || chosen === BILLS) return;
+    if (checkedRevision !== licenceRevision || !from || !to || chosen === DAYS || chosen === BILLS || !list || locked) return;
+    let current = true;
     setBusy(true);
+    setReport(null);
     call('report', { id: chosen, period: { from, to } })
-      .then(setReport)
+      .then((fresh) => { if (current) setReport(fresh); })
       .catch((cause) => {
+        if (!current) return;
         setReport(null);
         complain(cause);
       })
-      .finally(() => setBusy(false));
-  }, [chosen, from, to, complain]);
+      .finally(() => { if (current) setBusy(false); });
+    return () => { current = false; };
+  }, [chosen, from, to, complain, list, locked, licenceRevision, checkedRevision]);
 
   const save = (command: 'report_csv' | 'report_pdf') => {
     call(command, { id: chosen, period: { from, to } })
@@ -148,9 +169,10 @@ export function Reports({
       .catch(complain);
   };
 
-  // A licence refusal closes the reports, never the bills or the days: voiding, reprinting
-  // and closing the day are billing, and billing is never behind the plan.
-  if (!list && !locked && mayReport) return <Spinner label="Opening the reports" />;
+  const checking = checkedRevision !== licenceRevision;
+  if (!allowed) return locked && !checking
+    ? <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />
+    : <Spinner label="Opening the reports" />;
 
   const columns: readonly Column<Line>[] =
     report?.columns.map((spec, index) => ({
@@ -162,13 +184,15 @@ export function Reports({
   const lines: readonly Line[] = report?.rows.map((cells, at) => ({ at, cells })) ?? [];
 
   return (
-    <div className="mb-railpage">
+    <>
+    {checking ? <Spinner label="Opening the reports" /> : null}
+    <div className="mb-railpage mb-reports__gate" hidden={checking} inert={checking}>
       <Scroller inset className="mb-reports__rail">
         {/* At the top and on their own: the bills and the day itself. */}
         <div className="mb-reports__group">
           {[
-            { id: BILLS, label: 'Bills', shown: mayReport },
-            { id: DAYS, label: 'Day open/close', shown: true },
+            { id: BILLS, label: 'Bills', shown: mayBills },
+            { id: DAYS, label: 'Day open/close', shown: mayDays },
           ]
             .filter((entry) => entry.shown)
             .map((entry) => (
@@ -218,7 +242,7 @@ export function Reports({
 
       <div className="mb-reports__body">
         {chosen === BILLS ? (
-          <Bills onGoTo={onGoTo} />
+          <Bills onGoTo={onGoTo} initialOrderId={initialOrderId} />
         ) : chosen === DAYS ? (
           <Days />
         ) : locked || !list ? (
@@ -350,6 +374,7 @@ export function Reports({
         )}
       </div>
     </div>
+    </>
   );
 }
 

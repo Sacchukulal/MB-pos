@@ -31,7 +31,7 @@ thiserror = "2"
 # installer budget (S4) is the strongest argument available.
 # ---------------------------------------------------------------------------
 
-# Ed25519 for the snapshot signature, HMAC-SHA256 for the emergency code, and
+# Ed25519 for snapshot and emergency-grant signatures, and
 # SHA-256 for the code's single-use record.
 #
 # **Not ed25519-dalek, and not hmac + sha2**, both of which would be perfectly

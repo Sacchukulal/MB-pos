@@ -148,7 +148,7 @@ fn assert_live_sales(app: &App, paise: i64, count: i64) {
     }
     let dashboard = crate::reports::dashboard_on(app, Some(today())).expect("dashboard");
     let stat = |label: &str| dashboard.stats.iter().find(|s| s.label == label).expect("stat");
-    assert_eq!(stat("Takings").value, amount);
+    assert_eq!(stat("Net sales").value, amount);
     for id in ["trend", "payment", "types", "cashiers"] {
         let chart = dashboard.charts.iter().find(|chart| chart.id == id).expect("chart");
         let sum: i64 = chart.points.iter().map(|point|
@@ -253,8 +253,8 @@ fn archived_daily_totals_agree_with_dashboard_sales_and_active_bill_count() {
     assert_eq!(totals.last().map(String::as_str), Some("130.00"));
     let dashboard = crate::reports::dashboard_on(&app, Some(today())).expect("dashboard");
     let stat = |label: &str| dashboard.stats.iter().find(|s| s.label == label).expect("stat");
-    assert_eq!(stat("Takings").value, "130.00");
+    assert_eq!(stat("Net sales").value, "130.00");
     assert_eq!(stat("Average bill").value, "65.00");
-    assert_eq!(stat("In the drawer").value, "—", "a summary cannot reconstruct a drawer");
+    assert_eq!(stat("Expected cash in drawer").value, "—", "a summary cannot reconstruct a drawer");
     assert!(dashboard.attention.iter().any(|a| a.title.contains("Archived")));
 }

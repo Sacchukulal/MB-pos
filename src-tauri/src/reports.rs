@@ -1424,6 +1424,7 @@ const fn control_words(kind: &str) -> &str {
         b"void" => "Bill voided",
         b"cancel" => "Order cancelled",
         b"refund" => "Refunded",
+        b"return" => "Earlier bill returned",
         b"reprint" => "Reprinted",
         b"discount" => "Discount given",
         _ => "Correction",
@@ -1432,8 +1433,8 @@ const fn control_words(kind: &str) -> &str {
 
 /// The list, filtered to what this person may open.
 pub fn list_on(app: &App) -> UiResult<ReportListView> {
-    let who = guard::require(app, Permission::ReportsView)?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
+    let who = guard::require(app, Permission::ReportsView)?;
     Ok(ReportListView {
         periods: choices(crate::flows::today(crate::flows::now())),
         reports: CATALOGUE
@@ -1677,25 +1678,30 @@ fn ranking(
 
 /// A share of the whole: each slice's colour is the thing it stands for.
 fn donut(id: &str, title: &str, buckets: Vec<mb_db::repo::reports::Bucket>) -> ChartView {
-    let whole = buckets
-        .iter()
-        .fold(0_i64, |acc, b| acc.saturating_add(b.gross.paise()));
+    // A returned sale is negative, which cannot be a slice of a whole. Reuse the
+    // bar chart for that period and keep every signed figure visible.
+    let has_returns = buckets.iter().any(|b| b.gross.paise() < 0);
+    let scale = if has_returns {
+        buckets.iter().map(|b| b.gross.paise().saturating_abs()).max().unwrap_or(0)
+    } else {
+        buckets.iter().fold(0_i64, |acc, b| acc.saturating_add(b.gross.paise()))
+    };
     let mut buckets = buckets;
     buckets.sort_by_key(|b| std::cmp::Reverse(b.gross.paise()));
     ChartView {
         id: id.to_owned(),
         title: title.to_owned(),
-        kind: "donut".to_owned(),
-        note: String::new(),
+        kind: if has_returns { "bars" } else { "donut" }.to_owned(),
+        note: if has_returns { "Returns appear as negative amounts.".to_owned() } else { String::new() },
         empty: "Nothing sold.".to_owned(),
         points: buckets
             .iter()
-            .filter(|b| b.gross.is_positive())
+            .filter(|b| !b.gross.is_zero())
             .map(|b| PointView {
                 label: b.label.clone(),
                 value: b.gross.to_plain_string(),
                 note: words::count(b.bills, "bill", "bills"),
-                share: permille(b.gross.paise(), whole),
+                share: permille(b.gross.paise().saturating_abs(), scale),
                 hue: hue_of(&b.key),
             })
             .collect(),
@@ -2046,9 +2052,9 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
 
     let mut stats = vec![
         StatView {
-            label: "Takings".to_owned(),
+            label: "Net sales".to_owned(),
             value: net.to_plain_string(),
-            note: words::count(bills, "bill", "bills"),
+            note: format!("All payment methods · {}", words::count(bills, "bill", "bills")),
         },
         StatView {
             label: "Average bill".to_owned(),
@@ -2062,14 +2068,14 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
     ];
     stats.push(match position {
         Some(position) => StatView {
-            label: "In the drawer".to_owned(),
+            label: "Expected cash in drawer".to_owned(),
             value: position.expected.to_plain_string(),
-            note: "What the till expects, before counting.".to_owned(),
+            note: "Cash only, before counting. All tills.".to_owned(),
         },
         None => StatView {
-            label: "Cash taken".to_owned(),
+            label: "Cash received".to_owned(),
             value: cash.to_plain_string(),
-            note: format!("{} by UPI and card", electronic.to_plain_string()),
+            note: format!("Period receipts, not a drawer balance. {} by UPI and card", electronic.to_plain_string()),
         },
     });
     stats.push(StatView {
@@ -2339,6 +2345,29 @@ pub fn report_print_on(app: &App, id: String, period: PeriodArg) -> UiResult<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn payment_and_order_type_charts_keep_returns_visible_without_negative_pie_slices() {
+        let bucket = |key: &str, paise: i64| mb_db::repo::reports::Bucket {
+            key: key.to_owned(), label: key.to_owned(), bills: i64::from(paise > 0),
+            gross: Money::from_paise(paise), discount: Money::ZERO, tax: Money::ZERO, qty: None,
+        };
+        let returned = donut("types", "Order types", vec![bucket("parcel", -5000)]);
+        assert_eq!(returned.kind, "bars");
+        assert_eq!(returned.points.len(), 1, "return-only periods must not look empty");
+        assert_eq!(returned.points[0].value, "-50.00");
+        assert_eq!(returned.points[0].share, 1000);
+        assert!(returned.note.contains("negative"));
+
+        let mixed = donut("payment", "Payment modes", vec![bucket("cash", 5000), bucket("card", -5000)]);
+        assert_eq!(mixed.kind, "bars");
+        assert_eq!(mixed.points.iter().map(|p| p.value.as_str()).collect::<Vec<_>>(), vec!["50.00", "-50.00"]);
+        assert!(mixed.points.iter().all(|p| p.share == 1000), "opposite amounts cannot cancel the chart's scale");
+
+        let sales = donut("payment", "Payment modes", vec![bucket("cash", 7500), bucket("card", 2500)]);
+        assert_eq!(sales.kind, "donut");
+        assert_eq!(sales.points.iter().map(|p| p.share).collect::<Vec<_>>(), vec![750, 250]);
+    }
 
     /// Every report in the list exists, and every report is in the list.
     #[test]

@@ -302,6 +302,31 @@ describe('Badge', () => {
 
 /** A dialog opened over another one — adding a customer while a bill waits on the account. */
 describe('one dialog over another', () => {
+  it('keeps a visible dialog responsive when another protected dialog is hidden', () => {
+    const close = vi.fn();
+    const hiddenClose = vi.fn();
+    render(<>
+      <Modal open title="Visible" onClose={close}>Visible question</Modal>
+      <div hidden inert><Modal open title="Protected" onClose={hiddenClose}>Hidden question</Modal></div>
+    </>);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(hiddenClose).not.toHaveBeenCalled();
+  });
+
+  it('does not submit or close a dialog inside a temporarily hidden protected screen', () => {
+    const close = vi.fn();
+    const confirm = vi.fn();
+    const { rerender } = render(<div hidden inert><Modal open title="Review bill" onClose={close} onEnter={confirm}>Review</Modal></div>);
+    fireEvent.keyDown(document, { key: 'Enter' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    rerender(<div><Modal open title="Review bill" onClose={close} onEnter={confirm}>Review</Modal></div>);
+    fireEvent.keyDown(document, { key: 'Enter' });
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
   it('closes the top one on Escape and leaves the one underneath open', () => {
     const closeUnder = vi.fn();
     const closeOver = vi.fn();

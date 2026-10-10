@@ -3,7 +3,7 @@
 use mb_auth::audit::action;
 use mb_auth::{AuditEntry, Permission};
 use mb_core::{AnyOrder, Money, OrderId, Qty, StaffId};
-use mb_db::repo::corrections::{Reason, Refund, RevertLine, RevertPayment, RevertRow};
+use mb_db::repo::corrections::{Reason, RevertLine, RevertPayment, RevertRow};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -16,7 +16,7 @@ use crate::words::{self, UiError, UiResult};
 use crate::{log_info, log_warn};
 
 /// Above this, a void or a revert needs a second person.
-const APPROVAL_KEY: &str = "bill.void.approval_above_paise";
+pub(crate) const APPROVAL_KEY: &str = "bill.void.approval_above_paise";
 
 // What the screens see.
 
@@ -43,6 +43,10 @@ pub struct BillRowView {
     /// Present on a voided bill, and shown.
     pub void_reason: Option<String>,
     pub refunded: Option<MoneyView>,
+    /// A linked return posted on a later business day; the issued bill is unchanged.
+    pub returned: bool,
+    pub day_closed: bool,
+    pub correction_open: bool,
     /// How many pieces of paper this bill has produced beyond the first.
     pub reprints: u32,
     /// The bill was taken back to the counter and billed again under this number.
@@ -96,7 +100,8 @@ pub struct BillFilter {
 pub struct BillsView {
     pub rows: Vec<BillRowView>,
     /// The figures for what is listed.
-    pub totals: DayTotalsView,
+    pub totals: Option<DayTotalsView>,
+    pub can_export: bool,
     pub periods: Vec<crate::reports::PeriodChoiceView>,
     /// Everyone who took a bill in the period, for the filter.
     pub cashiers: Vec<crate::lan::PersonPick>,
@@ -181,7 +186,9 @@ pub fn list_bills_on(app: &App) -> UiResult<Vec<BillRowView>> {
 
 /// The Bills screen: the rows that match, and everything the toolbar needs.
 pub fn bills_on(app: &App, filter: BillFilter) -> UiResult<BillsView> {
-    let who = guard::require(app, Permission::ReportsView)?;
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
+    let who = guard::require_any(app, guard::BILL_LOOKUP_PERMISSIONS)?;
+    let may_report = who.can(Permission::ReportsView);
     let day = today(now());
     let period = match &filter.period {
         Some(arg) => arg.parse()?,
@@ -253,7 +260,7 @@ pub fn bills_on(app: &App, filter: BillFilter) -> UiResult<BillsView> {
                 let rows: Vec<BillRowView> = rows.into_iter().map(|(_, row)| row).collect();
                 cashiers.sort_by(|a, b| a.name.cmp(&b.name));
 
-                let totals = totals_of(&rows);
+                let totals = may_report.then(|| totals_of(&rows));
                 let waiting = repos.corrections().reverts_waiting(OUTLET)?;
                 let approvers = staff
                     .iter()
@@ -267,6 +274,7 @@ pub fn bills_on(app: &App, filter: BillFilter) -> UiResult<BillsView> {
                 Ok(BillsView {
                     rows,
                     totals,
+                    can_export: may_report && who.can(Permission::ReportsExport),
                     periods: crate::reports::choices(day),
                     cashiers,
                     approvers,
@@ -400,6 +408,9 @@ fn bill_row(
         state: state.to_owned(),
         void_reason,
         refunded: None,
+        returned: false,
+        day_closed: false,
+        correction_open: false,
         reprints: 0,
         edited: false,
         approval: None,
@@ -425,6 +436,11 @@ fn with_the_register(
     id: &OrderId,
     mut row: BillRowView,
 ) -> Result<BillRowView, mb_db::DbError> {
+    row.returned = repos.returns().contains(id)?;
+    if let Some(issued) = repos.orders().find(id)? {
+        row.day_closed = repos.days().is_locked(OUTLET, issued.core().business_day)?;
+        row.correction_open = repos.orders().find_working(id)?.as_ref() != Some(&issued);
+    }
     let reverts = repos.corrections().reverts_of(id)?;
     if !reverts.is_empty() {
         row.edited = true;
@@ -531,7 +547,8 @@ fn totals_of(rows: &[BillRowView]) -> DayTotalsView {
 // One bill, opened.
 
 pub fn bill_detail_on(app: &App, order_id: String) -> UiResult<BillDetailView> {
-    let who = guard::require(app, Permission::ReportsView)?;
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
+    let who = guard::require_any(app, guard::BILL_LOOKUP_PERMISSIONS)?;
     let id = OrderId::new(order_id);
     let config = app.shop_config();
 
@@ -639,6 +656,9 @@ pub fn bill_detail_on(app: &App, order_id: String) -> UiResult<BillDetailView> {
                             refund.reason
                         ),
                     );
+                }
+                if let Some(returned) = repos.returns().for_order(&id)? {
+                    note(returned.at, names.of(&returned.by), format!("Full return {} recorded on a later day: {}. Original bill unchanged; prepared food not restocked.", returned.total.to_plain_string(), returned.reason));
                 }
                 for copy in &reprints {
                     note(
@@ -848,7 +868,7 @@ fn changes_between(
 
 /// The shop's own reasons for one flow.
 pub fn reasons_on(app: &App, kind: String) -> UiResult<Vec<ReasonView>> {
-    guard::require(app, Permission::BillCreate)?;
+    guard::require_any(app, guard::CORRECTION_REASON_PERMISSIONS)?;
     app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).corrections().reasons(OUTLET, &kind))
@@ -894,26 +914,48 @@ pub fn void_bill_on(
     approver_staff_id: Option<String>,
     approver_pin: Option<String>,
 ) -> UiResult<Vec<BillRowView>> {
+    void_bill_with_returns_on(app, order_id, reason, approver_staff_id, approver_pin, None)
+}
+
+pub fn void_bill_with_returns_on(
+    app: &App, order_id: String, reason: String,
+    approver_staff_id: Option<String>, approver_pin: Option<String>,
+    returns: Option<Vec<(String, Money)>>,
+) -> UiResult<Vec<BillRowView>> {
     let _one_at_a_time = app.begin_action();
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::BillVoid)?;
     let at = now();
     let day = today(at);
     let id = OrderId::new(order_id.clone());
+    if returns.is_some()
+        && let Some(refusal) = crate::dayclose::day_refusal_on(app, day, "refund.day_closed", "record this return")? {
+        return Err(refusal);
+    }
 
     let found = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
-                let orders = mb_db::Repos::new(tx).orders();
+                let repos = mb_db::Repos::new(tx);
+                let orders = repos.orders();
                 let issued = orders.find(&id)?;
-                if orders.find_working(&id)? != issued {
+                if repos.returns().contains(&id)? {
+                    return Err(mb_db::DbError::invariant("This bill already has a return. Open its history to see the money returned."));
+                }
+                let working = orders.find_working(&id)?;
+                let empty_return = returns.is_some() && matches!((&working, &issued),
+                    (Some(AnyOrder::Open(draft)), Some(AnyOrder::Settled(original)))
+                    if draft.core.cart.is_empty() && draft.core.billing.settlement == original.clone().reopen().core.billing.settlement);
+                if working != issued && !empty_return {
                     return Err(mb_db::DbError::invariant("Finish this bill's correction before voiding it."));
                 }
-                Ok(issued)
+                Ok((issued, working))
             })
             .map_err(|e| words::from_db(&e))
     })?;
 
-    let Some(AnyOrder::Settled(settled)) = found else {
+    let (issued_snapshot, working_snapshot) = found;
+    let Some(AnyOrder::Settled(settled)) = issued_snapshot.clone() else {
         return Err(UiError::new(
             "void.not_settled",
             "Only a bill that has been paid can be voided. Check the bill and try again.",
@@ -945,18 +987,27 @@ pub fn void_bill_on(
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
+                if repos.orders().find(&id)? != issued_snapshot
+                    || repos.orders().find_working(&id)? != working_snapshot
+                    || repos.returns().contains(&id)?
+                {
+                    return Err(mb_db::DbError::invariant("This bill changed while the correction was being checked. Reopen it and try again."));
+                }
+                if repos.days().is_locked(OUTLET, settled.core.business_day)?
+                    || (returns.is_some() && repos.days().is_locked(OUTLET, day)?)
+                {
+                    return Err(mb_db::DbError::invariant("The business day closed while the correction was being checked. Reopen the bill."));
+                }
                 repos.orders().save(
                     OUTLET,
                     app.terminal_id(),
                     &AnyOrder::Voided(voided.clone()),
                 )?;
-                repos.stock().reverse_for_bill(
-                    OUTLET,
-                    &voided.core.id,
-                    at,
-                    day,
-                    Some(&who.staff_id),
-                )?;
+                // A customer returning prepared food does not make the ingredients
+                // usable again. An explicit erroneous-sale void keeps its old reversal.
+                if returns.is_none() {
+                    repos.stock().reverse_for_bill(OUTLET, &voided.core.id, at, day, Some(&who.staff_id))?;
+                }
                 // The same transaction as the thing it describes.
                 repos.audit().append(
                     OUTLET,
@@ -977,14 +1028,27 @@ pub fn void_bill_on(
                             "state": "voided",
                             "total_paise": total.paise(),
                             "reason": reason,
+                            "stock": if returns.is_some() { "not_restocked" } else { "reversed" },
                         }),
                     ),
                 )?;
                 repos.kitchen().close_order(voided.core.id.as_str())?;
+                repos.orders().finish_edit(&id)?;
+                if let Some(amounts) = &returns {
+                    crate::refunds::record(&repos, &id, amounts, &reason, &who, at, &crate::newid::fresh_at("return", at))?;
+                }
                 Ok(())
             })
             .map_err(|e| words::from_db(&e))
     })?;
+
+    app.with_cart_mut(|state| {
+        if state.order_id() == Some(id.as_str()) {
+            *state = crate::billing::CartState::new_order(crate::billing::starting_order_type(&app.shop_config(), state.order_type()));
+        }
+        Ok(())
+    })?;
+    app.push(crate::state::Pushed::Floor);
 
     crate::log_bill!(
         voided.core.id,
@@ -995,25 +1059,19 @@ pub fn void_bill_on(
     list_bills_on(app)
 }
 
-/// Does this void need a second person, and did it get one?
-fn approve_if_needed(
-    app: &App,
-    total: Money,
-    approver_staff_id: Option<String>,
-    approver_pin: Option<String>,
-) -> UiResult<()> {
+pub(crate) fn approval_needed_on(app: &App, total: Money) -> UiResult<bool> {
     let threshold: Option<Money> = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).settings().get(OUTLET, APPROVAL_KEY))
             .map_err(|e| words::from_db(&e))
     })?;
 
-    let Some(threshold) = threshold else {
-        return Ok(()); // absent means never
-    };
-    if total.paise() < threshold.paise() {
-        return Ok(());
-    }
+    Ok(threshold.is_some_and(|limit| total >= limit))
+}
+
+/// Does this correction need a second person, and did it get one?
+pub(crate) fn approve_if_needed(app: &App, total: Money, approver_staff_id: Option<String>, approver_pin: Option<String>) -> UiResult<()> {
+    if !approval_needed_on(app, total)? { return Ok(()); }
 
     let (Some(staff_id), Some(pin)) = (approver_staff_id, approver_pin) else {
         return Err(UiError::new(
@@ -1026,12 +1084,17 @@ fn approve_if_needed(
         ));
     };
 
-    let pin = mb_auth::Pin::parse(&pin)
+    verify_approver_on(app, &staff_id, &pin)
+}
+
+/// Validate the same manager credential for voids and final corrected-bill saves.
+pub(crate) fn verify_approver_on(app: &App, staff_id: &str, pin: &str) -> UiResult<()> {
+    let pin = mb_auth::Pin::parse(pin)
         .map_err(|e| UiError::new("auth.pin_shape", format!("{e}.")).with_detail(e.to_string()))?;
 
     let member = app.with_shop(|shop| {
         shop.db
-            .transaction(|tx| mb_db::Repos::new(tx).people().find_staff(OUTLET, &staff_id))
+            .transaction(|tx| mb_db::Repos::new(tx).people().find_staff(OUTLET, staff_id))
             .map_err(|e| words::from_db(&e))
     })?;
 
@@ -1042,7 +1105,7 @@ fn approve_if_needed(
         ));
     };
     // Approving is voiding. Somebody who may not void may not wave one through.
-    if !member.permissions.has(Permission::BillVoid) {
+    if member.status != mb_db::repo::people::StaffStatus::Active || !member.permissions.has(Permission::BillVoid) {
         return Err(UiError::new(
             "void.approver_denied",
             format!("{} cannot void bills either.", member.name),
@@ -1078,11 +1141,18 @@ pub fn revert_bill_on(
 ) -> UiResult<String> {
     // One counter action at a time — see `App::begin_action`.
     let _one_at_a_time = app.begin_action();
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::BillRevert)?;
     let at = now();
     let day = today(at);
     let id = OrderId::new(order_id);
     let till = app.terminal_id().to_owned();
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        if mb_db::Repos::new(tx).returns().contains(&id)? {
+            return Err(mb_db::DbError::invariant("This bill has already been returned and cannot be edited."));
+        }
+        Ok(())
+    }).map_err(|e| words::from_db(&e)))?;
     let reason = reason.trim().to_owned();
     if reason.is_empty() {
         return Err(UiError::new("revert.reason", "Give a reason."));
@@ -1118,7 +1188,8 @@ pub fn revert_bill_on(
         return Err(refusal);
     }
     let total = settled.bill.grand_total;
-    approve_if_needed(app, total, approver_staff_id, approver_pin)?;
+    // Approval belongs to the final proposed bill, not to opening its editing draft.
+    let _ = (approver_staff_id, approver_pin);
     // Validate the requested bill first. Leaving a persisted order saves its local
     // work; it does not settle or cancel that customer's bill.
     prepare_counter_for_revert(app)?;
@@ -1240,6 +1311,7 @@ fn prepare_counter_for_revert(app: &App) -> UiResult<()> {
 
 /// A manager signs an edit off.
 pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::BillRevertApprove)?;
     let at = now();
     let day = today(at);
@@ -1428,6 +1500,7 @@ pub fn change_line_checked_on(
 ) -> UiResult<crate::billing::CartView> {
     // One counter action at a time — see `App::begin_action`.
     let _one_at_a_time = app.begin_action();
+    crate::correction_draft::require_edit_access(app)?;
     let mut proposed = app.with_cart(|state| Ok(state.clone()))?;
     let selected_order = proposed.order_id().map(str::to_owned);
     let old_line = proposed.cart.lines().get(index).cloned().ok_or_else(||
@@ -1580,6 +1653,7 @@ pub fn change_line_checked_on(
 
 /// Print another copy, and say so on the paper.
 pub fn reprint_bill_on(app: &App, order_id: String, reason: String) -> UiResult<String> {
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::BillReprint)?;
     let at = now();
     let day = today(at);
@@ -1648,6 +1722,7 @@ pub fn reprint_bill_on(app: &App, order_id: String, reason: String) -> UiResult<
 // Refund — 8.7.
 
 /// Record money going back to a customer.
+#[cfg(test)]
 pub fn refund_on(
     app: &App,
     order_id: String,
@@ -1655,72 +1730,16 @@ pub fn refund_on(
     mode: String,
     reason: String,
 ) -> UiResult<Vec<BillRowView>> {
-    let who = guard::require(app, Permission::BillVoid)?;
-    let at = now();
-    let day = today(at);
-
-    if amount_paise <= 0 {
-        return Err(UiError::new(
-            "refund.amount",
-            "Type how much is going back to the customer.",
-        ));
-    }
-    // A refund is money out of today's drawer, and a closed day takes none.
-    if let Some(refusal) =
-        crate::dayclose::day_refusal_on(app, day, "refund.day_closed", "refund this")?
-    {
-        return Err(refusal);
-    }
-
-    app.with_shop(|shop| {
-        shop.db
-            .transaction(|tx| {
-                let repos = mb_db::Repos::new(tx);
-                let refund = Refund {
-                    id: format!("{}_{order_id}", crate::newid::fresh_at("ref", at)),
-                    order_id: OrderId::new(order_id.clone()),
-                    amount: Money::from_paise(amount_paise),
-                    mode: mode.clone(),
-                    reason: reason.clone(),
-                    refunded_at: at,
-                    refunded_by: Some(who.staff_id.clone()),
-                };
-                repos.corrections().record_refund(OUTLET, &refund, day)?;
-                repos.audit().append(
-                    OUTLET,
-                    &AuditEntry::new(
-                        at,
-                        day,
-                        Some(who.staff_id.clone()),
-                        action::BILL_VOIDED,
-                        "refund",
-                    )
-                    .about(order_id.clone())
-                    .with_after(serde_json::json!({
-                        "amount_paise": amount_paise,
-                        "mode": mode,
-                        "reason": reason,
-                    })),
-                )?;
-                Ok(())
-            })
-            .map_err(|e| words::from_db(&e))
-    })?;
-
-    log_info!(
-        "{} refunded on {order_id} by {}",
-        Money::from_paise(amount_paise).to_plain_string(),
-        who.name
-    );
+    crate::refunds::refund_batch_on(app, order_id, vec![(mode, Money::from_paise(amount_paise))], reason)?;
     list_bills_on(app)
 }
-
 // The list, as a file.
 
 /// The State column of a saved list: the word for the state, and anything else that happened
 /// to the bill. The badges on the screen say the same things.
 fn state_cell(row: &BillRowView) -> String {
     let mut out = row.state_word.clone();
+    if row.returned { out.push_str(", returned on a later day"); }
     if row.edited {
         out.push_str(", edited");
     }
@@ -1766,12 +1785,15 @@ fn bills_title(view: &BillsView, filter: &BillFilter) -> String {
 /// The Bills screen as a report — the same shape every other report has, so the one CSV
 /// writer and the one page layout serve this list too, filters and all.
 pub(crate) fn bills_report(app: &App, filter: BillFilter) -> UiResult<crate::reports::ReportView> {
+    guard::require(app, Permission::ReportsView)?;
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let period = match &filter.period {
         Some(arg) => arg.parse()?,
         None => mb_db::repo::reports::Period::one_day(today(now())),
     };
     let view = bills_on(app, filter.clone())?;
-    let totals = &view.totals;
+    let totals = view.totals.as_ref().ok_or_else(||
+        UiError::new("reports.locked", "An active licence and report access are needed to export bills."))?;
 
     // The money last, because that is where a report keeps its figure — on a narrow roll it
     // is the one that stands beside the bill number.
@@ -1929,15 +1951,4 @@ pub fn reprint_bill(
     reason: String,
 ) -> UiResult<String> {
     reprint_bill_on(&app, order_id, reason)
-}
-
-#[tauri::command]
-pub fn refund_bill(
-    app: tauri::State<'_, App>,
-    order_id: String,
-    amount_paise: i64,
-    mode: String,
-    reason: String,
-) -> UiResult<Vec<BillRowView>> {
-    refund_on(&app, order_id, amount_paise, mode, reason)
 }

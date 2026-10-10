@@ -1,42 +1,34 @@
-/**
- * Which orders turned up, or grew, while the screen was already open. Rust says only that the
- * floor changed; the difference between the list a screen was showing and the one it shows
- * now is the one fact nobody but the screen has — so it is worked out here, once, and every
- * card drawn from the list asks it the same question. The billing grid, the processing list
- * and the floor plan all ask it.
- */
-
+/** One shared arrival tracker for Billing, Processing and the Floor plan. */
 import { useEffect, useRef, useState } from 'react';
 
-import { beatsFor, beep } from '../kit';
+import { beep } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 
-const NONE: ReadonlySet<string> = new Set();
+/** Each new generation restarts only the passive highlight, never the card's controls. */
+export type Arrivals = ReadonlyMap<string, number>;
+const NONE: Arrivals = new Map();
 
-/**
- * What a card would have to change for a cashier to want to look at it: it is a new order,
- * or its bill is not the bill it was — a phone added food, or took some off. The timers move
- * on their own and mean nothing here.
- */
 function shape(tile: TableView): string {
-  return tile.total?.text ?? '';
+  // Older saved previews do not have the new field. Live Rust always supplies it.
+  return tile.arrivalKey ?? tile.total?.text ?? '';
 }
 
-/**
- * The ids of the orders that arrived or changed since the last read — for as long as the
- * theme beats, then gone. `null` is a floor not read yet: the first list to come from Rust is
- * what the screen opened on, and nothing on it is new. The two switches are the shop's, under
- * Settings › Billing and on the Floor screen: whether the cards beat, and whether each
- * arrival beeps once alongside.
- */
+/** The duration remains readable when motion is disabled: the cue then stays still. */
+function arrivalDuration(): number {
+  const duration = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--arrival-duration'),
+  );
+  return Number.isFinite(duration) && duration > 0 ? duration : 3000;
+}
+
 export function useArrivals(
   floor: readonly TableView[] | null,
   { beat = true, sound = false }: { beat?: boolean; sound?: boolean } = {},
-): ReadonlySet<string> {
+): Arrivals {
   const shown = useRef<Map<string, string> | null>(null);
-  const [arrived, setArrived] = useState<ReadonlySet<string>>(NONE);
-  /** Every arrival stops on its own clock; a later read of the floor must not reset it. */
-  const clocks = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const [arrived, setArrived] = useState<Arrivals>(NONE);
+  const generation = useRef(0);
+  const clocks = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
     if (floor === null) return;
@@ -46,29 +38,57 @@ export function useArrivals(
     shown.current = now;
     if (before === null) return;
 
-    const fresh = [...now].filter(([id, it]) => before.get(id) !== it).map(([id]) => id);
-    if (fresh.length === 0) return;
-    if (sound) beep();
-    if (!beat) return;
-    setArrived((was) => new Set([...was, ...fresh]));
-    const clock = setTimeout(() => {
-      clocks.current.delete(clock);
-      setArrived((was) => {
-        const left = new Set(was);
-        for (const id of fresh) left.delete(id);
-        return left.size === 0 ? NONE : left;
-      });
-    }, beatsFor());
-    clocks.current.add(clock);
-    // The switches are read when the floor changes, never a reason to look again.
+    // Settlement/removal is not an arrival and must not leave a timer behind.
+    for (const [id, clock] of clocks.current) {
+      if (!now.has(id)) {
+        clearTimeout(clock);
+        clocks.current.delete(id);
+      }
+    }
+    const fresh = [...now].filter(([id, value]) => before.get(id) !== value).map(([id]) => id);
+    if (fresh.length > 0 && sound) beep();
+    const additions = new Map<string, number>();
+    if (beat) {
+      for (const id of fresh) {
+        const previousClock = clocks.current.get(id);
+        if (previousClock !== undefined) clearTimeout(previousClock);
+        const next = ++generation.current;
+        additions.set(id, next);
+        const clock = setTimeout(() => {
+          // An old callback cannot expire a newer arrival for this order.
+          if (clocks.current.get(id) !== clock) return;
+          clocks.current.delete(id);
+          setArrived((was) => {
+            if (was.get(id) !== next) return was;
+            const left = new Map(was);
+            left.delete(id);
+            return left.size === 0 ? NONE : left;
+          });
+        }, arrivalDuration());
+        clocks.current.set(id, clock);
+      }
+    }
+    setArrived((was) => {
+      const next = new Map([...was].filter(([id]) => now.has(id)));
+      for (const [id, value] of additions) next.set(id, value);
+      if (next.size === was.size && [...next].every(([id, value]) => was.get(id) === value)) return was;
+      return next.size === 0 ? NONE : next;
+    });
+    // Settings are applied to new arrivals; changing them does not replay the floor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floor]);
 
-  // Leaving the screen: nothing left to draw attention to.
+  useEffect(() => {
+    if (beat) return;
+    for (const clock of clocks.current.values()) clearTimeout(clock);
+    clocks.current.clear();
+    setArrived(NONE);
+  }, [beat]);
+
   useEffect(() => {
     const running = clocks.current;
     return () => {
-      for (const clock of running) clearTimeout(clock);
+      for (const clock of running.values()) clearTimeout(clock);
       running.clear();
     };
   }, []);
@@ -76,7 +96,6 @@ export function useArrivals(
   return arrived;
 }
 
-/** Whether this card is one of them — the one test every card runs. */
-export function hasArrived(arrived: ReadonlySet<string> | undefined, tile: TableView): boolean {
-  return tile.orderId !== null && arrived?.has(tile.orderId) === true;
+export function arrivalFor(arrived: Arrivals | undefined, tile: TableView): number | undefined {
+  return tile.orderId === null ? undefined : arrived?.get(tile.orderId);
 }

@@ -4,7 +4,8 @@ import { useMemo, type ReactNode } from 'react';
 
 import { Button, cx, EmptyState, Icon } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
-import { hasArrived } from './arrivals';
+import { arrivalFor, type Arrivals } from './arrivals';
+import { ArrivalPulse } from './ArrivalPulse';
 
 /* The tile brings its own styling. */
 import './billing.css';
@@ -38,7 +39,7 @@ export function TableGrid({
   /** A second party beside a busy table — the + on its tile. */
   onSplit?: (table: TableView) => void;
   /** The orders that landed while the screen was open — see `useArrivals`. */
-  arrived?: ReadonlySet<string>;
+  arrived?: Arrivals;
 }) {
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -99,7 +100,7 @@ export function TableGrid({
                 onOpen={() => onOpen(table)}
                 onPrintBill={() => onPrintBill(table)}
                 onSplit={onSplit ? () => onSplit(table) : undefined}
-                arrived={hasArrived(arrived, table)}
+                arrived={arrivalFor(arrived, table)}
               />
             ))}
           </div>
@@ -154,7 +155,7 @@ export function Tile({
   /** The bin, on hover. */
   onDelete?: () => void;
   /** The order landed while the screen was open: the card beats for a moment. */
-  arrived?: boolean;
+  arrived?: number;
 }) {
   const late = table.state === 'late';
   const waiting = table.state === 'waiting';
@@ -182,6 +183,7 @@ export function Tile({
     .join(' ');
   return (
     <div className={classes}>
+      <ArrivalPulse generation={arrived} />
       <Face onOpen={onOpen} label={describe(table, picked)}>
         {/* Table numbers are short; "Parcel" and "Self service" are not. */}
         <span

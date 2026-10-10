@@ -54,6 +54,7 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
 function cart(over: Partial<CartView> = {}): CartView {
   const zero = money(0, '0.00');
   return {
+    isCorrection: false,
     lines: [
       {
         index: 0,

@@ -33,12 +33,8 @@ impl Feature {
     /// Closing the day is not a report, and this constant is where that decision is written.
     pub const REPORTS_DOES_NOT_MEAN_THE_DAY_CLOSE: &'static [&'static str] = &[
         "day_state",
-        "days",
         "close_pending",
         "close_day",
-        "mark_holiday",
-        "unmark_holiday",
-        "reopen_day",
         "count_cash",
         "count_drawer",
     ];

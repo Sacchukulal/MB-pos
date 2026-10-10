@@ -288,21 +288,39 @@
 /*
  * ARRIVED: something new landed on this card while the screen was already open — a phone's
  * order on a table's tile, a row joining the processing list. The ring beats a few times, the
- * bell's own beat, and stops; a counter with motion turned off has the beat at zero and sees
- * nothing. An outline, never a shadow: a tile's shadow carries its state's stripe.
+ * bell's own beat, and stops. Only the passive pulse is replaced on another arrival so the
+ * card keeps keyboard focus. Its inset ring remains inside clipped grid/processing edges.
  */
 .mb-arrived.mb-arrived {
+  position: relative;
+}
+
+.mb-arrival-pulse {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: calc(var(--focus-ring-width) * -1);
   animation: mb-arrive var(--motion-beat) var(--ease) var(--beats);
 }
 
 @keyframes mb-arrive {
   from {
-    outline: var(--pick-ring) solid var(--focus-ring);
-    outline-offset: var(--focus-ring-width);
+    background: var(--pick-tint);
+    outline-color: var(--focus-ring);
   }
   to {
-    outline: var(--pick-ring) solid transparent;
-    outline-offset: calc(var(--focus-ring-width) * 3);
+    background: transparent;
+    outline-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mb-arrival-pulse {
+    animation: none;
+    background: var(--pick-tint);
   }
 }
 

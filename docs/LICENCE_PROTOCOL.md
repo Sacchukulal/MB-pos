@@ -381,29 +381,79 @@ product, always with a `Retry-After`.
 
 ---
 
-## 8. The offline emergency code
+## 8. Offline signed emergency grants (MB-E1, October 2026)
 
-Not a call. Support mints a code by hand and reads it out; the counter verifies
-it with **no network**.
+Support can temporarily restore the **existing signed plan** when a configured
+shop cannot refresh or has moved to a replacement computer. Ordinary billing
+never needs an emergency grant. This is an offline verification protocol, not
+a new cloud endpoint.
 
-* 20 characters, Crockford base32, four groups of five: `K7M2Q-9XR4T-BW8HN-3PZ6D`.
-* HMAC-SHA256 over `machine_id_bytes || payload_be_u32`, truncated to the top 76
-  bits; the payload is the low 24 bits of the code (16 bits issue-day, 8 bits
-  hours).
-* Valid from the **start of its issue day, UTC**, for `hours` — so a 72-hour
-  code gives between two and three days of real life, and support and the shop
-  never have to agree about a timezone over the phone.
-* Single use per machine, rate limited, and audited on the counter with the
-  person who typed it.
-* **The secret is compiled into the counter.** Anybody who extracts it can mint
-  codes for their own machine. That is the stated, accepted cost of a shop being
-  able to bill when its PC dies on a Saturday.
+Support uses `MB-backend/tools/emergency-code.mjs` with the full machine ID,
+licence key, number of hours (1–255), and who requested it and why. The tool uses
+`LICENCE_SIGNING_SEED`, the same private Ed25519 seed held by the licence
+service. The counter carries only the existing trusted public keys. The tool
+checks that the signing key matches the production public key and refuses to
+print a grant unless the licence resolves to a shop and its audit event saves.
+Never copy the production seed into POS source, a build setting, or a test.
 
-P34 owns the tool support uses. It must never mint a code without recording who
-asked and for which machine.
+The exact UTF-8 JSON payload is signed by the existing detached Ed25519 signer:
+
+```json
+{
+  "purpose": "magicbill-emergency-v1",
+  "scope": "existing-plan",
+  "machine": "full-machine-id",
+  "licence_key": "MB-XXXX-XXXX-XXXX",
+  "issued_at": 1791446400000,
+  "not_after": 1791705600000
+}
+```
+
+Both times are Unix milliseconds. The grant starts at issuance, not the start
+of its UTC date, and expires at `not_after` (exclusive). Duration cannot exceed
+255 hours. The purpose and scope are fixed values; unknown fields, purposes,
+or scopes are refused. A grant cannot add features or supply an unsigned plan.
+
+Transport is `MB-E1.<base64url-without-padding of payload>.<standard-base64
+signature>`. Support sends it for copying and pasting. It is case sensitive;
+ASCII whitespace from wrapping is accepted. The old short-code read-aloud
+format is retired. Signature verification uses the exact decoded payload,
+never a reserialized approximation.
+
+`licence.json` stores the signed object in `emergency_grant`. Every entitlement
+evaluation verifies its signature, scope, licence key, machine, start time,
+maximum duration, and expiry. The licence snapshot itself must also have a
+valid signature; the grant only overrides that snapshot's normal expiry or
+binding during its signed window. Clock checks use the existing high-water
+mark, so rolling back the wall clock alone cannot revive an expired grant.
+
+Redemption records a SHA-256 payload fingerprint and refuses a second
+redemption, including after restart. The active signed grant remains usable
+without repeated redemption. Failed persistence does not activate an in-memory
+grant. Deactivation and licence switch clear the grant; a grant for another
+licence is refused even if copied back into the file. Five bad attempts still
+require the existing fifteen-minute wait.
+
+**Compatibility:** old `emergency_until` fields are ignored, never migrated
+into authority. Old HMAC codes are refused; they relied on a shared signing
+secret shipped in the client. A shop relying on one must obtain a new MB-E1
+grant. The signed normal licence, account, database, and ordinary billing stay
+usable under their existing rules. Updated support tooling and updated POS
+must be used together; old installed POS versions cannot read MB-E1. This
+change needs no database migration or cloud function deployment.
+
+**Local-state limit:** replay fingerprints and the clock high-water mark remain
+local state. Restoring an entire older file together with rolling back the PC
+clock is not prevented by this offline protocol. Copying a still-valid grant
+back can restore only its original machine/licence-bound window; it cannot
+forge a signature, extend the signed expiry, or add plan features. Stronger
+anti-rollback guarantees would require online redemption or trusted hardware.
+
+The support-tool fixture in `crates/mb-license/tests/fixtures/emergency-v1.json`
+is signed only by the public development test key. Both the Node support-tool
+tests and Rust verifier test read it. Release builds reject development grants.
 
 ---
-
 ## 9. Two things this protocol deliberately does NOT have
 
 ### 9.1 No owner-phone binding

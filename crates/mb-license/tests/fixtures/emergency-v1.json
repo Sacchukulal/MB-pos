@@ -1,0 +1,4 @@
+{
+  "payload": "{\"purpose\":\"magicbill-emergency-v1\",\"scope\":\"existing-plan\",\"machine\":\"test-machine\",\"licence_key\":\"MB-TEST-0001\",\"issued_at\":1728000000000,\"not_after\":1728259200000}",
+  "signature": "stI05jpC9NhaULGgCb3kJ0MwBmpTXp4M4zUL+bRyhUPlXOV3jaR+c24vMVVpRaqGyr6wHMtu8PM1QPev11kECA=="
+}

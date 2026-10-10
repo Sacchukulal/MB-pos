@@ -8,7 +8,7 @@ export type DayRowView = { day: string, daySays: string,
 /**
  * `trading` or `holiday`.
  */
-kind: string, isLocked: boolean, bills: number, net: MoneyView, 
+kind: string, isLocked: boolean, bills: number | null, net: MoneyView | null, 
 /**
  * "9:02 am" — when the first order of the day was started; empty on a day with none.
  */

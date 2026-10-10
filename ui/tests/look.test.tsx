@@ -226,8 +226,8 @@ describe('the documented-exception hatch', () => {
 // The top bar.
 
 describe('the top navigation', () => {
-  /** The bar is a fixed six and cannot grow. */
-  it('keeps the same six in the bar wherever you are', () => {
+  /** Bills stay inside Reports; the primary navigation keeps its familiar six entries. */
+  it('keeps the same primary actions in the bar wherever you are', () => {
     const onBilling = splitScreens(SHIPPED_SCREENS, 'billing');
     const onStock = splitScreens(SHIPPED_SCREENS, 'stock');
 

@@ -184,6 +184,7 @@ describe('saving after the table choice', () => {
     const zero = { paise: 0n, text: '0.00' };
     const money = { paise: 16000n, text: '160.00' };
     cart = {
+      isCorrection: false,
       lines: [{ index: 0, editToken: 'line', name: 'Masala Dosa', note: null, qty: '2',
         rateLabel: '5%', unitPrice: money, gross: money, discount: zero, lineDiscount: zero,
         amount: money, modifiers: [] }],

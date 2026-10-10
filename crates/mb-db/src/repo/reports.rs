@@ -179,14 +179,14 @@ impl<'a> ReportsRepo<'a> {
                 };
                 format!(
                     "SELECT {key} AS k, {label} AS lbl,
-                            COUNT(DISTINCT o.id),
+                            COUNT(DISTINCT CASE WHEN o.sale_count = 1 THEN o.id END),
                             COALESCE(SUM(bl.gross_including_tax), 0),
                             COALESCE(SUM(bl.line_discount + bl.bill_discount_share), 0),
                             COALESCE(SUM(bl.cgst + bl.sgst + bl.igst), 0),
                             COALESCE(SUM(l.qty), 0)
-                       FROM orders o
-                       JOIN order_lines l ON l.order_id = o.id
-                       JOIN bill_lines bl ON bl.order_line_id = l.id
+                       FROM report_sale_orders o
+                       JOIN report_order_lines l ON l.order_id = o.id
+                       JOIN report_bill_lines bl ON bl.order_line_id = l.id
                   LEFT JOIN categories c  ON c.id = l.category_id
                       WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
                         AND {sold}
@@ -226,7 +226,7 @@ impl<'a> ReportsRepo<'a> {
                     ),
                     // A payment mode is a property of the PAYMENT, not of the bill: one bill
                     // can be cash and UPI at once.
-                    _ => ("p.mode", "p.mode", "JOIN payments p ON p.order_id = o.id"),
+                    _ => ("p.mode", "p.mode", "JOIN report_sale_payments p ON p.order_id = o.id"),
                 };
                 let amount = if by == SalesBy::PaymentMode {
                     "COALESCE(SUM(p.amount), 0)"
@@ -243,13 +243,13 @@ impl<'a> ReportsRepo<'a> {
                 };
                 format!(
                     "SELECT {key} AS k, {label} AS lbl,
-                            COUNT(DISTINCT o.id),
+                            COUNT(DISTINCT CASE WHEN o.sale_count = 1 THEN o.id END),
                             {amount},
                             {discount},
                             {tax},
                             0
-                       FROM orders o
-                       JOIN bills b ON b.order_id = o.id
+                       FROM report_sale_orders o
+                       JOIN report_sale_bills b ON b.order_id = o.id
                        {extra_join}
                       WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
                         AND {sold}
@@ -283,7 +283,7 @@ impl<'a> ReportsRepo<'a> {
                 gross: encode::money_from_sql(gross),
                 discount: encode::money_from_sql(discount),
                 tax: encode::money_from_sql(tax),
-                qty: wants_qty.then(|| Qty::from_thousandths(qty.max(0))),
+                qty: wants_qty.then(|| Qty::from_thousandths(qty)),
             });
         }
         // A shop brought down from the cloud has only its last 30 days as bills; the older days
@@ -300,7 +300,7 @@ impl<'a> ReportsRepo<'a> {
     /// Unique live bills, even when one bill appears in multiple report buckets.
     pub fn sold_count(&self, outlet: &str, period: Period) -> Result<i64, DbError> {
         Ok(self.tx.query_row(
-            "SELECT COUNT(*) FROM orders WHERE outlet_id = ?1
+            "SELECT COALESCE(SUM(sale_count), 0) FROM report_sale_orders WHERE outlet_id = ?1
              AND business_day BETWEEN ?2 AND ?3 AND state = 'settled'",
             rusqlite::params![outlet, encode::business_day_to_sql(period.from),
                 encode::business_day_to_sql(period.to)],
@@ -318,8 +318,8 @@ impl<'a> ReportsRepo<'a> {
                     COALESCE(SUM(bl.sgst), 0),
                     COALESCE(SUM(bl.igst), 0),
                     COALESCE(SUM(bl.vat), 0)
-               FROM orders o
-               JOIN bill_lines bl ON bl.order_id = o.id
+               FROM report_sale_orders o
+               JOIN report_bill_lines bl ON bl.order_id = o.id
               WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
                 AND o.state = 'settled'
            GROUP BY bl.rate_bp, bl.tax_kind
@@ -359,9 +359,9 @@ impl<'a> ReportsRepo<'a> {
                     COALESCE(SUM(bl.cgst), 0),
                     COALESCE(SUM(bl.sgst), 0),
                     COALESCE(SUM(bl.igst), 0)
-               FROM orders o
-               JOIN order_lines l ON l.order_id = o.id
-               JOIN bill_lines bl ON bl.order_line_id = l.id
+               FROM report_sale_orders o
+               JOIN report_order_lines l ON l.order_id = o.id
+               JOIN report_bill_lines bl ON bl.order_line_id = l.id
               WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
                 AND o.state = 'settled'
            GROUP BY COALESCE(l.hsn, '')
@@ -376,7 +376,7 @@ impl<'a> ReportsRepo<'a> {
             |row| {
                 Ok(HsnBucket {
                     hsn: row.get(0)?,
-                    qty: Qty::from_thousandths(row.get::<_, i64>(1)?.max(0)),
+                    qty: Qty::from_thousandths(row.get::<_, i64>(1)?),
                     taxable: encode::money_from_sql(row.get(2)?),
                     cgst: encode::money_from_sql(row.get(3)?),
                     sgst: encode::money_from_sql(row.get(4)?),
@@ -458,6 +458,11 @@ impl<'a> ReportsRepo<'a> {
           LEFT JOIN staff s ON s.id = r.refunded_by
               WHERE r.outlet_id = ?1 AND r.business_day BETWEEN ?2 AND ?3
              UNION ALL
+             SELECT r.business_day, r.returned_at, 'return', r.bill_number,
+                    COALESCE(s.name, ''), r.reason, r.grand_total
+               FROM bill_returns r LEFT JOIN staff s ON s.id = r.returned_by
+              WHERE r.outlet_id = ?1 AND r.business_day BETWEEN ?2 AND ?3
+             UNION ALL
              SELECT p.business_day, p.printed_at, 'reprint',
                     COALESCE(o.bill_number_formatted, p.order_id),
                     COALESCE(s.name, ''), COALESCE(p.reason, ''), 0
@@ -518,9 +523,9 @@ impl<'a> ReportsRepo<'a> {
                     -- which is the lie this column exists to avoid.
                     MAX(i.cost_price),
                     COUNT(i.cost_price)
-               FROM orders o
-               JOIN order_lines l ON l.order_id = o.id
-               JOIN bill_lines bl ON bl.order_line_id = l.id
+               FROM report_sale_orders o
+               JOIN report_order_lines l ON l.order_id = o.id
+               JOIN report_bill_lines bl ON bl.order_line_id = l.id
           LEFT JOIN items i ON i.id = l.item_id
               WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
                 AND o.state = 'settled'
@@ -540,7 +545,7 @@ impl<'a> ReportsRepo<'a> {
                 Ok(ItemMargin {
                     item_id: row.get(0)?,
                     name: row.get(1)?,
-                    qty: Qty::from_thousandths(qty.max(0)),
+                    qty: Qty::from_thousandths(qty),
                     revenue: encode::money_from_sql(row.get(3)?),
                     // The count guards the MAX: an item with no costed row at all must be
                     // `None`, not `Some(0)`.
@@ -564,20 +569,20 @@ impl<'a> ReportsRepo<'a> {
         let before = period.previous();
         let mut stmt = self.tx.prepare(
             "SELECT COALESCE(l.item_id, l.name) AS k, l.name,
-                    COUNT(DISTINCT o.id),
+                    COUNT(DISTINCT CASE WHEN o.sale_count = 1 THEN o.id END),
                     COALESCE(SUM(bl.gross_including_tax), 0),
                     COALESCE(SUM(l.qty), 0)
-               FROM orders o
-               JOIN order_lines l ON l.order_id = o.id
-               JOIN bill_lines bl ON bl.order_line_id = l.id
+               FROM report_sale_orders o
+               JOIN report_order_lines l ON l.order_id = o.id
+               JOIN report_bill_lines bl ON bl.order_line_id = l.id
               WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
                 AND o.state = 'settled'
                 AND COALESCE(l.item_id, l.name) NOT IN (
                         SELECT COALESCE(l2.item_id, l2.name)
-                          FROM orders o2 JOIN order_lines l2 ON l2.order_id = o2.id AND l2.seq >= 0
+                          FROM report_sale_orders o2 JOIN report_order_lines l2 ON l2.order_id = o2.id AND l2.seq >= 0
                          WHERE o2.outlet_id = ?1
                            AND o2.business_day BETWEEN ?4 AND ?5
-                           AND o2.state = 'settled')
+                           AND o2.state = 'settled' AND o2.sale_count = 1)
            GROUP BY k
            ORDER BY SUM(bl.gross_including_tax) DESC",
         )?;
@@ -597,7 +602,7 @@ impl<'a> ReportsRepo<'a> {
                     gross: encode::money_from_sql(row.get(3)?),
                     discount: Money::ZERO,
                     tax: Money::ZERO,
-                    qty: Some(Qty::from_thousandths(row.get::<_, i64>(4)?.max(0))),
+                    qty: Some(Qty::from_thousandths(row.get::<_, i64>(4)?)),
                 })
             },
         )?;
@@ -627,7 +632,7 @@ impl<'a> ReportsRepo<'a> {
             // fourth place for them to disagree.
             "SELECT COALESCE(SUM(b.grand_total), 0),
                     COALESCE(SUM(b.total_cgst + b.total_sgst + b.total_igst), 0)
-               FROM bills b JOIN orders o ON o.id = b.order_id
+               FROM report_sale_bills b JOIN report_sale_orders o ON o.id = b.order_id
               WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
                 AND o.state = 'settled'",
             rusqlite::params![outlet, from, to],

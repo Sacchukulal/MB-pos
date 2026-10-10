@@ -56,9 +56,10 @@ export function Modal({
     if (!open) return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' && event.key !== 'Enter') return;
+      if (panel.current?.closest('[hidden], [inert]')) return;
       // One key, one dialog. A dialog opened over another one is further down the page than
       // the one it sits on, so the last one on the page is the one on top.
-      const dialogs = document.querySelectorAll('.mb-modal');
+      const dialogs = [...document.querySelectorAll('.mb-modal')].filter((dialog) => !dialog.closest('[hidden], [inert]'));
       if (dialogs[dialogs.length - 1] !== panel.current) return;
       if (event.key === 'Escape') {
         // The dialog takes the key: a screen listening on the window must not also act on it.

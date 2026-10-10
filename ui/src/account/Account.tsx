@@ -293,7 +293,7 @@ export function Account() {
               variant="primary"
               disabled={busy || code.trim() === ''}
               onClick={() =>
-                run(() => call('use_emergency_code', { code }), 'Everything is switched on again.')
+                run(() => call('use_emergency_code', { code }), 'The support grant has been applied.')
               }
             >
               Unlock
@@ -302,13 +302,13 @@ export function Account() {
         }
       >
         <p className="mb-muted">
-          Support reads out a code on the phone. It switches everything on for three days.
+          Paste the signed grant from support. It temporarily restores the features included in your licence.
         </p>
         <Input
           label="Code"
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="K7M2Q-9XR4T-BW8HN-3PZ6D"
+          placeholder="MB-E1.…"
           autoComplete="off"
           autoFocus
         />

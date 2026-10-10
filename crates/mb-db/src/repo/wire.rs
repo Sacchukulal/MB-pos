@@ -102,6 +102,7 @@ pub const ROW_TABLE_KEY: &str = "$table";
 /// column that names the parent.
 fn children_of(table: &str) -> &'static [(&'static str, &'static str)] {
     match table {
+        "bill_returns" => &[("bill_return_lines", "return_id")],
         "bill_reverts" => &[
             ("bill_revert_lines", "revert_id"),
             ("bill_revert_payments", "revert_id"),
@@ -1270,6 +1271,8 @@ impl<'a> WireRepo<'a> {
                 AND NOT EXISTS (SELECT 1 FROM orders o
                     WHERE o.outlet_id = c.outlet_id AND o.business_day = c.business_day
                       AND (o.state IN ('settled', 'voided') OR o.bill_number_value IS NOT NULL))
+                AND NOT EXISTS (SELECT 1 FROM bill_returns r
+                    WHERE r.outlet_id = c.outlet_id AND r.business_day = c.business_day)
               ORDER BY business_day",
         )?;
         let rows = stmt.query_map(
@@ -1452,8 +1455,9 @@ fn restore_rank(table: &str) -> u8 {
         "customer_ledger" | "credit_adjustments" | "customer_payments" | "expenses"
         | "cash_movements" => 5,
         "bills" | "orders" => 6,
-        "refunds" | "bill_reverts" | "bill_revert_lines" | "bill_revert_payments" => 7,
-        "day_totals" | "day_item_totals" | "day_category_totals" => 8,
+        "refunds" | "bill_reverts" | "bill_revert_lines" | "bill_revert_payments" | "bill_returns" => 7,
+        "bill_return_lines" => 8,
+        "day_totals" | "day_item_totals" | "day_category_totals" => 9,
         _ => 0,
     }
 }

@@ -8,7 +8,7 @@ export type PendingDayView = { day: string,
 /**
  * "Tuesday 2 September".
  */
-daySays: string, bills: number, net: MoneyView, cash: MoneyView, upiAndCard: MoneyView, expenses: MoneyView, 
+daySays: string, bills: number | null, net: MoneyView | null, cash: MoneyView | null, upiAndCard: MoneyView | null, expenses: MoneyView | null, 
 /**
  * "Table 7 #12", "Parcel #13" — what nobody finished that day.
  */

@@ -18,6 +18,8 @@ mod cloud;
 mod buying_tests;
 mod config;
 mod corrections;
+mod refunds;
+mod correction_draft;
 #[cfg(test)]
 mod correction_tests;
 /// The physical stock count, which freezes the book and posts a delta rather than setting the
@@ -122,6 +124,10 @@ mod redact;
 mod reports;
 #[cfg(test)]
 mod reports_tests;
+#[cfg(test)]
+mod refund_tests;
+#[cfg(test)]
+mod historical_return_tests;
 mod search;
 mod session;
 /// The one table that knows what a setting is, and the load / save / reset / export / import

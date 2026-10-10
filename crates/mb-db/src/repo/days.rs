@@ -83,7 +83,7 @@ impl DayFigures {
     /// on an account was a day somebody was standing in it.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.bills == 0 && self.expenses.is_zero() && self.moved.is_zero()
+        self.bills == 0 && self.net.is_zero() && self.expenses.is_zero() && self.moved.is_zero()
     }
 }
 
@@ -305,7 +305,7 @@ impl<'a> DaysRepo<'a> {
 
         let mut stmt = self.tx.prepare_cached(
             "SELECT p.mode, COALESCE(SUM(p.amount), 0)
-               FROM payments p JOIN orders o ON o.id = p.order_id
+               FROM report_sale_payments p JOIN report_sale_orders o ON o.id = p.order_id
               WHERE o.outlet_id = ?1 AND o.business_day = ?2 AND o.state = 'settled'
               GROUP BY p.mode ORDER BY p.mode",
         )?;
@@ -325,7 +325,7 @@ impl<'a> DaysRepo<'a> {
         }
 
         let charges: i64 = self.tx.query_row(
-            "SELECT COALESCE(SUM(b.total_charges), 0) FROM bills b JOIN orders o ON o.id = b.order_id
+            "SELECT COALESCE(SUM(b.total_charges), 0) FROM report_sale_bills b JOIN report_sale_orders o ON o.id = b.order_id
               WHERE o.outlet_id = ?1 AND o.business_day = ?2 AND o.state = 'settled'",
             rusqlite::params![outlet, day_sql],
             |row| row.get(0),

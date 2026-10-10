@@ -13,6 +13,8 @@ pub enum PaymentError {
     NegativeTip,
     #[error("that is more than was received through this payment mode")]
     RefundTooLarge,
+    #[error("that payment label is ambiguous; choose the original payment method again")]
+    AmbiguousRefundMode,
     /// You cannot hand change back out of a card machine.
     #[error(
         "card, UPI and credit payments come to ₹{non_cash}, which is more than the ₹{due} owed — take the extra in cash or reduce the amount"
@@ -46,6 +48,18 @@ pub enum PaymentMode {
 }
 
 impl PaymentMode {
+    /// Stable financial identity, separate from a display label. A custom method named
+    /// Cash must never authorize physical cash leaving the drawer.
+    #[must_use]
+    pub fn refund_code(&self) -> String {
+        match self {
+            PaymentMode::Cash => "cash".to_owned(),
+            PaymentMode::Card => "card".to_owned(),
+            PaymentMode::Upi => "upi".to_owned(),
+            PaymentMode::Credit(_) => "credit".to_owned(),
+            PaymentMode::Other(label) => format!("other:{}", label.trim().to_ascii_lowercase()),
+        }
+    }
     /// Cash is the only mode that can produce change.
     #[must_use]
     pub const fn is_cash(&self) -> bool {
@@ -130,28 +144,72 @@ pub struct Settlement {
     tip: Money,
 }
 
+/// A persisted receipt: actual retained money, with the included tip identified once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceiptPayment {
+    pub seq: usize,
+    pub payment: Payment,
+    pub tip: Money,
+}
+
 impl Settlement {
+    /// The original settlement keeps cash tendered for the receipt's change line.
+    /// Ledgers use this projection so change cannot become income or be refunded twice.
+    /// `payment.amount` includes `tip`; tip is metadata, never extra money received.
+    pub fn receipts(&self, grand_total: Money) -> Result<Vec<ReceiptPayment>> {
+        self.validate(grand_total)?;
+        let mut change = self.change_due(grand_total)?;
+        let mut tip = self.tip;
+        let mut rows = Vec::new();
+        for (seq, original) in self.payments.iter().enumerate() {
+            let mut payment = original.clone();
+            if payment.mode.is_cash() && change.is_positive() {
+                let given_back = std::cmp::min(payment.amount, change);
+                payment.amount = payment.amount.sub(given_back)?;
+                change = change.sub(given_back)?;
+            }
+            if !payment.amount.is_positive() {
+                continue;
+            }
+            let included_tip = std::cmp::min(payment.amount, tip);
+            tip = tip.sub(included_tip)?;
+            rows.push(ReceiptPayment {
+                seq,
+                payment,
+                tip: included_tip,
+            });
+        }
+        Ok(rows)
+    }
     /// Adjust the current allocation after a separately recorded return. Issued versions
     /// retain the original receipts; this projection says how much still pays this bill.
     pub fn return_to(&mut self, mode: &str, amount: Money) -> Result<()> {
         if !amount.is_positive() {
             return Err(PaymentError::NonPositiveAmount);
         }
+        let code = mode.trim().to_ascii_lowercase();
+        let reserved = matches!(code.as_str(), "cash" | "card" | "upi" | "credit" | "other")
+            || code.starts_with("other:");
+        if mode.trim() != code && reserved && self.payments.iter().any(|p|
+            matches!(&p.mode, PaymentMode::Other(label) if label.trim().eq_ignore_ascii_case(&code))) {
+            return Err(PaymentError::AmbiguousRefundMode);
+        }
+        let accepts = |payment: &Payment| {
+            payment.mode.refund_code() == code
+                || (!reserved
+                    && matches!(&payment.mode, PaymentMode::Other(label) if label.trim().eq_ignore_ascii_case(&code)))
+        };
         let available = Money::try_sum(
             self.payments
                 .iter()
-                .filter(|p| p.mode.report_label().eq_ignore_ascii_case(mode))
+                .filter(|p| accepts(p))
                 .map(|p| p.amount),
         )?;
         if amount > available {
             return Err(PaymentError::RefundTooLarge);
         }
         let mut remaining = amount;
-        for payment in self
-            .payments
-            .iter_mut()
-            .filter(|p| p.mode.report_label().eq_ignore_ascii_case(mode))
-        {
+        for payment in self.payments.iter_mut().filter(|p| accepts(p)) {
             let take = if payment.amount < remaining {
                 payment.amount
             } else {
@@ -284,6 +342,83 @@ mod tests {
 
     fn pay(mode: PaymentMode, rupees: i64) -> Payment {
         Payment::new(mode, rs(rupees)).expect("valid payment")
+    }
+
+    #[test]
+    fn ledger_receipts_remove_cash_change_and_include_tip_only_once() {
+        let mut settlement = Settlement::with_tip(rs(5)).expect("tip");
+        settlement.add(pay(PaymentMode::Cash, 200)).expect("cash");
+        let rows = settlement.receipts(rs(105)).expect("net receipts");
+        assert_eq!(rows[0].payment.amount, rs(110));
+        assert_eq!(rows[0].tip, rs(5));
+        assert_eq!(settlement.total_paid().expect("original"), rs(200));
+        assert_eq!(
+            settlement.change_due(rs(105)).expect("original change"),
+            rs(90)
+        );
+    }
+
+    #[test]
+    fn ledger_keeps_payment_identity_when_cash_is_all_returned_as_change() {
+        let mut settlement = Settlement::new();
+        settlement.add(pay(PaymentMode::Cash, 50)).expect("cash");
+        settlement.add(pay(PaymentMode::Card, 105)).expect("card");
+        let rows = settlement.receipts(rs(105)).expect("net receipts");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].seq, 1);
+        assert_eq!(rows[0].payment.mode, PaymentMode::Card);
+        assert_eq!(rows[0].payment.amount, rs(105));
+    }
+
+    #[test]
+    fn ledger_never_takes_change_out_of_a_custom_tender_named_cash() {
+        let mut settlement = Settlement::new();
+        settlement
+            .add(pay(PaymentMode::Other("Cash".to_owned()), 50))
+            .expect("custom mode");
+        settlement.add(pay(PaymentMode::Cash, 100)).expect("cash");
+        let rows = settlement.receipts(rs(105)).expect("receipts");
+        assert_eq!(rows[0].payment.amount, rs(50));
+        assert_eq!(rows[1].payment.amount, rs(55));
+    }
+
+    #[test]
+    fn canonical_returns_distinguish_custom_cash_and_reject_ambiguous_legacy_labels() {
+        let mut settlement = Settlement::new();
+        settlement
+            .add(pay(PaymentMode::Other("Cash".to_owned()), 50))
+            .expect("custom");
+        settlement.add(pay(PaymentMode::Cash, 100)).expect("cash");
+        let original = settlement.clone();
+        assert_eq!(
+            settlement.return_to("Cash", rs(10)),
+            Err(PaymentError::AmbiguousRefundMode)
+        );
+        assert_eq!(settlement, original);
+        settlement
+            .return_to("other:cash", rs(20))
+            .expect("custom return");
+        assert_eq!(settlement.payments()[0].amount, rs(30));
+        assert_eq!(settlement.payments()[1].amount, rs(100));
+        settlement.return_to("cash", rs(40)).expect("physical cash");
+        assert_eq!(settlement.payments()[0].amount, rs(30));
+        assert_eq!(settlement.payments()[1].amount, rs(60));
+    }
+
+    #[test]
+    fn legacy_unambiguous_custom_labels_still_return_their_own_money() {
+        let mut settlement = Settlement::new();
+        settlement
+            .add(pay(PaymentMode::Other("Meal card".to_owned()), 50))
+            .expect("custom");
+        settlement
+            .return_to("Meal card", rs(10))
+            .expect("legacy saved correction");
+        assert_eq!(settlement.payments()[0].amount, rs(40));
+        assert_eq!(
+            settlement.payments()[0].mode.refund_code(),
+            "other:meal card"
+        );
     }
 
     #[test]

@@ -2453,3 +2453,57 @@ directions**: a missing index fails, and so does a stray one.
 | `idx_counters_prefix` | counters (outlet_id, kind, prefix) **unique**, partial | **D135 in the database.** Two tills issuing under one prefix is the ONE way a per-terminal series can still produce a number twice, so it is a constraint and not a convention. The empty-prefix gap is closed in code, in words, because SQLite cannot express "unique unless there is only one row" |
 | `idx_day_closes_drawer` | day_closes (outlet_id, business_day, terminal_id, shift_no) **unique**, partial | one close per drawer per shift (D140) |
 | `idx_day_closes_shop` | day_closes (outlet_id, business_day) **unique**, partial | exactly one shop roll-up per day. Partial because the shop row's terminal is NULL and SQLite treats NULLs as distinct |
+
+
+## Closed-day returns (migration 22)
+
+Full returns preserve the closed original sale. Signed reporting views post the frozen adjustment on the return day. Refund rows separately record money actually returned; prepared food is not automatically restocked.
+
+### bill_returns
+
+| column | type | null | notes |
+|---|---|---|---|
+| id | TEXT | no | |
+| outlet_id | TEXT | no | |
+| order_id | TEXT | no | |
+| terminal_id | TEXT | no | |
+| business_day | INTEGER | no | |
+| original_business_day | INTEGER | no | |
+| returned_at | INTEGER | no | |
+| returned_by | TEXT | no | |
+| reason | TEXT | no | |
+| stock_disposition | TEXT | no | |
+| bill_number | TEXT | no | |
+| order_type | TEXT | no | |
+| table_id | TEXT | yes | |
+| grand_total | INTEGER | no | |
+| total_charges | INTEGER | no | |
+| total_discount | INTEGER | no | |
+| total_taxable | INTEGER | no | |
+| total_cgst | INTEGER | no | |
+| total_sgst | INTEGER | no | |
+| total_igst | INTEGER | no | |
+| total_vat | INTEGER | no | |
+
+### bill_return_lines
+
+| column | type | null | notes |
+|---|---|---|---|
+| id | TEXT | no | |
+| return_id | TEXT | no | |
+| seq | INTEGER | no | |
+| item_id | TEXT | yes | |
+| name | TEXT | no | |
+| category_id | TEXT | yes | |
+| hsn | TEXT | yes | |
+| qty | INTEGER | no | |
+| gross_including_tax | INTEGER | no | |
+| line_discount | INTEGER | no | |
+| bill_discount_share | INTEGER | no | |
+| taxable | INTEGER | no | |
+| cgst | INTEGER | no | |
+| sgst | INTEGER | no | |
+| igst | INTEGER | no | |
+| vat | INTEGER | no | |
+| rate_bp | INTEGER | no | |
+| tax_kind | TEXT | no | |

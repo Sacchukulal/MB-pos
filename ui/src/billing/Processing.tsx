@@ -5,7 +5,8 @@ import { useEffect, useRef } from 'react';
 import { Badge, cx, EmptyState, Icon } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 import { formatMinutes } from './TableGrid';
-import { hasArrived } from './arrivals';
+import { arrivalFor, type Arrivals } from './arrivals';
+import { ArrivalPulse } from './ArrivalPulse';
 
 /** Rust decides membership from the working order; this view only sorts it, newest first. */
 export function processingOrders(
@@ -60,7 +61,7 @@ export function Processing({
   /** Put it in the cart — the same press as the tile. */
   onOpen: (order: TableView) => void;
   /** The orders that landed while the screen was open — see `useArrivals`. */
-  arrived?: ReadonlySet<string>;
+  arrived?: Arrivals;
 }) {
   const list = useRef<HTMLUListElement>(null);
   // The arrows never leave the highlighted row out of sight.
@@ -90,12 +91,13 @@ export function Processing({
               'mb-processing__order',
               order.selected && 'mb-chosen',
               index === highlighted && 'mb-processing__order--highlighted',
-              hasArrived(arrived, order) && 'mb-arrived',
+              arrivalFor(arrived, order) !== undefined && 'mb-arrived',
             )}
             aria-pressed={order.selected}
             aria-current={index === highlighted ? 'true' : undefined}
             onClick={() => onOpen(order)}
           >
+            <ArrivalPulse generation={arrivalFor(arrived, order)} />
             {/* A real table says so; parcel and self service already name themselves. */}
             <span className="mb-processing__where">
               {order.section === null ? order.label : `Table ${order.label}`}

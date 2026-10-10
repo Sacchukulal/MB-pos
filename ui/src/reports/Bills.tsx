@@ -1,6 +1,6 @@
 /** Every bill, one at a time — and the ways one is taken back. */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import {
   Badge,
@@ -12,6 +12,7 @@ import {
   Facts,
   Modal,
   Money,
+  MoneyInput,
   Notice,
   Numeric,
   PageHeader,
@@ -24,6 +25,7 @@ import {
   Table,
   Toolbar,
   useToast,
+  freshId,
   type BadgeTone,
   type Column,
 } from '../kit';
@@ -32,14 +34,16 @@ import type { BeforeLineView } from '../ipc/generated/BeforeLineView';
 import type { BillDetailView } from '../ipc/generated/BillDetailView';
 import type { BillRowView } from '../ipc/generated/BillRowView';
 import type { BillsView } from '../ipc/generated/BillsView';
+import type { BillCorrectionOffer } from '../ipc/generated/BillCorrectionOffer';
 import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { HistoryView } from '../ipc/generated/HistoryView';
 import { ReasonDialog, type ReasonKind } from '../corrections/Reason';
-import { useMay } from '../shell/permissions';
+import { useLicenceRevision } from '../shell/licence';
 
 type Pending =
   | { kind: 'revert'; bill: BillRowView }
   | { kind: 'void'; bill: BillRowView }
+  | { kind: 'return'; bill: BillRowView }
   | { kind: 'reprint'; bill: BillRowView }
   | { kind: 'refund'; bill: BillRowView };
 
@@ -69,7 +73,7 @@ const MODES = [
 /** How long typing settles before Rust is asked again. */
 const SEARCH_SETTLE_MS = 150;
 
-export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
+export function Bills({ onGoTo, initialOrderId }: { onGoTo?: (screen: string) => void; initialOrderId?: string }) {
   const [view, setView] = useState<BillsView | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -82,7 +86,12 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   const [detail, setDetail] = useState<BillDetailView | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const toast = useToast();
-  const mayExport = useMay()('reports.export');
+  const licenceRevision = useLicenceRevision();
+  const listRequest = useRef(0);
+  const detailRequest = useRef(0);
+  const initialHandled = useRef<string | undefined>(undefined);
+  const initialReturn = useRef<string | null>(null);
+  const [returnNotice, setReturnNotice] = useState<string | null>(null);
 
   const complain = useCallback(
     (cause: unknown) => {
@@ -105,8 +114,10 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   );
 
   const load = useCallback(async () => {
+    const request = ++listRequest.current;
     try {
       const fresh = await call('bills', { filter });
+      if (request !== listRequest.current) return;
       setView(fresh);
       // The first answer carries the presets; the screen opens on today.
       const today = fresh.periods[0];
@@ -127,16 +138,22 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   };
 
   useEffect(() => {
+    setView((current) => current ? { ...current, totals: null, canExport: false } : current);
     const timer = setTimeout(() => void load(), SEARCH_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [load]);
+    return () => { clearTimeout(timer); ++listRequest.current; };
+  }, [load, licenceRevision]);
 
   const open = useCallback(
     async (orderId: string) => {
+      const request = ++detailRequest.current;
       setOpened(orderId);
+      setDetail(null);
+      setReturnNotice(null);
       try {
-        setDetail(await call('bill_detail', { orderId }));
+        const fresh = await call('bill_detail', { orderId });
+        if (request === detailRequest.current) setDetail(fresh);
       } catch (cause) {
+        if (request !== detailRequest.current) return;
         setOpened(null);
         complain(cause);
       }
@@ -145,9 +162,33 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   );
 
   const close = () => {
+    ++detailRequest.current;
+    initialReturn.current = null;
     setOpened(null);
     setDetail(null);
   };
+
+  useEffect(() => {
+    if (!initialOrderId) {
+      initialHandled.current = undefined;
+      initialReturn.current = null;
+      return;
+    }
+    if (!view || initialHandled.current === initialOrderId) return;
+    initialHandled.current = initialOrderId;
+    initialReturn.current = initialOrderId;
+    void open(initialOrderId);
+  }, [initialOrderId, view, open]);
+
+  useEffect(() => {
+    if (!view || !detail || initialReturn.current !== opened || opened !== initialOrderId) return;
+    initialReturn.current = null;
+    if (view.canVoid && detail.row.state === 'settled' && !detail.row.returned) {
+      setPending({ kind: 'return', bill: detail.row });
+    } else if (!view.canVoid) {
+      setReturnNotice('A manager with bill-return permission must sign in to return the whole bill. Your changes are saved.');
+    }
+  }, [detail, opened, initialOrderId, view]);
 
   /** After anything changes a bill: the list again, and the open one again. */
   const refresh = async () => {
@@ -174,17 +215,25 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
   /** The buttons for one bill: on its row, and again in its dialog. */
   const actionsFor = (bill: BillRowView, size: 'sm' | 'md') => {
     if (!view || bill.state === 'cancelled') return null;
-    const paid = bill.state === 'settled';
+    const paid = bill.state === 'settled' && !bill.returned;
     return (
       <>
-        {paid && view.canRevert ? (
+        {paid && view.canRevert && !bill.dayClosed ? (
           <Button
             size={size}
             variant={size === 'md' ? 'primary' : 'secondary'}
             onClick={() => setPending({ kind: 'revert', bill })}
           >
-            Edit bill
+            {bill.correctionOpen ? 'Resume changes' : 'Edit / return items'}
           </Button>
+        ) : null}
+        {paid && view.canVoid ? (
+          <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'return', bill })}>
+            Return whole bill
+          </Button>
+        ) : null}
+        {!paid && view.canVoid ? (
+          <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'refund', bill })}>Return money</Button>
         ) : null}
         {view.canReprint ? (
           <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'reprint', bill })}>
@@ -195,14 +244,9 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
           <Button size="sm" variant="quiet" onClick={() => invoice(bill)}>
             Invoice PDF
           </Button>
-          {paid && view.canVoid ? (
+          {paid && view.canVoid && !bill.dayClosed ? (
             <Button size="sm" variant="danger" onClick={() => setPending({ kind: 'void', bill })}>
-              Void
-            </Button>
-          ) : null}
-          {!paid && view.canVoid ? (
-            <Button size="sm" onClick={() => setPending({ kind: 'refund', bill })}>
-              Give money back
+              Void without returning money
             </Button>
           ) : null}
         </RowMenu>
@@ -235,6 +279,7 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         <span className="mb-stack mb-stack--gap-inline">
           <span className="mb-row mb-row--gap-inline">
             <Badge tone={TONES[b.state] ?? 'neutral'}>{b.stateWord}</Badge>
+            {b.returned ? <Badge tone="warn">Returned</Badge> : null}
             {b.edited ? <Badge tone="accent">Edited</Badge> : null}
             {b.approval === 'waiting' ? <Badge tone="warn">Needs approval</Badge> : null}
             {b.approval === 'approved' ? <Badge tone="ok">Approved</Badge> : null}
@@ -269,7 +314,7 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
   const totals = view.totals;
   const subtitle =
-    view.rows.length > 0
+    totals && view.rows.length > 0
       ? [
           `Taken ${totals.gross.text}`,
           totals.voids.paise > 0 ? `Voided ${totals.voids.text}` : '',
@@ -287,10 +332,10 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     <div className="mb-bills">
       <PageHeader
         title="Bills"
-        count={view.rows.length}
+        count={totals ? view.rows.length : undefined}
         subtitle={subtitle}
         actions={
-          mayExport ? (
+          view.canExport ? (
             <>
               <Button size="sm" variant="quiet" onClick={() => save('bills_csv')}>
                 Save as CSV
@@ -384,6 +429,7 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
       {opened ? (
         <BillDialog
           detail={detail}
+          notice={returnNotice}
           actions={detail ? actionsFor(detail.row, 'md') : null}
           onApprove={approve}
           onClose={close}
@@ -416,11 +462,13 @@ export function Bills({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 /** One bill, opened: what was on it, how it was paid, and everything done to it since. */
 function BillDialog({
   detail,
+  notice,
   actions,
   onApprove,
   onClose,
 }: {
   detail: BillDetailView | null;
+  notice: string | null;
   actions: ReactNode;
   onApprove: (revertId: string) => void | Promise<void>;
   onClose: () => void;
@@ -492,6 +540,7 @@ function BillDialog({
         </>
       }
     >
+      {notice ? <Notice tone="warn">{notice}</Notice> : null}
       {!detail || !row ? (
         <Spinner label="Opening the bill" />
       ) : (
@@ -504,6 +553,7 @@ function BillDialog({
             <Fact label="State">
               <span className="mb-row mb-row--gap-inline">
                 <Badge tone={TONES[row.state] ?? 'neutral'}>{row.stateWord}</Badge>
+                {row.returned ? <Badge tone="warn">Returned on a later day</Badge> : null}
                 {row.edited ? <Badge tone="accent">Edited</Badge> : null}
                 {row.reprints > 0 ? <Badge tone="neutral">{row.reprints + 1} copies</Badge> : null}
               </span>
@@ -623,18 +673,36 @@ function Correction({
   const { bill } = pending;
   // Rust decides whether a manager is needed; the screen finds out by asking.
   const [needsApproval, setNeedsApproval] = useState(false);
+  const [offer, setOffer] = useState<BillCorrectionOffer | null>(null);
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [requestId] = useState(() => freshId('refund'));
+  const [problem, setProblem] = useState<string | null>(null);
+  const returnsMoney = pending.kind === 'return' || pending.kind === 'refund';
+  useEffect(() => {
+    if (pending.kind === 'reprint') return;
+    let active = true;
+    call('bill_correction_offer', { orderId: bill.orderId }).then((fresh) => {
+      if (!active) return;
+      setOffer(fresh);
+      setNeedsApproval((pending.kind === 'void' || pending.kind === 'return') && fresh.needsApproval);
+      setAmounts(Object.fromEntries(fresh.tenders.map((tender) => [tender.mode, tender.input])));
+    }).catch((cause) => { if (active) setProblem(isUiError(cause) ? cause.message : 'Could not load this bill. Reopen it and try again.'); });
+    return () => { active = false; };
+  }, [bill.orderId, pending.kind]);
 
   // Editing a settled bill uses the shop's existing correction reasons.
   const kind: ReasonKind = pending.kind === 'reprint' ? 'reprint' : 'void';
   const what = {
     revert: `Edit bill ${bill.number} — ${bill.total.text}`,
     void: `Void bill ${bill.number} — ${bill.total.text}`,
+    return: `Return bill ${bill.number}`,
     reprint: `Reprint bill ${bill.number}`,
-    refund: `Give back ${bill.total.text} on bill ${bill.number}`,
+    refund: `Return money on bill ${bill.number}`,
   }[pending.kind];
   const confirmLabel = {
-    revert: 'Take it back to the counter',
+    revert: 'Edit bill',
     void: 'Void the bill',
+    return: 'Confirm return',
     reprint: 'Print another copy',
     refund: 'Record the money going back',
   }[pending.kind];
@@ -649,6 +717,15 @@ function Correction({
           approverPin: approver?.pin ?? null,
         });
         await onDone(said);
+      } else if (pending.kind === 'return') {
+        const args = {
+          orderId: bill.orderId, reason,
+          amounts: (offer?.tenders ?? []).map((tender): [string, string] => [tender.mode, amounts[tender.mode] ?? '']),
+          approverStaffId: approver?.id ?? null, approverPin: approver?.pin ?? null,
+        };
+        if (offer?.closedDay) await call('return_closed_bill', { ...args, requestId });
+        else await call('void_and_return_bill', args);
+        await onDone(`Bill ${bill.number} returned.`);
       } else if (pending.kind === 'void') {
         await call('void_bill', {
           orderId: bill.orderId,
@@ -661,14 +738,13 @@ function Correction({
         const said = await call('reprint_bill', { orderId: bill.orderId, reason });
         await onDone(said);
       } else {
-        await call('refund_bill', {
+        await call('return_bill_money', {
           orderId: bill.orderId,
-          // The paise integer Rust sent, handed straight back.
-          amountPaise: Number(bill.total.paise),
-          mode: 'cash',
+          amounts: (offer?.tenders ?? []).map((tender) => [tender.mode, amounts[tender.mode] ?? '']),
           reason,
+          requestId,
         });
-        await onDone(`${bill.total.text} recorded as given back.`);
+        await onDone('The money returned is recorded.');
       }
     } catch (cause) {
       if (isUiError(cause) && cause.code === 'void.needs_approval') {
@@ -687,13 +763,27 @@ function Correction({
       kind={kind}
       what={what}
       description={pending.kind === 'revert'
-        ? 'It goes back to the counter under the same number, to be changed and billed again.'
-        : undefined}
+        ? 'Change the items on the billing screen, then Save changes. The bill keeps its number.'
+        : pending.kind === 'void' ? 'This cancels the sale without recording any money returned. Use Return whole bill if you are paying the customer back.'
+        : returnsMoney ? 'Record the money actually returned through each original payment method. Card and UPI returns must also be completed through your payment provider. Prepared food will not be added back to stock.' : undefined}
       confirmLabel={confirmLabel}
       needsApproval={needsApproval}
       approvers={approvers}
       onCancel={onClose}
-      onConfirm={(reason, approver) => void run(reason, approver)}
-    />
+      disabled={pending.kind !== 'reprint' && (!offer || (pending.kind === 'refund' && offer.tenders.length === 0))}
+      onConfirm={run}
+    >
+      {problem ? <Notice tone="danger">{problem}</Notice> : null}
+      {pending.kind !== 'reprint' && !offer && !problem ? <Spinner label="Checking this bill" /> : null}
+      {returnsMoney && offer ? <>
+        {pending.kind === 'return' && offer.closedDay ? <Notice tone="info">The whole bill will be returned today. The original closed bill stays unchanged. Any customer-account amount will be credited. Prepared food will not be added back to stock.</Notice> : null}
+        <p>Still available to return: <Money value={offer.remaining} /></p>
+        {offer.tenders.length === 0 ? <Notice tone="info">There is no received payment left to return.</Notice> : null}
+        {offer.tenders.map((tender) => <MoneyInput key={tender.mode}
+          label={`Return by ${tender.mode.startsWith('other:') ? tender.mode.slice(6) : tender.mode}`} value={amounts[tender.mode] ?? ''}
+          hint={`Available: ${tender.remaining.text}`}
+          onChange={(value) => setAmounts((prior) => ({ ...prior, [tender.mode]: value }))} />)}
+      </> : null}
+    </ReasonDialog>
   );
 }

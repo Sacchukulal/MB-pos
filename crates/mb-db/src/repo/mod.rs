@@ -36,6 +36,7 @@ pub mod people;
 pub mod print_jobs;
 /// Every report, and every one of them groups by the STORED business day.
 pub mod reports;
+pub mod returns;
 pub mod settings;
 /// Materials, recipes and the append-only stock ledger — and the one function in this crate
 /// that is deliberately incapable of refusing a bill.
@@ -97,6 +98,11 @@ impl<'a> Repos<'a> {
     #[must_use]
     pub fn orders(&self) -> OrderRepo<'a> {
         OrderRepo::new(self.tx)
+    }
+
+    #[must_use]
+    pub fn returns(&self) -> returns::ReturnsRepo<'a> {
+        returns::ReturnsRepo::new(self.tx)
     }
 
     #[must_use]

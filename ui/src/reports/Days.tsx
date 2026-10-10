@@ -4,7 +4,8 @@
  * whole thing off first among them. One screen, under Reports.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLicenceRevision } from '../shell/licence';
 
 import {
   Badge,
@@ -49,6 +50,8 @@ const STATE_WORDS: Record<string, string> = {
 };
 
 export function Days() {
+  const licenceRevision = useLicenceRevision();
+  const request = useRef(0);
   const [view, setView] = useState<DaysView | null>(null);
   const [drawer, setDrawer] = useState<DrawerView | null>(null);
   const [counts, setCounts] = useState<Record<number, number>>({});
@@ -91,8 +94,10 @@ export function Days() {
 
   /** The whole screen. With the switch off there is no drawer and nothing waiting. */
   const load = useCallback(() => {
+    const generation = ++request.current;
     call('days')
       .then((fresh) => {
+        if (generation !== request.current) return;
         daysArrived(fresh);
         if (!fresh.closesDays) {
           setDrawer(null);
@@ -102,12 +107,14 @@ export function Days() {
         // The drawer is optional: a shop that never counts still closes its days.
         call('count_cash', { counts: null })
           .then((drawerNow) => {
+            if (generation !== request.current) return;
             if (drawerNow) drawerArrived(drawerNow);
           })
           .catch(() => setDrawer(null));
         // Silent on failure: a person who may not read payments still closes the day.
         call('payments')
           .then((payments) => {
+            if (generation !== request.current) return;
             if (payments && Array.isArray(payments.unconfirmed)) {
               setUnconfirmed(payments.unconfirmed);
               setWaiting(payments.says);
@@ -118,7 +125,13 @@ export function Days() {
       .catch(complain);
   }, [complain, daysArrived, drawerArrived]);
 
-  useEffect(load, [load]);
+  useEffect(() => {
+    // Keep unfinished drawer input; remove paid figures before rechecking access.
+    setView((old) => old ? { ...old, days: old.days.map((day) => ({ ...day, bills: null, net: null })) } : old);
+    setDrawer((old) => old ? { ...old, takings: [] } : old);
+    load();
+    return () => { request.current += 1; };
+  }, [load, licenceRevision]);
 
   /** The rules go through the one door every setting goes through, then the screen is read again. */
   const saveRules = () => {
@@ -194,7 +207,7 @@ export function Days() {
     },
     { key: 'opened', header: 'Opened', nowrap: true, render: (row) => <Numeric>{row.openedSays}</Numeric> },
     { key: 'bills', header: 'Bills', numeric: true, render: (row) => <Numeric>{row.bills}</Numeric> },
-    { key: 'net', header: 'Net', numeric: true, render: (row) => <Money value={row.net} /> },
+    { key: 'net', header: 'Net', numeric: true, render: (row) => (row.net ? <Money value={row.net} /> : null) },
     { key: 'says', header: '', render: (row) => <span className="mb-muted">{row.closedSays}</span> },
     {
       key: 'act',
@@ -420,7 +433,7 @@ export function Days() {
 
         {view.closesDays ? (
           <Panel title="Days" flush>
-            <Table columns={columns} rows={view.days} rowKey={(row) => row.day} />
+            <Table columns={columns.filter((column) => view.days.some((day) => day.net !== null) || !['bills', 'net'].includes(column.key))} rows={view.days} rowKey={(row) => row.day} />
           </Panel>
         ) : null}
 

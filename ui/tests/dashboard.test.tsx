@@ -26,6 +26,29 @@ const view: DashboardView = {
 beforeEach(() => { localStorage.clear(); call.mockReset(); call.mockImplementation((command: string) => Promise.resolve(command === 'report_list' ? { periods: presets } : view)); });
 afterEach(cleanup);
 
+it('clears paid dashboard data after expiry and refreshes access after renewal', async () => {
+  render(<DashboardPage />);
+  await screen.findByText('2,400.00');
+  call.mockRejectedValue({ code: 'licence.not_operating', message: 'Reports need an active licence.' });
+  fireEvent(window, new Event('focus'));
+  await screen.findByText('Reports need an active licence.');
+  expect(screen.queryByText('2,400.00')).toBeNull();
+  call.mockImplementation((command: string) => Promise.resolve(command === 'report_list' ? { periods: presets } : view));
+  fireEvent(window, new Event('focus'));
+  await screen.findByText('2,400.00');
+});
+
+it('does not restore a stale dashboard response after access was refused', async () => {
+  let finish!: (fresh: DashboardView) => void;
+  call.mockImplementationOnce(() => new Promise<DashboardView>((resolve) => { finish = resolve; }));
+  render(<Dashboard presets={presets} />);
+  call.mockRejectedValue({ code: 'licence.not_operating', message: 'Reports need an active licence.' });
+  fireEvent(window, new Event('focus'));
+  await screen.findByText('Reports need an active licence.');
+  await act(async () => finish(view));
+  expect(screen.queryByText('2,400.00')).toBeNull();
+});
+
 it('renders real figures, switches chart styles and exposes point details to the keyboard', async () => {
   render(<Dashboard presets={presets} />);
   expect(await screen.findByText('2,400.00')).toBeTruthy();

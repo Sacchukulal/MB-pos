@@ -64,6 +64,26 @@ fn today() -> BusinessDay {
     crate::flows::today(crate::flows::now())
 }
 
+#[test]
+fn unlicensed_day_operations_do_not_expose_historical_sales() {
+    let scratch = Scratch::new("day_operational_access");
+    let app = a_shop(&scratch, "day_operational_access");
+    a_cash_sale(&app);
+    let yesterday = today().previous();
+    move_today_to(&app, yesterday);
+    app.use_licensing(crate::licensing::for_tests_blank());
+    let pending = day_state_on(&app, None).expect("pending operations");
+    assert_eq!(pending.pending.len(), 1);
+    let row = &pending.pending[0];
+    assert!(row.net.is_none() && row.bills.is_none() && row.cash.is_none());
+    assert!(row.upi_and_card.is_none() && row.expenses.is_none());
+    assert!(pending.may_act);
+    assert_eq!(days_on(&app).expect_err("Reports history stays locked").code, "licence.not_operating");
+    let closed = close_day_on(&app, yesterday.to_string(), None, String::new(), false).expect("close without paid summaries");
+    assert!(closed.days.is_empty() && closed.upcoming.is_empty(), "operational response cannot expose Reports history");
+    assert!(day_state_on(&app, None).expect("closed").pending.is_empty());
+}
+
 /// One cash sale through the real billing path, so the figures are figures the product
 /// produced rather than ones the test typed.
 fn a_cash_sale(app: &App) -> mb_core::Money {
@@ -170,10 +190,10 @@ fn a_day_left_open_is_pending_until_it_is_closed() {
     assert_eq!(state.pending.len(), 1, "{:?}", state.pending);
     let row = &state.pending[0];
     assert_eq!(row.day, yesterday.to_string());
-    assert_eq!(row.bills, 1);
-    assert!(row.net.paise > 0);
-    assert_eq!(row.cash.paise, row.net.paise, "a cash sale is cash");
-    assert_eq!(row.upi_and_card.paise, 0);
+    assert_eq!(row.bills, Some(1));
+    assert!(row.net.as_ref().expect("paid figures").paise > 0);
+    assert_eq!(row.cash, row.net, "a cash sale is cash");
+    assert_eq!(row.upi_and_card.as_ref().expect("paid figures").paise, 0);
     assert!(!row.looks_like_holiday);
     assert_eq!(row.suggested, "close");
     let weekday = crate::words::weekday(yesterday);
@@ -191,7 +211,7 @@ fn a_day_left_open_is_pending_until_it_is_closed() {
     assert!(closed.is_locked);
     assert_eq!(closed.state, "closed");
     assert_eq!(closed.kind, "trading");
-    assert_eq!(closed.bills, 1, "the figure was frozen with the day");
+    assert_eq!(closed.bills, Some(1), "the figure was frozen with the day");
     assert!(
         closed.closed_says.starts_with("Closed "),
         "{}",
@@ -308,7 +328,7 @@ fn a_day_with_bills_cannot_be_a_holiday() {
     let state = day_state_on(&app, None).expect("the gate");
     assert_eq!(state.pending.len(), 1);
     assert!(!state.pending[0].looks_like_holiday);
-    assert_eq!(state.pending[0].expenses.paise, 50_000);
+    assert_eq!(state.pending[0].expenses.as_ref().expect("paid figures").paise, 50_000);
     let refused =
         set_holiday_on(&app, vec![yesterday.to_string()], true).expect_err("with an expense");
     assert_eq!(refused.code, "day.not_empty");
@@ -1510,9 +1530,9 @@ fn the_dashboard_draws_the_period_it_is_asked_for() {
     let today_view = dashboard_on(&app, None).expect("today");
     assert_eq!(today_view.title, "Today, so far");
     assert_eq!(today_view.from, today().to_string());
-    assert_eq!(today_view.stats[0].label, "Takings");
+    assert_eq!(today_view.stats[0].label, "Net sales");
     assert_eq!(today_view.stats[0].value, one.to_plain_string());
-    assert_eq!(today_view.stats[0].note, "1 bill");
+    assert_eq!(today_view.stats[0].note, "All payment methods · 1 bill");
     let ids: Vec<&str> = today_view.charts.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(
         ids,
@@ -1552,8 +1572,8 @@ fn the_dashboard_draws_the_period_it_is_asked_for() {
     )
     .expect("three days");
     assert!(three.title.ends_with("· 3 days"), "{}", three.title);
-    assert_eq!(three.stats[0].note, "3 bills");
-    assert_eq!(three.stats[2].label, "Cash taken");
+    assert_eq!(three.stats[0].note, "All payment methods · 3 bills");
+    assert_eq!(three.stats[2].label, "Cash received");
     let trend = &three.charts[0];
     assert_eq!(trend.title, "Sales by day");
     assert_eq!(trend.points.len(), 3);

@@ -343,6 +343,7 @@ fn kitchen_ticket_allowed(app: &App) -> UiResult<()> {
 /// makes this ONE command "Print KOT" for a kitchen and "Save bill" for a counter without one.
 pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
     let _one_at_a_time = app.begin_action();
+    crate::correction_draft::require_edit_access(app)?;
     crate::guard::require(app, mb_auth::Permission::BillCreate)?;
     let paper = kitchen_ticket_allowed(app).is_ok();
     let at = now();
@@ -513,12 +514,30 @@ pub fn complete_bill_with_returns_on(
     refund_mode: Option<String>,
     refund_amounts: Option<Vec<(String, String)>>,
 ) -> UiResult<String> {
+    complete_bill_authorized_on(app, mode, refund_mode, refund_amounts, None, None, None)
+}
+
+pub fn complete_bill_authorized_on(
+    app: &App,
+    mode: Option<String>,
+    refund_mode: Option<String>,
+    refund_amounts: Option<Vec<(String, String)>>,
+    approver_staff_id: Option<String>,
+    approver_pin: Option<String>,
+    proposal_token: Option<String>,
+) -> UiResult<String> {
     let _one_at_a_time = app.begin_action();
+    crate::correction_draft::require_edit_access(app)?;
     let who = crate::guard::require(app, mb_auth::Permission::BillCreate)?;
     park_current(app)?;
+    if let Some(expected) = proposal_token
+        && crate::correction_draft::proposal_token(app)? != expected {
+            return Err(UiError::new("revert.review_changed", "This correction changed after review. Close this review and check the updated bill before saving."));
+    }
     let at = now();
     let settled_by = who.staff_id.clone();
     let config = app.shop_config();
+    let authorization = crate::correction_draft::authorize_on(app, approver_staff_id, approver_pin)?;
 
     let return_due = app.with_cart(|state| {
         let corrected = state.account.revision > 0 || !state.account.sources.is_empty();
@@ -628,6 +647,7 @@ pub fn complete_bill_with_returns_on(
             return Err(refusal);
         }
 
+        let expected_working = existing.clone();
         let open = match existing {
             // Parked already: its token, and any bill number a printed bill gave it, stay; the
             // cart as it is now goes in. The time and the day came from the order itself,
@@ -647,7 +667,7 @@ pub fn complete_bill_with_returns_on(
         };
         // The bill number is claimed in there, with the money, if no printed bill gave the
         // order one already.
-        let settled = mb_db::settle(
+        let settled = mb_db::settle::settle_checked(
             &shop.db,
             till,
             open,
@@ -655,6 +675,15 @@ pub fn complete_bill_with_returns_on(
             settlement,
             at,
             settled_by.clone(),
+            |repos| {
+                if let Some(expected) = &expected_working {
+                    repos.orders().assert_working(expected)?;
+                }
+                match &authorization {
+                    Some(approval) => approval.record(repos, at),
+                    None => Ok(()),
+                }
+            },
         )
         .map_err(|e| words::from_db(&e))?;
         Ok((settled.bill_number.formatted.clone(), settled))
@@ -813,6 +842,9 @@ pub fn print_open_bill_on(app: &App, order_id: String) -> UiResult<String> {
             ));
         }
     };
+    if open.core.billing.revision > 0 {
+        crate::licensing::gate(app, mb_license::Feature::Reports)?;
+    }
     if open.core.cart.is_empty() {
         return Err(
             UiError::new("bill.empty", "There is nothing on this table's bill yet.").quietly(),
@@ -868,9 +900,6 @@ pub fn preview_order_on(
     app: &App,
     order_id: Option<String>,
 ) -> UiResult<crate::preview::PreviewDoc> {
-    let printer = default_printer(app)?;
-    let (metrics, engine) = app.metrics_for(JobKind::Bill, &printer);
-
     let order = match order_id {
         Some(id) => find_order(app, &OrderId::new(&id))?.ok_or_else(|| {
             UiError::new("preview.no_order", "That order is not on this counter.")
@@ -887,6 +916,11 @@ pub fn preview_order_on(
             }
         },
     };
+    if matches!(order, AnyOrder::Settled(_) | AnyOrder::Voided(_)) || order.core().billing.revision > 0 {
+        crate::licensing::gate(app, mb_license::Feature::Reports)?;
+    }
+    let printer = default_printer(app)?;
+    let (metrics, engine) = app.metrics_for(JobKind::Bill, &printer);
     // The cart's lines, when the cart is what is being looked at.
     let bill =
         match order_id_of(&order) == app.with_cart(|s| Ok(s.order_id().map(str::to_owned)))? {
@@ -919,7 +953,8 @@ fn order_id_of(order: &AnyOrder) -> Option<String> {
 }
 
 pub fn bill_pdf_on(app: &App, order_id: String) -> UiResult<crate::reports::SavedFileView> {
-    crate::guard::require(app, mb_auth::Permission::BillCreate)?;
+    crate::licensing::gate(app, mb_license::Feature::Reports)?;
+    crate::guard::require_any(app, crate::guard::BILL_DOCUMENT_PERMISSIONS)?;
     let order = find_order(app, &OrderId::new(&order_id))?
         .ok_or_else(|| UiError::new("preview.no_order", "That bill is not on this counter."))?;
     let bill = bill_of(app, &order)?;
@@ -1237,8 +1272,8 @@ pub fn bill_pdf(app: State<'_, App>, order_id: String) -> UiResult<crate::report
 }
 
 #[tauri::command]
-pub fn complete_bill(app: State<'_, App>, mode: Option<String>, refund_mode: Option<String>, refund_amounts: Option<Vec<(String, String)>>) -> UiResult<String> {
-    complete_bill_with_returns_on(&app, mode, refund_mode, refund_amounts)
+pub fn complete_bill(app: State<'_, App>, mode: Option<String>, refund_mode: Option<String>, refund_amounts: Option<Vec<(String, String)>>, approver_staff_id: Option<String>, approver_pin: Option<String>, proposal_token: Option<String>) -> UiResult<String> {
+    complete_bill_authorized_on(&app, mode, refund_mode, refund_amounts, approver_staff_id, approver_pin, proposal_token)
 }
 
 #[tauri::command]

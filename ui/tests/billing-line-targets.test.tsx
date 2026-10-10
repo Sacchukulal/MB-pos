@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CartView } from '../src/ipc/generated/CartView';
 import type { Pushed } from '../src/ipc/generated/Pushed';
@@ -23,6 +23,7 @@ beforeEach(() => {
   window.localStorage.clear();
   call.mockReset();
   cart = {
+    isCorrection: false,
     lines: [{ index: 0, editToken: 'original-line', name: 'Masala Dosa', note: null, qty: '2',
       rateLabel: '5%', unitPrice: money, gross: money, discount: zero, lineDiscount: zero,
       amount: money, modifiers: [] }],
@@ -36,6 +37,7 @@ beforeEach(() => {
     arrivalBeep: false, arrivalBeat: false,
   };
   call.mockImplementation((command: string) => {
+    if (command === 'correction_save_preview') return Promise.resolve({ cart, proposalToken: 'review', originalTotal: money, newTotal: money, needsApproval: false, approvers: [] });
     if (command === 'menu_items' || command === 'open_orders') return Promise.resolve([]);
     if (command === 'device_manager') return Promise.resolve({ devices: [] });
     if (command === 'reasons') return Promise.resolve([{ id: 'reason_1', text: 'Customer request' }]);
@@ -43,6 +45,53 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+it('shows explicit correction actions and confirms before discarding', async () => {
+  cart.isCorrection = true;
+  cart.billNumber = 'A/7';
+  await show();
+  expect(screen.getByRole('button', { name: 'Save changes' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+  expect(call.mock.calls.some(([name]) => name === 'discard_bill_correction')).toBe(false);
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard changes' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('discard_bill_correction', { orderId: 'order_4' }));
+});
+
+it('takes an empty correction to the full return flow after saving its draft', async () => {
+  cart = { ...cart, isCorrection: true, isEmpty: true, lines: [], billNumber: 'A/7' };
+  const go = vi.fn();
+  render(<ToastProvider><Billing onGoTo={go} /></ToastProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Return whole bill' }));
+  await waitFor(() => expect(go).toHaveBeenCalledWith('reports/bills/order_4'));
+  expect(call).toHaveBeenCalledWith('save_bill_correction_draft');
+  expect(call.mock.calls.some(([name]) => name === 'complete_bill')).toBe(false);
+});
+
+it('asks for the original payment return before submitting a reduced correction', async () => {
+  cart.isCorrection = true;
+  cart.billNumber = 'A/7';
+  cart.change = money;
+  cart.payments = [{ index: 0, reference: null, mode: 'Card', refundMode: 'card', amount: money }];
+  await show();
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await screen.findByRole('button', { name: 'Confirm return' });
+  expect(screen.getByLabelText('Return by Card')).toBeTruthy();
+  expect(call.mock.calls.some(([name]) => name === 'complete_bill')).toBe(false);
+});
+
+it('uses the fresh preflight cart for return amounts after a concurrent order update', async () => {
+  cart.isCorrection = true;
+  cart.billNumber = 'A/7';
+  await show();
+  const current = { ...cart, change: money, payments: [{ index: 0, reference: null, mode: 'UPI', refundMode: 'upi', amount: money }] };
+  call.mockImplementation((command: string) => command === 'correction_save_preview'
+    ? Promise.resolve({ cart: current, proposalToken: 'new-review', originalTotal: money, newTotal: zero, needsApproval: false, approvers: [] })
+    : Promise.resolve(cart));
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  await screen.findByRole('button', { name: 'Confirm return' });
+  expect(screen.getByLabelText('Return by UPI')).toHaveValue('160.00');
+  expect(call.mock.calls.some(([name]) => name === 'complete_bill')).toBe(false);
+});
 
 it('starts a fresh default order on Escape when unlocked', async () => {
   cart.orderTypeLocked = false;

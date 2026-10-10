@@ -12,6 +12,7 @@ import {
 
 import {
   Button,
+  ConfirmDialog,
   cx,
   EmptyState,
   Icon,
@@ -31,6 +32,7 @@ import {
 import { call, inApp, isUiError } from '../ipc/call';
 import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { CartView } from '../ipc/generated/CartView';
+import type { CorrectionSaveView } from '../ipc/generated/CorrectionSaveView';
 import { useMay } from '../shell/permissions';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
@@ -40,6 +42,7 @@ import { HelpSheet, HowMany, Suggestions, TableBox } from './Keys';
 import { carry, ORDER_TYPES, reduceCarried, stepQuantity, type Command as KeyCommand } from './keyboard';
 import { PutOnAccount } from '../credit/Credit';
 import { ReasonDialog } from '../corrections/Reason';
+import { ApprovalFields } from '../corrections/Approval';
 import { DiscountDialog } from './Discount';
 import { Processing, ProcessingHead, processingOrders } from './Processing';
 import { MergeBill } from './MergeBill';
@@ -90,6 +93,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const [voidingLine, setVoidingLine] = useState<{ index: number; name: string; expectedLine: string | undefined } | null>(null);
   const [reducingLine, setReducingLine] = useState<{ index: number; qty: string; expectedLine: string | undefined } | null>(null);
   const [returning, setReturning] = useState(false);
+  const [saveReview, setSaveReview] = useState<CorrectionSaveView | null>(null);
+  const [discardingCorrection, setDiscardingCorrection] = useState(false);
   /** The line whose quantity is being typed, and what has been typed so far. */
   const [typingQty, setTypingQty] = useState<{ index: number; text: string; originalQty: string; expectedLine: string | undefined } | null>(null);
   /** The reason for cancelling a parked order. */
@@ -454,6 +459,18 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
    */
   const completeBill = useCallback(async () => {
     try {
+      if (cart?.isCorrection && cart.isEmpty && cart.orderId) {
+        await call('save_bill_correction_draft');
+        onGoTo(`reports/bills/${cart.orderId}`);
+        return;
+      }
+      if (cart?.isCorrection) {
+        const review = await call('correction_save_preview');
+        setCart(review.cart);
+        setSaveReview(review);
+        setReturning(true);
+        return;
+      }
       // Whatever is still owing goes down in the mode that is lit — Rust takes it and settles
       // in one command.
       const number = await call('complete_bill', { mode: payMode });
@@ -462,11 +479,11 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       await refreshFloor();
       toast.show('ok', `Bill ${number} settled.`);
     } catch (cause) {
-      if (isUiError(cause) && cause.code === 'bill.return_due') setReturning(true);
+      if (isUiError(cause) && cause.code === 'bill.return_due') { setSaveReview(null); setReturning(true); }
       else if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable('bill');
       else report(cause);
     }
-  }, [freshMoney, payMode, refreshFloor, report, toast]);
+  }, [cart, onGoTo, freshMoney, payMode, refreshFloor, report, toast]);
 
   /**
    * Which keystroke's answer is the latest. Replies can come back out of order; only the one
@@ -940,6 +957,13 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
       {/* THE CART IS PERMANENT. */}
       <div className="mb-billing__cart">
+        {cart?.isCorrection ? (
+          <div className="mb-cart__floor">
+            <p>Editing bill {cart.billNumber}. The issued bill stays unchanged until you save.</p>
+            <Button size="sm" disabled={acting} onClick={() => setDiscardingCorrection(true)}>Discard changes</Button>
+            <Button size="sm" disabled={acting} onClick={() => act(newOrder)}>Save for later</Button>
+          </div>
+        ) : null}
 
         {/* A very long bill says so. */}
         {cart && cart.lengthSays ? (
@@ -1156,8 +1180,8 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           ) : (
             <EmptyState
               small
-              title="Nothing on this bill yet"
-              hint="Type an item or a table number in the box above."
+              title={cart?.isCorrection ? 'All items removed' : 'Nothing on this bill yet'}
+              hint={cart?.isCorrection ? 'Use Return whole bill to review the refund, or add items to continue editing.' : 'Type an item or a table number in the box above.'}
             />
           )}
         </Scroller>
@@ -1198,7 +1222,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             onClick={() => act(completeBill)}
             icon={<Icon name="check-circle" />}
           >
-            Complete bill
+            {cart?.isCorrection ? (cart.isEmpty ? 'Return whole bill' : 'Save changes') : 'Complete bill'}
           </Button>
 
           <Button
@@ -1364,17 +1388,33 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       ) : null}
 
       {returning && cart ? (
-        <ReturnAmounts cart={cart} busy={acting} onClose={() => setReturning(false)}
-          onConfirm={(refundAmounts) => act(async () => {
+        <ReturnAmounts cart={cart} approval={saveReview ?? undefined} busy={acting} onClose={() => { setReturning(false); setSaveReview(null); }}
+          onConfirm={(refundAmounts, approver) => act(async () => {
                 try {
-                  await call('complete_bill', { mode: payMode, refundAmounts });
+                  await call('complete_bill', { mode: payMode, refundAmounts, approverStaffId: approver?.id, approverPin: approver?.pin, proposalToken: saveReview?.proposalToken });
                   setReturning(false);
+                  setSaveReview(null);
                   setCart(await call('current_cart'));
                   freshMoney();
                   await refreshFloor();
                   toast.show('ok', 'The corrected bill and return are recorded.');
                 } catch (cause) { report(cause); }
               })} />
+      ) : null}
+
+      {discardingCorrection && cart?.orderId ? (
+        <ConfirmDialog open title="Discard these bill changes?"
+          body="The issued bill and its original payment remain unchanged. Changes already sent to the kitchen or money already recorded must be resolved before discarding."
+          confirmLabel="Discard changes" onCancel={() => setDiscardingCorrection(false)}
+          onConfirm={() => act(async () => {
+            try {
+              setCart(await call('discard_bill_correction', { orderId: cart.orderId! }));
+              setDiscardingCorrection(false);
+              freshMoney();
+              await refreshFloor();
+              toast.show('ok', 'Changes discarded. The issued bill is unchanged.');
+            } catch (cause) { report(cause); }
+          })} />
       ) : null}
 
       {reducingLine ? (
@@ -1447,26 +1487,38 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 const OTHER_MODES = ['Card', 'UPI'] as const;
 
 /** Collect the actual returns; Rust validates the total and each original payment mode. */
-export function ReturnAmounts({ cart, busy, onClose, onConfirm }: {
+export function ReturnAmounts({ cart, approval, busy, onClose, onConfirm }: {
   cart: Pick<CartView, 'change' | 'payments'>;
+  approval?: Omit<CorrectionSaveView, 'cart'>;
   busy: boolean;
   onClose: () => void;
-  onConfirm: (amounts: [string, string][]) => void;
+  onConfirm: (amounts: [string, string][], approver?: { id: string; pin: string }) => void;
 }) {
-  const modes = [...new Set(cart.payments.map((payment) => payment.mode))];
-  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const modes = [...new Map(cart.payments.map((payment) => [payment.refundMode, { code: payment.refundMode, label: payment.mode }])).values()];
+  const [amounts, setAmounts] = useState<Record<string, string>>(() => modes.length === 1 && modes[0]
+    ? { [modes[0].code]: onlyAmount(cart.change.text) } : {});
+  const [manager, setManager] = useState('');
+  const [pin, setPin] = useState('');
+  const hasReturn = Number(cart.change.paise) > 0;
+  const ready = !busy && (!approval?.needsApproval || (manager !== '' && pin.length > 0));
   const confirm = () => {
-    if (!busy) onConfirm(modes.map((mode) => [mode, amounts[mode] ?? '']));
+    if (!ready) return;
+    const returns: [string, string][] = hasReturn ? modes.map((mode) => [mode.code, amounts[mode.code] ?? '']) : [];
+    if (approval?.needsApproval) onConfirm(returns, { id: manager, pin });
+    else onConfirm(returns);
   };
   return (
-    <Modal open title={`Return ${cart.change.text}`} onClose={() => { if (!busy) onClose(); }}
+    <Modal open title={hasReturn ? `Return ${cart.change.text}` : 'Save corrected bill'} onClose={() => { if (!busy) onClose(); }}
       onEnter={confirm}
-      note="Enter the amount returned through each original payment mode, then confirm."
-      actions={<Button variant="primary" disabled={busy} onClick={confirm}>Confirm return</Button>}>
-      {modes.map((mode) => (
-        <MoneyInput key={mode} label={`Return by ${mode}`} value={amounts[mode] ?? ''}
-          disabled={busy} onChange={(typed) => setAmounts((before) => ({ ...before, [mode]: typed }))} />
-      ))}
+      note={hasReturn ? 'Enter the amount returned through each original payment mode, then confirm.' : 'Review the final amount before saving the correction.'}
+      actions={<Button variant="primary" disabled={!ready} onClick={confirm}>{hasReturn ? 'Confirm return' : 'Save changes'}</Button>}>
+      {approval ? <p>Original total {approval.originalTotal.text}. Corrected total {approval.newTotal.text}.</p> : null}
+      {hasReturn ? modes.map((mode) => (
+        <MoneyInput key={mode.code} label={`Return by ${mode.label}${mode.code.startsWith('other:') ? ' (custom)' : ''}`} value={amounts[mode.code] ?? ''}
+          disabled={busy} onChange={(typed) => setAmounts((before) => ({ ...before, [mode.code]: typed }))} />
+      )) : null}
+      {approval?.needsApproval ? <ApprovalFields people={approval.approvers} selected={manager} pin={pin}
+        onSelect={setManager} onPin={setPin} disabled={busy} pinLabel="Manager PIN" /> : null}
     </Modal>
   );
 }

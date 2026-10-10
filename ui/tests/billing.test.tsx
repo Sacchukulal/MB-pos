@@ -16,27 +16,60 @@ import type { TableView } from '../src/ipc/generated/TableView';
 afterEach(cleanup);
 
 describe('corrected bill returns', () => {
+  it('keeps a custom cash-named payment separate from actual cash', () => {
+    const confirm = vi.fn();
+    render(<ReturnAmounts cart={{ change: money(1000, '10.00'), payments: [
+      { index: 0, reference: null, mode: 'Cash', refundMode: 'cash', amount: money(1000, '10.00') },
+      { index: 1, reference: null, mode: 'Cash', refundMode: 'other:cash', amount: money(1000, '10.00') },
+    ] }} busy={false} onClose={vi.fn()} onConfirm={confirm} />);
+    fireEvent.change(screen.getByLabelText('Return by Cash'), { target: { value: '3.00' } });
+    fireEvent.change(screen.getByLabelText('Return by Cash (custom)'), { target: { value: '7.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm return' }));
+    expect(confirm).toHaveBeenCalledWith([['cash', '3.00'], ['other:cash', '7.00']]);
+  });
+  it('prefills a single original payment method using the server return amount', () => {
+    const confirm = vi.fn();
+    render(<ReturnAmounts cart={{ change: money(123450, '1,234.50'), payments: [{ index: 0, reference: null, mode: 'UPI', refundMode: 'upi', amount: money(123450, '1,234.50') }] }}
+      busy={false} onClose={vi.fn()} onConfirm={confirm} />);
+    expect(screen.getByLabelText('Return by UPI')).toHaveValue('1234.50');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm return' }));
+    expect(confirm).toHaveBeenCalledWith([['upi', '1234.50']]);
+  });
+
+  it('collects the final manager approval together with the returned amounts', () => {
+    const confirm = vi.fn();
+    render(<ReturnAmounts cart={{ change: money(500, '5.00'), payments: [{ index: 0, reference: null, mode: 'Card', refundMode: 'card', amount: money(1000, '10.00') }] }}
+      approval={{ proposalToken: 'review', originalTotal: money(1000, '10.00'), newTotal: money(500, '5.00'), needsApproval: true, approvers: [{ id: 'manager', name: 'Manager' }] }}
+      busy={false} onClose={vi.fn()} onConfirm={confirm} />);
+    expect(screen.getByRole('button', { name: 'Confirm return' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Return by Card'), { target: { value: '5.00' } });
+    fireEvent.click(screen.getByLabelText('Manager'));
+    fireEvent.change(screen.getByLabelText('Manager PIN'), { target: { value: '2468' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm return' }));
+    expect(confirm).toHaveBeenCalledWith([['card', '5.00']], { id: 'manager', pin: '2468' });
+  });
+
   it('keeps exact typed amounts for Rust and preserves them for a retry', () => {
     const confirm = vi.fn();
     const cart = {
       change: money(7900, '79.00'),
       payments: [
-        { mode: 'Cash', amount: money(5000, '50.00') },
-        { mode: 'Card', amount: money(5500, '55.00') },
-        { mode: 'Cash', amount: money(100, '1.00') },
+        { mode: 'Cash', refundMode: 'cash', amount: money(5000, '50.00') },
+        { mode: 'Card', refundMode: 'card', amount: money(5500, '55.00') },
+        { mode: 'Cash', refundMode: 'cash', amount: money(100, '1.00') },
       ],
     } as Pick<CartView, 'change' | 'payments'>;
     const { rerender } = render(<ReturnAmounts cart={cart} busy={false} onClose={vi.fn()} onConfirm={confirm} />);
     fireEvent.change(screen.getByLabelText('Return by Cash'), { target: { value: '50.00' } });
     fireEvent.change(screen.getByLabelText('Return by Card'), { target: { value: '29.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm return' }));
-    expect(confirm).toHaveBeenLastCalledWith([['Cash', '50.00'], ['Card', '29.00']]);
+    expect(confirm).toHaveBeenLastCalledWith([['cash', '50.00'], ['card', '29.00']]);
     rerender(<ReturnAmounts cart={cart} busy onClose={vi.fn()} onConfirm={confirm} />);
     expect(screen.getByRole('button', { name: 'Confirm return' })).toBeDisabled();
     rerender(<ReturnAmounts cart={cart} busy={false} onClose={vi.fn()} onConfirm={confirm} />);
     fireEvent.click(screen.getByRole('button', { name: 'Confirm return' }));
     expect(confirm).toHaveBeenCalledTimes(2);
-    expect(confirm).toHaveBeenLastCalledWith([['Cash', '50.00'], ['Card', '29.00']]);
+    expect(confirm).toHaveBeenLastCalledWith([['cash', '50.00'], ['card', '29.00']]);
   });
 });
 
@@ -90,12 +123,12 @@ describe('arrivals', () => {
 
     // A phone puts an order on table 3.
     rerender({ floor: [busy('1'), busy('2'), busy('3')] });
-    expect([...result.current]).toEqual(['ord_3']);
+    expect([...result.current.keys()]).toEqual(['ord_3']);
 
     // A re-read of the same floor fifteen seconds on changes nothing, and does not reset the clock.
     act(() => vi.advanceTimersByTime(2000));
     rerender({ floor: [busy('1'), busy('2'), busy('3')] });
-    expect([...result.current]).toEqual(['ord_3']);
+    expect([...result.current.keys()]).toEqual(['ord_3']);
     act(() => vi.advanceTimersByTime(1000));
     expect(result.current.size).toBe(0);
 
@@ -104,7 +137,7 @@ describe('arrivals', () => {
     rerender({
       floor: [{ ...busy('1'), total: { paise: 99_900n, text: '999.00' } }, busy('2'), busy('3')],
     });
-    expect([...result.current]).toEqual(['ord_1']);
+    expect([...result.current.keys()]).toEqual(['ord_1']);
     act(() => vi.advanceTimersByTime(3000));
     rerender({
       floor: [{ ...busy('1'), total: { paise: 99_900n, text: '999.00' }, minutes: 9 }, busy('2'), busy('3')],
@@ -113,7 +146,7 @@ describe('arrivals', () => {
 
     // The grid and the list draw the same fact.
     render(
-      <TableGrid tables={[busy('3')]} filter="" onOpen={() => {}} onPrintBill={() => {}} arrived={new Set(['ord_3'])} />,
+      <TableGrid tables={[busy('3')]} filter="" onOpen={() => {}} onPrintBill={() => {}} arrived={new Map([['ord_3', 1]])} />,
     );
     expect(document.querySelector('.mb-tile.mb-arrived')).toBeTruthy();
     vi.useRealTimers();

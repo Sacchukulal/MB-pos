@@ -105,6 +105,25 @@ pub const GATED: &[(&str, Feature)] = &[
     ("report_pdf", Feature::Reports),
     ("report_print", Feature::Reports),
     ("dashboard", Feature::Reports),
+    ("bills", Feature::Reports),
+    ("bill_detail", Feature::Reports),
+    ("bill_correction_offer", Feature::Reports),
+    ("revert_bill", Feature::Reports),
+    ("approve_revert", Feature::Reports),
+    ("void_bill", Feature::Reports),
+    ("void_and_return_bill", Feature::Reports),
+    ("return_bill_money", Feature::Reports),
+    ("return_closed_bill", Feature::Reports),
+    ("reprint_bill", Feature::Reports),
+    ("bill_pdf", Feature::Reports),
+    ("correction_save_preview", Feature::Reports),
+    ("save_bill_correction_draft", Feature::Reports),
+    ("days", Feature::Reports),
+    ("mark_holiday", Feature::Reports),
+    ("unmark_holiday", Feature::Reports),
+    ("reopen_day", Feature::Reports),
+    ("bills_csv", Feature::Reports),
+    ("bills_pdf", Feature::Reports),
     // Phones: the switch, then `gate_phones` counts them.
     ("open_pairing", Feature::MobileOrdering),
     ("allow_device", Feature::MobileOrdering),
@@ -436,7 +455,7 @@ pub fn after_licence_change(app: &App) {
 }
 
 /// The window hears the banner and its tone.
-fn tell_the_window(app: &App) {
+pub(crate) fn tell_the_window(app: &App) {
     let at = now();
     let entitlement = app.entitlement();
     app.push(Pushed::Licence {
@@ -447,9 +466,7 @@ fn tell_the_window(app: &App) {
 
 /// The standing again from the copy on disk — a date may have passed — and the window told.
 pub fn re_decide_and_tell(app: &App) {
-    let before = app.entitlement().standing;
-    app.re_decide();
-    if app.entitlement().standing != before {
+    if app.re_decide() {
         tell_the_window(app);
     }
 }
@@ -709,7 +726,7 @@ pub fn refresh_now(app: &App, limit: Duration) -> bool {
         Err(e) => {
             log_warn!("the licence could not be checked: {e}");
             // The standing may have moved (needs-checking, grace) without a fresh snapshot.
-            app.re_decide();
+            re_decide_and_tell(app);
             false
         }
     }
@@ -729,6 +746,7 @@ pub fn start_refresher(handle: &tauri::AppHandle) {
             // The first paint first.
             app.refresher_wakeup().wait_for(Duration::from_secs(1));
             let mut last_try_failed = !refresh_now(&app, mb_license::deadline::STARTUP_DEADLINE);
+            let mut last_try = std::time::Instant::now();
             loop {
                 let Some(app) = handle.try_state::<App>() else {
                     return;
@@ -736,7 +754,7 @@ pub fn start_refresher(handle: &tauri::AppHandle) {
                 // No key yet, or the last try failed: look again in an hour. Otherwise the
                 // rest of the day.
                 let due_in = if last_try_failed || app.with_licence(|l| l.key().is_none()) {
-                    RETRY_AFTER
+                    RETRY_AFTER.saturating_sub(last_try.elapsed())
                 } else {
                     let age = now()
                         .millis()
@@ -744,15 +762,19 @@ pub fn start_refresher(handle: &tauri::AppHandle) {
                     let every = i64::try_from(CHECK_EVERY.as_millis()).unwrap_or(i64::MAX);
                     Duration::from_millis(u64::try_from(every.saturating_sub(age)).unwrap_or(0))
                 };
-                // Wake at least hourly so a plan that runs out at midnight is re-decided from
+                // Wake each minute so an open paid screen clears after local expiry.
+                // Re-deciding is local; it does not increase cloud request frequency.
+                // A plan that runs out at midnight is re-decided from
                 // the copy on disk; the cloud is asked only when the day's check is due.
-                let wait = due_in.min(RETRY_AFTER).max(Duration::from_secs(60));
+                let wait = due_in.min(Duration::from_secs(60));
                 let woken = app.refresher_wakeup().wait_for(wait);
                 let Some(app) = handle.try_state::<App>() else {
                     return;
                 };
                 if app.with_licence(|l| l.key().is_none()) {
+                    re_decide_and_tell(&app);
                     last_try_failed = false;
+                    last_try = std::time::Instant::now();
                     continue;
                 }
                 if !woken && due_in > wait {
@@ -761,6 +783,7 @@ pub fn start_refresher(handle: &tauri::AppHandle) {
                 }
                 log_info!("checking the licence with the cloud");
                 last_try_failed = !refresh_now(&app, mb_license::deadline::DEADLINE);
+                last_try = std::time::Instant::now();
             }
         });
     if let Err(e) = spawned {

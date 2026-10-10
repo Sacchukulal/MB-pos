@@ -148,6 +148,16 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0021_deleted_menu_items",
         sql: include_str!("migrations/0021_deleted_menu_items.sql"),
     },
+    Migration {
+        version: 22,
+        name: "0022_bill_returns",
+        sql: include_str!("migrations/0022_bill_returns.sql"),
+    },
+    Migration {
+        version: 23,
+        name: "0023_net_receipts",
+        sql: include_str!("migrations/0023_net_receipts.sql"),
+    },
 ];
 
 /// The highest version this build understands.
@@ -293,6 +303,10 @@ fn run_one(conn: &mut Connection, migration: &Migration) -> Result<(), DbError> 
             name: migration.name,
             source,
         })?;
+
+    if migration.version == 23 {
+        crate::Repos::new(&tx).orders().reproject_legacy_receipts(mb_core::Timestamp::from_millis(now_millis()))?;
+    }
 
     // Elapsed is recorded because a migration that takes four minutes on a 5400 rpm HDD is
     // something the next release needs to know before it ships another one.

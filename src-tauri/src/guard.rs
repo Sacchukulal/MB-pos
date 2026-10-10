@@ -9,6 +9,11 @@ use mb_auth::{Actor, Permission};
 use crate::state::App;
 use crate::words::{UiError, UiResult};
 
+pub const CORRECTION_REASON_PERMISSIONS: &[Permission] = &[
+    Permission::BillCreate, Permission::BillRevert, Permission::BillVoid,
+    Permission::BillReprint, Permission::OrderCancel, Permission::OrderItemVoid,
+];
+
 /// What a command needs — the record the classification test reads.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +32,10 @@ pub enum Access {
 /// Every command in the product, and what it needs.
 #[cfg(test)]
 pub const COMMAND_ACCESS: &[(&str, Access)] = &[
+    ("bill_correction_offer", Access::NeedsAny(BILL_LOOKUP_PERMISSIONS)),
+    ("return_bill_money", Access::Needs(Permission::BillVoid)),
+    ("void_and_return_bill", Access::Needs(Permission::BillVoid)),
+    ("return_closed_bill", Access::Needs(Permission::BillVoid)),
     // Works while locked, and has to.
     ("app_status", Access::Public),
     // The theme toggle is on the lock screen.
@@ -50,7 +59,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ),
     // Making a customer's invoice out of a bill that already exists is reading, not billing —
     // the same authority as looking at the bill list.
-    ("bill_pdf", Access::Needs(Permission::ReportsView)),
+    ("bill_pdf", Access::NeedsAny(BILL_DOCUMENT_PERMISSIONS)),
     ("current_cart", Access::Needs(Permission::BillCreate)),
     ("reload_current_order", Access::Needs(Permission::BillCreate)),
     ("cart_add", Access::Needs(Permission::BillCreate)),
@@ -104,22 +113,24 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("list_permissions", Access::Needs(Permission::StaffManage)),
     ("audit_trail", Access::Needs(Permission::AuditView)),
     // Taking something back.
-    ("bills", Access::Needs(Permission::ReportsView)),
+    ("bills", Access::NeedsAny(BILL_LOOKUP_PERMISSIONS)),
     // Saving the list is taking it out of the building, the same as saving a report.
     ("bills_csv", Access::Needs(Permission::ReportsExport)),
     ("bills_pdf", Access::Needs(Permission::ReportsExport)),
-    ("bill_detail", Access::Needs(Permission::ReportsView)),
+    ("bill_detail", Access::NeedsAny(BILL_LOOKUP_PERMISSIONS)),
     // Taking a paid bill back to the counter; a manager signs it off afterwards.
     ("revert_bill", Access::Needs(Permission::BillRevert)),
+    ("discard_bill_correction", Access::Needs(Permission::BillRevert)),
+    ("save_bill_correction_draft", Access::Needs(Permission::BillRevert)),
+    ("correction_save_preview", Access::Needs(Permission::BillRevert)),
     (
         "approve_revert",
         Access::Needs(Permission::BillRevertApprove),
     ),
     // The reason list itself is not sensitive; being unable to read it would make every
     // correction dialog open empty.
-    ("reasons", Access::Needs(Permission::BillCreate)),
+    ("reasons", Access::NeedsAny(CORRECTION_REASON_PERMISSIONS)),
     ("void_bill", Access::Needs(Permission::BillVoid)),
-    ("refund_bill", Access::Needs(Permission::BillVoid)),
     ("cancel_order", Access::Needs(Permission::OrderCancel)),
     ("void_line", Access::Needs(Permission::OrderItemVoid)),
     ("reprint_bill", Access::Needs(Permission::BillReprint)),
@@ -585,6 +596,26 @@ pub fn require_owner(app: &App) -> UiResult<Actor> {
 }
 
 /// The two discounts: one line, or the whole bill.
+/// Reading an individual receipt is part of the actions that require finding it.
+/// This grants neither those actions nor access to report aggregates and exports.
+pub const BILL_LOOKUP_PERMISSIONS: &[Permission] = &[
+    Permission::ReportsView,
+    Permission::BillRevert,
+    Permission::BillRevertApprove,
+    Permission::BillVoid,
+    Permission::BillReprint,
+];
+
+/// A billing-only role can issue an individual invoice without browsing receipt history.
+pub const BILL_DOCUMENT_PERMISSIONS: &[Permission] = &[
+    Permission::BillCreate,
+    Permission::ReportsView,
+    Permission::BillRevert,
+    Permission::BillRevertApprove,
+    Permission::BillVoid,
+    Permission::BillReprint,
+];
+
 pub const DISCOUNT_PERMISSIONS: &[Permission] =
     &[Permission::BillDiscountLine, Permission::BillDiscountBill];
 
@@ -845,7 +876,9 @@ mod tests {
     }
 
     /// Every file that defines a command.
-    const SOURCES: [&str; 33] = [
+    const SOURCES: [&str; 35] = [
+        include_str!("correction_draft.rs"),
+        include_str!("refunds.rs"),
         include_str!("terminals.rs"),
         include_str!("orders.rs"),
         include_str!("buying.rs"),

@@ -17,7 +17,79 @@ pub struct OrderRepo<'a> {
     tx: &'a Transaction<'a>,
 }
 
+/// Receipt metadata travels with the existing account JSON, not with the bill/tax totals.
+/// Older account objects deserialize unchanged. Core account equality remains unchanged.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredAccount {
+    #[serde(flatten)]
+    billing: mb_core::BillingAccount,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    issued_receipt: Option<Settlement>,
+}
+
 impl<'a> OrderRepo<'a> {
+    /// Migration 23: rebuild only the payment ledger using the same core projection as
+    /// new bills. Keep raw tender/change and every immutable bill/tax value intact.
+    pub(crate) fn reproject_legacy_receipts(&self, at: mb_core::Timestamp) -> Result<(), DbError> {
+        let mut stmt = self.tx.prepare("SELECT o.id, o.outlet_id, o.business_day, b.grand_total, o.billing_account FROM orders o JOIN bills b ON b.order_id = o.id WHERE o.state IN ('settled', 'voided')")?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i32>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (id, outlet, day, total, json) in rows {
+            let mut stored: StoredAccount =
+                serde_json::from_str(&json).map_err(|e| DbError::invariant(e.to_string()))?;
+            if stored.issued_receipt.is_some() {
+                continue;
+            }
+            let original = self.read_settlement(&id)?;
+            let projected = original
+                .receipts(Money::from_paise(total))
+                .map_err(|e| DbError::invariant(format!("receipt {id}: {e}")))?;
+            for (seq, _) in original.payments().iter().enumerate() {
+                let seq_sql = i64::try_from(seq).map_err(|e| DbError::invariant(e.to_string()))?;
+                if let Some(row) = projected.iter().find(|row| row.seq == seq) {
+                    self.tx.execute("UPDATE payments SET amount = ?3, tip = ?4 WHERE order_id = ?1 AND seq = ?2", rusqlite::params![id, seq_sql, row.payment.amount.paise(), row.tip.paise()])?;
+                } else {
+                    self.tx.execute(
+                        "DELETE FROM payments WHERE order_id = ?1 AND seq = ?2",
+                        rusqlite::params![id, seq_sql],
+                    )?;
+                }
+            }
+            stored.issued_receipt = Some(original);
+            let json =
+                serde_json::to_string(&stored).map_err(|e| DbError::invariant(e.to_string()))?;
+            self.tx.execute(
+                "UPDATE orders SET billing_account = ?2 WHERE id = ?1",
+                rusqlite::params![id, json],
+            )?;
+            OutboxRepo::new(self.tx).enqueue(&outlet, "orders", &id, Op::Upsert, at)?;
+            for table in crate::repo::wire::TOTALS_TABLES {
+                OutboxRepo::new(self.tx).enqueue(
+                    &outlet,
+                    table,
+                    &day.to_string(),
+                    Op::Upsert,
+                    at,
+                )?;
+            }
+            crate::archive::ArchiveRepo::new(self.tx).mark_dirty(
+                &outlet,
+                mb_core::BusinessDay::from_days_since_epoch(day),
+                at,
+            )?;
+        }
+        Ok(())
+    }
+
     /// A durable editing draft takes precedence only on the billing/floor path.
     /// Reports continue reading the issued order until the replacement commits.
     pub fn find_working(&self, id: &OrderId) -> Result<Option<AnyOrder>, DbError> {
@@ -172,8 +244,11 @@ impl<'a> OrderRepo<'a> {
         )?;
 
         self.save_lines(id, &core.cart, core.billing.revision)?;
-        let account =
-            serde_json::to_string(&core.billing).map_err(|e| DbError::invariant(e.to_string()))?;
+        let account = serde_json::to_string(&StoredAccount {
+            billing: core.billing.clone(),
+            issued_receipt: bill_and_settlement(order).map(|(_, receipt)| receipt.clone()),
+        })
+        .map_err(|e| DbError::invariant(e.to_string()))?;
         self.tx.execute(
             "UPDATE orders SET billing_account = ?2 WHERE id = ?1",
             rusqlite::params![id, account],
@@ -182,9 +257,9 @@ impl<'a> OrderRepo<'a> {
 
         if let Some((bill, settlement)) = bill_and_settlement(order) {
             self.save_bill(id, bill, core)?;
-            self.save_payments(id, settlement, core)?;
+            self.save_payments(id, settlement, core, Some(bill.grand_total))?;
         } else if matches!(order, AnyOrder::Open(_)) && core.billing.billed_into.is_none() {
-            self.save_payments(id, &core.billing.settlement, core)?;
+            self.save_payments(id, &core.billing.settlement, core, None)?;
         }
 
         // The outbox entry is written HERE, in the same transaction as the row it describes.
@@ -682,15 +757,30 @@ impl<'a> OrderRepo<'a> {
         order_id: &str,
         settlement: &Settlement,
         core: &OrderCore,
+        grand_total: Option<Money>,
     ) -> Result<(), DbError> {
-        for (seq, payment) in settlement.payments().iter().enumerate() {
+        let rows = match grand_total {
+            Some(total) => settlement
+                .receipts(total)
+                .map_err(|e| DbError::invariant(e.to_string()))?,
+            None => settlement
+                .payments()
+                .iter()
+                .enumerate()
+                .map(|(seq, payment)| mb_core::payment::ReceiptPayment {
+                    seq,
+                    payment: payment.clone(),
+                    tip: if seq == 0 {
+                        settlement.tip()
+                    } else {
+                        Money::ZERO
+                    },
+                })
+                .collect(),
+        };
+        for row in rows {
+            let (seq, payment, tip) = (row.seq, row.payment, row.tip);
             let cols = encode::payment_mode_to_sql(&payment.mode);
-            // The tip belongs to the settlement, not to one payment.
-            let tip = if seq == 0 {
-                settlement.tip()
-            } else {
-                Money::ZERO
-            };
             self.tx.execute(
                 "INSERT INTO payments (id, order_id, seq, mode, customer_id, mode_label, amount,
                                        tip, reference, settles_credit, received_at, received_by,
@@ -929,6 +1019,43 @@ impl<'a> OrderRepo<'a> {
 
     /// Replays `Settlement`: `new`, `add` per payment, then the tip.
     fn read_settlement(&self, order_id: &str) -> Result<Settlement, DbError> {
+        let stored: String = self.tx.query_row(
+            "SELECT billing_account FROM orders WHERE id = ?1",
+            [order_id],
+            |r| r.get(0),
+        )?;
+        let account: StoredAccount =
+            serde_json::from_str(&stored).map_err(|e| DbError::invariant(e.to_string()))?;
+        if let Some(original) = account.issued_receipt {
+            let mut payments = original.payments().to_vec();
+            let mut stmt = self.tx.prepare_cached(
+                "SELECT seq, reference, provider, confirmed_at FROM payments WHERE order_id = ?1",
+            )?;
+            let rows = stmt.query_map([order_id], |r| {
+                Ok((
+                    r.get::<_, usize>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<i64>>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (seq, reference, provider, confirmed) = row?;
+                if let Some(payment) = payments.get_mut(seq) {
+                    payment.reference = reference;
+                    payment.provider = provider;
+                    payment.confirmed = confirmed.is_some();
+                }
+            }
+            let mut receipt = Settlement::with_tip(original.tip())
+                .map_err(|e| DbError::invariant(e.to_string()))?;
+            for payment in payments {
+                receipt
+                    .add(payment)
+                    .map_err(|e| DbError::invariant(e.to_string()))?;
+            }
+            return Ok(receipt);
+        }
         let mut stmt = self.tx.prepare_cached(
             "SELECT mode, customer_id, mode_label, amount, tip, reference, settles_credit,
                     provider, confirmed_at

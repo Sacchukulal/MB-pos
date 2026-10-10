@@ -56,6 +56,11 @@ settleAsked: boolean,
  */
 by: string | null, byId: string | null, orderId: string | null, 
 /**
+ * Stable identity of the food and notes, independent of timers, payments and selection.
+ * A same-price substitution or another quantity still deserves an arrival cue.
+ */
+arrivalKey?: string, 
+/**
  * The letter, when this tile is a second party on its table ("B" of "4B"). With no
  * `order_id` beside it, it is the party the cart has just opened and not yet saved —
  * pressing it re-joins the same seat.

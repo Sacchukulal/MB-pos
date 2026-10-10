@@ -11,7 +11,7 @@ export type BillsView = { rows: Array<BillRowView>,
 /**
  * The figures for what is listed.
  */
-totals: DayTotalsView, periods: Array<PeriodChoiceView>, 
+totals: DayTotalsView | null, canExport: boolean, periods: Array<PeriodChoiceView>, 
 /**
  * Everyone who took a bill in the period, for the filter.
  */

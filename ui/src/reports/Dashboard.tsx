@@ -17,6 +17,7 @@ import {
 } from '../kit';
 import { call, isLicenceRefusal, isUiError } from '../ipc/call';
 import { useMay } from '../shell/permissions';
+import { useLicenceRevision } from '../shell/licence';
 import { keep, remember } from '../remember';
 import type { AttentionView } from '../ipc/generated/AttentionView';
 import type { DashboardView } from '../ipc/generated/DashboardView';
@@ -66,12 +67,15 @@ function startingPeriod(presets: readonly PeriodChoiceView[]): { from: string; t
 
 /** A standalone destination, with the same permission and licence checks as Reports. */
 export function DashboardPage({ onGoTo }: { onGoTo?: (screen: string) => void }) {
+  const licenceRevision = useLicenceRevision();
   const [presets, setPresets] = useState<readonly PeriodChoiceView[] | null>(null);
   const [trouble, setTrouble] = useState('');
   const [locked, setLocked] = useState('');
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let current = true;
+    setPresets(null);
+    setLocked('');
     setTrouble('');
     call('report_list').then((list) => {
       if (!current) return;
@@ -83,7 +87,7 @@ export function DashboardPage({ onGoTo }: { onGoTo?: (screen: string) => void })
       else setTrouble(isUiError(cause) ? cause.message : 'The dashboard could not be opened. Please try again.');
     });
     return () => { current = false; };
-  }, [attempt]);
+  }, [attempt, licenceRevision]);
   if (locked) return <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />;
   if (trouble) return <div role="alert"><p>{trouble}</p><Button onClick={() => setAttempt((n) => n + 1)}>Try again</Button></div>;
   if (!presets) return <Spinner label="Opening your dashboard" />;
@@ -91,7 +95,7 @@ export function DashboardPage({ onGoTo }: { onGoTo?: (screen: string) => void })
 }
 
 const METRIC_ICONS: Record<string, IconName> = {
-  Takings: 'banknote', 'Average bill': 'receipt', 'In the drawer': 'wallet', 'Cash taken': 'wallet',
+  'Net sales': 'banknote', 'Average bill': 'receipt', 'Expected cash in drawer': 'wallet', 'Cash received': 'wallet',
   Spent: 'card', Voided: 'x', 'Gross margin': 'chart',
 };
 
@@ -99,6 +103,7 @@ export function Dashboard({ presets, onGoTo }: {
   presets: readonly PeriodChoiceView[];
   onGoTo?: (screen: string) => void;
 }) {
+  const licenceRevision = useLicenceRevision();
   const [period, setPeriod] = useState(() => startingPeriod(presets));
   const [view, setView] = useState<DashboardView | null>(null);
   const [trouble, setTrouble] = useState('');
@@ -114,6 +119,8 @@ export function Dashboard({ presets, onGoTo }: {
     const preset = presets.find((choice) => choice.from === from && choice.to === to);
     keep(REMEMBERED, JSON.stringify(preset ? { label: preset.label } : { from, to }));
   };
+
+  useEffect(() => { setView(null); }, [licenceRevision]);
 
   useEffect(() => {
     let current = true;
@@ -143,7 +150,7 @@ export function Dashboard({ presets, onGoTo }: {
         }
       }).finally(() => { if (current) setBusy(false); });
     return () => { current = false; };
-  }, [period, refresh]);
+  }, [period, refresh, licenceRevision]);
 
   const when = (
     <div className="mb-dash__filters">

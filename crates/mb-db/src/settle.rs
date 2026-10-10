@@ -32,6 +32,22 @@ pub fn settle(
     at: Timestamp,
     by: StaffId,
 ) -> Result<SettledOrder, DbError> {
+    settle_checked(db, till, order, bill, settlement, at, by, |_| Ok(()))
+}
+
+/// The normal settlement transaction, with a final authorization checked and recorded
+/// before any bill, money or stock write. An error rolls back the entire replacement.
+#[allow(clippy::too_many_arguments, reason = "preserves the existing settlement inputs and adds authorization inside the same transaction")]
+pub fn settle_checked(
+    db: &Db,
+    till: Till<'_>,
+    order: OpenOrder,
+    bill: Bill,
+    settlement: Settlement,
+    at: Timestamp,
+    by: StaffId,
+    authorize: impl FnOnce(&Repos<'_>) -> Result<(), DbError>,
+) -> Result<SettledOrder, DbError> {
     let (outlet, terminal) = (till.outlet, till.terminal);
     db.transaction(|tx| {
         let repos = Repos::new(tx);
@@ -58,6 +74,7 @@ pub fn settle(
                 _ => {}
             }
         }
+        authorize(&repos)?;
         let mut order = order;
         numbering::number_the_bill(tx, outlet, terminal, &mut order)?;
         let settled = order

@@ -1,11 +1,11 @@
 /** One dialog, four callers — void, cancel, void a line, reprint. */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { Button, Input, Modal, Radio } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { ReasonView } from '../ipc/generated/ReasonView';
-import { PIN_DIGITS } from '../auth/keyboard';
+import { ApprovalFields } from './Approval';
 
 import './corrections.css';
 
@@ -22,8 +22,10 @@ export interface ReasonDialogProps {
   /** True when this action needs a manager's PIN as well. */
   needsApproval?: boolean;
   approvers?: readonly { id: string; name: string }[];
+  children?: ReactNode;
+  disabled?: boolean;
   onCancel: () => void;
-  onConfirm: (reason: string, approver?: { id: string; pin: string }) => void;
+  onConfirm: (reason: string, approver?: { id: string; pin: string }) => void | Promise<void>;
 }
 
 export function ReasonDialog({
@@ -35,6 +37,8 @@ export function ReasonDialog({
   approvers = [],
   onCancel,
   onConfirm,
+  children,
+  disabled = false,
 }: ReasonDialogProps) {
   const [choices, setChoices] = useState<readonly ReasonView[]>([]);
   const [chosen, setChosen] = useState<string>('');
@@ -42,6 +46,8 @@ export function ReasonDialog({
   const [approver, setApprover] = useState('');
   const [pin, setPin] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
 
   useEffect(() => {
     call('reasons', { kind })
@@ -58,7 +64,8 @@ export function ReasonDialog({
 
   const reason = [chosen, note.trim()].filter(Boolean).join(' — ');
 
-  const confirm = () => {
+  const confirm = async () => {
+    if (inFlight.current || disabled) return;
     if (reason === '') {
       setProblem('Choose a reason, or type one.');
       return;
@@ -67,15 +74,19 @@ export function ReasonDialog({
       setProblem('This needs a manager: choose who, and have them type their PIN.');
       return;
     }
-    onConfirm(
-      reason,
-      needsApproval ? { id: approver, pin } : undefined,
-    );
+    inFlight.current = true;
+    setBusy(true);
+    try {
+      await onConfirm(reason, needsApproval ? { id: approver, pin } : undefined);
+    } catch (cause) {
+      setProblem(isUiError(cause) ? cause.message : 'That could not be done. Try again.');
+    } finally { inFlight.current = false; setBusy(false); }
   };
 
   return (
-    <Modal open title={what} onClose={onCancel}>
+    <Modal open title={what} onClose={() => { if (!inFlight.current) onCancel(); }}>
       {description ? <p className="mb-muted">{description}</p> : null}
+      {children}
       <div className="mb-reasons">
         {choices.map((choice) => (
           <Radio
@@ -99,32 +110,8 @@ export function ReasonDialog({
       />
 
       {needsApproval ? (
-        <div className="mb-approval">
-          <p className="mb-muted">
-            This one needs a manager. They type their own PIN — it is not stored
-            and it is not remembered for the next one.
-          </p>
-          <div className="mb-reasons">
-            {approvers.map((person) => (
-              <Radio
-                key={person.id}
-                name="approver"
-                label={person.name}
-                checked={approver === person.id}
-                onChange={() => setApprover(person.id)}
-              />
-            ))}
-          </div>
-          {/* The same four digits as the lock screen. */}
-          <Input
-            label="Their PIN"
-            type="password"
-            inputMode="numeric"
-            maxLength={PIN_DIGITS}
-            value={pin}
-            onChange={(event) => setPin(event.target.value.replace(/[^0-9]/g, ''))}
-          />
-        </div>
+        <ApprovalFields people={approvers} selected={approver} pin={pin}
+          onSelect={setApprover} onPin={setPin} disabled={busy} />
       ) : null}
 
       {problem ? (
@@ -134,11 +121,11 @@ export function ReasonDialog({
       ) : null}
 
       <div className="mb-row mb-row--end">
-        <Button variant="quiet" onClick={onCancel}>
+        <Button variant="quiet" disabled={busy} onClick={onCancel}>
           Leave it
         </Button>
-        <Button variant="danger" onClick={confirm}>
-          {confirmLabel}
+        <Button variant="danger" disabled={busy || disabled} onClick={() => void confirm()}>
+          {busy ? 'Saving…' : confirmLabel}
         </Button>
       </div>
     </Modal>

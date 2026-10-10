@@ -63,7 +63,8 @@ fn exercise_everything_that_touches_a_secret(app: &App, scratch: &Scratch) {
 
     // An emergency code, right and wrong.
     let _ = crate::licensing::use_emergency_code_on(app, "K7M2Q-9XR4T-BW8HN-3PZ6D".to_owned());
-    let code = mb_license::emergency::mint(&machine, today.days_since_epoch(), 72);
+    let code = mb_license::emergency::mint(&machine, "MB-STUB-0001", today.days_since_epoch(), 72)
+        .expect("development support grant");
     let _ = crate::licensing::use_emergency_code_on(app, code.to_read_out());
 
     // A PIN, set and used.

@@ -53,19 +53,19 @@ export function DayGate({ state, onChange, onEscape, onSignOut }: DayGateProps) 
   const columns: readonly Column<PendingDayView>[] = [
     { key: 'day', header: 'Day', nowrap: true, render: (row) => row.daySays },
     { key: 'bills', header: 'Bills', numeric: true, render: (row) => <Numeric>{row.bills}</Numeric> },
-    { key: 'net', header: 'Net', numeric: true, render: (row) => <Money value={row.net} /> },
-    { key: 'cash', header: 'Cash', numeric: true, render: (row) => <Money value={row.cash} /> },
+    { key: 'net', header: 'Net', numeric: true, render: (row) => (row.net ? <Money value={row.net} /> : null) },
+    { key: 'cash', header: 'Cash', numeric: true, render: (row) => (row.cash ? <Money value={row.cash} /> : null) },
     {
       key: 'upi',
       header: 'UPI / card',
       numeric: true,
-      render: (row) => <Money value={row.upiAndCard} />,
+      render: (row) => (row.upiAndCard ? <Money value={row.upiAndCard} /> : null),
     },
     {
       key: 'spent',
       header: 'Spent',
       numeric: true,
-      render: (row) => <Money value={row.expenses} />,
+      render: (row) => (row.expenses ? <Money value={row.expenses} /> : null),
     },
     {
       key: 'what',
@@ -129,7 +129,7 @@ export function DayGate({ state, onChange, onEscape, onSignOut }: DayGateProps) 
       }
     >
       {state.mayAct ? null : <p className="mb-muted">{state.blockedSays}</p>}
-      <Table columns={columns} rows={state.pending} rowKey={(row) => row.day} />
+      <Table columns={columns.filter((column) => state.pending.some((row) => row.net !== null) || !['bills', 'net', 'cash', 'upi', 'spent'].includes(column.key))} rows={state.pending} rowKey={(row) => row.day} />
     </Modal>
   );
 }

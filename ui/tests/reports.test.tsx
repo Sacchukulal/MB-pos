@@ -1,6 +1,6 @@
 /** The reports screen. */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -24,6 +24,7 @@ const { ToastProvider } = await import('../src/kit');
 
 import type { ReportListView } from '../src/ipc/generated/ReportListView';
 import type { ReportView } from '../src/ipc/generated/ReportView';
+import { MayProvider } from '../src/shell/permissions';
 
 const list: ReportListView = {
   periods: [
@@ -277,7 +278,7 @@ it('folds a group out of sight, not just out of the accessibility tree', async (
 });
 
 /** A licence refusal is an ANSWER, and it stays on the screen. */
-it('keeps Bills available when the licence does not cover reports', async () => {
+it('locks all Reports including Bills when the licence does not cover reports', async () => {
   const refusal = {
     code: 'licence.not_operating',
     message:
@@ -296,12 +297,81 @@ it('keeps Bills available when the licence does not cover reports', async () => 
     </ToastProvider>,
   );
 
-  expect(await screen.findByRole('heading', { name: 'Bills' })).toBeTruthy();
-  expect(screen.queryByText('This part needs a licence')).toBeNull();
+  expect(await screen.findByText('This part needs a licence')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Bills' })).toBeNull();
+  expect(call.mock.calls.some(([command]) => command === 'bills' || command === 'days')).toBe(false);
   expect(screen.queryByRole('button', { name: 'Dashboard' })).toBeNull();
 });
 
-/** A cashier may close the day without reading a single report. */
+it('never mounts bill history while the Reports licence decision is pending', async () => {
+  let allow!: (value: ReportListView) => void;
+  call.mockImplementation((command: string) => command === 'report_list'
+    ? new Promise<ReportListView>((resolve) => { allow = resolve; }) : answer(command));
+  render(<ToastProvider><Reports initial="bills/sale" /></ToastProvider>);
+  expect(screen.queryByRole('heading', { name: 'Bills' })).toBeNull();
+  expect(call.mock.calls.some(([command]) => command === 'bills')).toBe(false);
+  await act(async () => { allow(list); });
+  expect(await screen.findByRole('heading', { name: 'Bills' })).toBeTruthy();
+  await waitFor(() => expect(call).toHaveBeenCalledWith('bill_detail', { orderId: 'sale' }));
+});
+
+it('removes history immediately on recheck and ignores an older licence response', async () => {
+  open();
+  await screen.findByRole('heading', { name: 'Bills' });
+  let stale!: (value: ReportListView) => void;
+  call.mockImplementation((command: string) => command === 'report_list'
+    ? new Promise<ReportListView>((resolve) => { stale = resolve; }) : answer(command));
+  fireEvent(window, new Event('focus'));
+  expect(screen.queryByRole('heading', { name: 'Bills' })).toBeNull();
+  call.mockImplementation((command: string) => command === 'report_list'
+    ? Promise.reject({ code: 'licence.expired', message: 'The licence has expired.' }) : answer(command));
+  fireEvent(window, new Event('focus'));
+  await screen.findByText('This part needs a licence');
+  await act(async () => { stale(list); });
+  expect(screen.queryByRole('heading', { name: 'Bills' })).toBeNull();
+  expect(screen.getByText('The licence has expired.')).toBeTruthy();
+  call.mockImplementation(answer);
+  fireEvent(window, new Event('focus'));
+  expect(await screen.findByRole('heading', { name: 'Bills' })).toBeTruthy();
+});
+
+it('preserves an open edit dialog and its typed reason across a valid licence recheck', async () => {
+  const money = { paise: 10000n, text: '100.00' };
+  let recheck: Promise<ReportListView> | undefined;
+  call.mockImplementation(async (command: string) => {
+    if (command === 'report_list' && recheck) return recheck;
+    if (command === 'bills') return { ...(await answer(command) as object), canRevert: true,
+      rows: [{ orderId: 'sale', number: 'A/7', state: 'settled', stateWord: 'Paid', total: money,
+        paidBy: 'Cash', at: 'Today', items: 1, table: null, orderType: 'Parcel', cashier: 'Owner',
+        reprints: 0, edited: false, returned: false, dayClosed: false, correctionOpen: false, refunded: money, approval: null }] };
+    if (command === 'bill_correction_offer') return { needsApproval: false, tenders: [], remaining: money, billTotal: money, closedDay: false, returned: false };
+    if (command === 'reasons') return [{ id: 'fix', text: 'Correct items' }];
+    return answer(command);
+  });
+  open();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit / return items' }));
+  const dialog = await screen.findByRole('dialog', { name: /Edit bill A\/7/ });
+  fireEvent.change(screen.getByLabelText('Anything to add'), { target: { value: 'Keep this reason' } });
+  let allow!: (value: ReportListView) => void;
+  recheck = new Promise((resolve) => { allow = resolve; });
+  fireEvent(window, new Event('focus'));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await act(async () => { allow(list); });
+  expect(await screen.findByRole('dialog', { name: /Edit bill A\/7/ })).toBe(dialog);
+  expect(screen.getByLabelText('Anything to add')).toHaveValue('Keep this reason');
+  expect(call.mock.calls.filter(([command]) => command === 'reasons')).toHaveLength(1);
+});
+
+it('locks Day open/close inside Reports for an expired day-close-only cashier', async () => {
+  call.mockImplementation((command: string) => command === 'report_list'
+    ? Promise.reject({ code: 'licence.expired', message: 'The licence has expired.' }) : answer(command));
+  render(<MayProvider held={['day.close']}><ToastProvider><Reports initial="days" /></ToastProvider></MayProvider>);
+  await screen.findByText('This part needs a licence');
+  expect(screen.queryByRole('button', { name: 'Day open/close' })).toBeNull();
+  expect(call.mock.calls.some(([command]) => command === 'days')).toBe(false);
+});
+
+/** A licensed cashier may close the day without reading a single summary report. */
 it('opens on Day open/close, and nothing else, for somebody who may not read reports', async () => {
   const denied = {
     code: 'auth.denied',
@@ -311,7 +381,7 @@ it('opens on Day open/close, and nothing else, for somebody who may not read rep
   call.mockImplementation((command: string) =>
     command === 'report_list' ? Promise.reject(denied) : answer(command),
   );
-  open();
+  render(<MayProvider held={['day.close']}><ToastProvider><Reports /></ToastProvider></MayProvider>);
   await waitFor(() => expect(call).toHaveBeenCalledWith('days'));
   expect(screen.getByRole('button', { name: 'Day open/close' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Dashboard' })).toBeNull();
@@ -329,6 +399,16 @@ it('opens on Day open/close when asked for it', async () => {
   );
   await waitFor(() => expect(call).toHaveBeenCalledWith('days'));
   expect(call).toHaveBeenCalledWith('report_list');
+});
+
+it('keeps licensed bill lookup available to a cashier without summary report permission', async () => {
+  call.mockImplementation((command: string) => command === 'report_list'
+    ? Promise.reject({ code: 'auth.denied', message: 'Reports need permission.' }) : answer(command));
+  render(<MayProvider held={['bill.revert', 'bill.reprint']}><ToastProvider><Reports /></ToastProvider></MayProvider>);
+  await waitFor(() => expect(call).toHaveBeenCalledWith('bills', expect.anything()));
+  expect(screen.getByRole('button', { name: 'Bills' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Day open/close' })).toBeNull();
+  expect(screen.queryByText('Sales by day')).toBeNull();
 });
 
 it('puts the days beside Bills, and opens them without asking for a report', async () => {

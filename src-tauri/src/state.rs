@@ -1,5 +1,36 @@
 //! What the process holds for its whole life, and the channel it pushes down.
 
+#[cfg(test)]
+mod entitlement_clock_tests {
+    #![allow(clippy::expect_used, reason = "tests: expect is the assertion")]
+    use crate::licence_tests::{a_trading_shop, licence_in};
+    use crate::signin_tests::Scratch;
+
+    #[test]
+    fn a_new_calendar_day_rechecks_the_local_snapshot_before_allowing_reports() {
+        let scratch = Scratch::new("licence_calendar_cache");
+        let app = a_trading_shop(&scratch, "cache");
+        let cached = app.entitlement();
+        app.use_licensing(licence_in(&scratch, "expired", mb_license::Status::Active, -100));
+        let today = crate::flows::today(crate::flows::now());
+        *app.entitlement.write().expect("cache") = (cached, today.previous());
+        assert!(crate::licensing::gate(&app, mb_license::Feature::Reports).is_err());
+        assert_eq!(app.entitlement().standing, mb_license::Standing::Expired);
+    }
+
+    #[test]
+    fn expired_snapshot_cache_is_not_accepted_until_the_next_refresher_tick() {
+        let scratch = Scratch::new("licence_timestamp_cache");
+        let app = a_trading_shop(&scratch, "cache");
+        let mut cached = app.entitlement();
+        app.use_licensing(licence_in(&scratch, "revoked", mb_license::Status::Revoked, 100));
+        cached.good_until = mb_core::Timestamp::EPOCH;
+        *app.entitlement.write().expect("cache") = (cached, crate::flows::today(crate::flows::now()));
+        assert!(crate::licensing::gate(&app, mb_license::Feature::Reports).is_err());
+        assert_eq!(app.entitlement().standing, mb_license::Standing::Revoked);
+    }
+}
+
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use mb_db::Db;
@@ -42,7 +73,7 @@ pub struct App {
     /// The licence, and everything that talks to the cloud about it.
     licensing: Mutex<mb_license::Licensing>,
     /// The decided entitlement, held.
-    entitlement: std::sync::RwLock<mb_license::Entitlement>,
+    entitlement: std::sync::RwLock<(mb_license::Entitlement, mb_core::BusinessDay)>,
     /// What the counter knows about updates.
     updates: Mutex<crate::updates::UpdateState>,
     /// Which till this machine is.
@@ -107,7 +138,7 @@ impl App {
             provider: std::sync::RwLock::new(Arc::new(mb_core::provider::Manual)),
             network: Mutex::new(None),
             licensing: Mutex::new(licensing),
-            entitlement: std::sync::RwLock::new(entitlement),
+            entitlement: std::sync::RwLock::new((entitlement, crate::flows::today(now))),
             updates: Mutex::new(crate::updates::UpdateState {
                 running: crate::updates::Version::running().to_string(),
                 is_dev_build: !crate::updates::is_a_release_build(),
@@ -288,11 +319,23 @@ impl App {
     /// What this shop is entitled to, right now.
     #[must_use]
     pub fn entitlement(&self) -> mb_license::Entitlement {
-        match self.entitlement.read() {
-            Ok(held) => held.clone(),
-            // A poisoned lock means another thread panicked while holding it.
-            Err(poisoned) => poisoned.into_inner().clone(),
+        let at = crate::flows::now();
+        let day = crate::flows::today(at);
+        let (cached, evaluated_day) = self.cached_entitlement();
+        if evaluated_day != day || cached.is_stale(at) {
+            // Re-evaluate the signed local snapshot. Never ask the network from a gate.
+            // The usual fast path retains the independent lock while cloud work runs.
+            if self.re_decide() {
+                crate::licensing::tell_the_window(self);
+            }
+            self.cached_entitlement().0
+        } else {
+            cached
         }
+    }
+
+    fn cached_entitlement(&self) -> (mb_license::Entitlement, mb_core::BusinessDay) {
+        self.entitlement.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
     }
 
     /// Do something with the licence, and re-decide afterwards.
@@ -301,7 +344,9 @@ impl App {
             let mut held = lock(&self.licensing);
             f(&mut held)
         };
-        self.re_decide();
+        if self.re_decide() {
+            crate::licensing::tell_the_window(self);
+        }
         outcome
     }
 
@@ -319,15 +364,16 @@ impl App {
     }
 
     /// Decide again from the cached snapshot, and hold the answer.
-    pub fn re_decide(&self) {
+    pub fn re_decide(&self) -> bool {
         let now = crate::flows::now();
         let fresh = {
             let held = lock(&self.licensing);
             held.entitlement(now, crate::flows::today(now))
         };
-        if let Ok(mut slot) = self.entitlement.write() {
-            *slot = fresh;
-        }
+        let mut slot = self.entitlement.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let changed = slot.0.standing != fresh.standing || slot.0.features() != fresh.features();
+        *slot = (fresh, crate::flows::today(now));
+        changed
     }
 
     /// Remember that the floor changed the order the cashier has open.
