@@ -100,7 +100,7 @@ export function Health({ onGoTo }: { onGoTo?: (screen: string) => void }) {
 
       {/* The manifest before the zip. */}
       <Panel
-        title="Send us what is happening"
+        title="Send diagnostics"
         note="If something above will not come right, this is what we need to look at it."
       >
         {plan ? (

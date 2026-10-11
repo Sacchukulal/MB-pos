@@ -54,7 +54,7 @@ export function Printers() {
     [complain, toast],
   );
 
-  if (!view) return <Spinner label="Reading the printer setup" />;
+  if (!view) return <Spinner label="Loading printer settings" />;
 
   const bill = view.printers.find((p) => p.isDefault) ?? null;
   const billName = bill && !bill.isStandIn ? bill.address : '';

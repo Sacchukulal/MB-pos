@@ -176,7 +176,7 @@ export function Menu() {
   if (categories === null) {
     return (
       <Page className="mb-menu">
-        <Spinner label="Reading the menu" />
+        <Spinner label="Loading menu" />
       </Page>
     );
   }
@@ -775,7 +775,7 @@ function EditItem({
           />
         </div>
         <MoneyInput
-          label="What it costs you"
+          label="Cost price"
           hint="Only you see this; it is what makes a margin report possible."
           value={cost}
           onChange={setCost}
@@ -823,7 +823,7 @@ function BulkPrices({
   return (
     <Modal open title="Change prices" onClose={onClose}>
       <Select
-        label="Which items"
+        label="Items"
         value={categoryId}
         onChange={(e) => setCategoryId(e.target.value)}
         options={[
@@ -908,7 +908,7 @@ function ImportMenu({
     <Modal open title="Import a menu" onClose={onClose} wide>
       <p className="mb-import__file">{path}</p>
       <Choice
-        label="What should this file do?"
+        label="Import action"
         value={mode}
         options={[
           { value: 'update', label: 'Update the menu' },
@@ -939,7 +939,7 @@ function ImportMenu({
           ) : null}
         </div>
       ) : (
-        <Spinner label="Reading the file" />
+        <Spinner label="Loading file" />
       )}
 
       <div className="mb-row mb-row--end">

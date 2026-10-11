@@ -133,7 +133,7 @@ export function Tills() {
       .finally(() => setBusy(false));
   };
 
-  if (!view) return <Spinner label="Looking at the tills" />;
+  if (!view) return <Spinner label="Loading tills" />;
 
   return (
     <div className="mb-tills">
@@ -253,12 +253,12 @@ export function Tills() {
         }
       >
         <Input
-          label="What this till is called"
+          label="Till name"
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
         />
         <Input
-          label="What goes in front of its bill numbers"
+          label="Bill number prefix"
           value={prefix}
           hint="A/ or B/ — so this till's bills read A/0001 and the other's read B/0001. No two tills may use the same one."
           onChange={(e) => setPrefix(e.currentTarget.value)}
@@ -297,7 +297,7 @@ export function Tills() {
           }
         />
         <Input
-          label="The short code"
+          label="Pairing code"
           value={joining?.token ?? ''}
           hint="Under the QR on the main till's Phones screen. It stops working after a few minutes."
           onChange={(e) =>
@@ -305,7 +305,7 @@ export function Tills() {
           }
         />
         <Input
-          label="What to call this till"
+          label="Till name"
           value={joining?.name ?? ''}
           hint="Somebody at the main till reads this before pressing Allow."
           onChange={(e) =>
@@ -313,7 +313,7 @@ export function Tills() {
           }
         />
         <Input
-          label="What goes in front of its bill numbers"
+          label="Bill number prefix"
           value={joining?.prefix ?? ''}
           hint="B/ if the main till uses A/. Without it two tills would print the same bill number."
           onChange={(e) =>

@@ -129,7 +129,7 @@ export function Expenses() {
   return (
     <Page className="mb-expenses">
       <PageHeader
-        title="Spends"
+        title="Expenses"
         count={view.rows.length}
         actions={
           <Button variant="secondary" onClick={() => setDrawer(true)}>
@@ -142,7 +142,7 @@ export function Expenses() {
       {/* Two fields and Enter. */}
       <div className="mb-row mb-expenses__quick">
         <Input
-          label="What"
+          label="Description"
           size="lg"
           value={what}
           autoFocus
@@ -171,7 +171,7 @@ export function Expenses() {
           ]}
         />
         <Select
-          label="How"
+          label="Payment mode"
           size="sm"
           value={mode}
           onChange={(e) => setMode(e.target.value)}
@@ -229,7 +229,7 @@ export function Expenses() {
 
       {view.rows.length === 0 ? (
         <EmptyState
-          title="Nothing spent today"
+          title="No expenses today"
           hint="Record what goes out as it goes out — that is what makes the profit figure true."
         />
       ) : (
@@ -398,7 +398,7 @@ function EditExpense({
 
   return (
     <Modal open title={row.description} onClose={onClose} wide>
-      <Input label="What" value={what} autoFocus onChange={(e) => setWhat(e.target.value)} />
+      <Input label="Description" value={what} autoFocus onChange={(e) => setWhat(e.target.value)} />
       <MoneyInput label="Amount" value={amount} onChange={setAmount} />
       <Select
         label="Category"
@@ -409,7 +409,7 @@ function EditExpense({
           ...view.allCategories.map((c) => ({ value: c.id ?? '', label: c.name })),
         ]}
       />
-      <Select label="How" value={mode} onChange={(e) => setMode(e.target.value)} options={MODES} />
+      <Select label="Payment mode" value={mode} onChange={(e) => setMode(e.target.value)} options={MODES} />
       <Input label="Paid to" value={paidTo} onChange={(e) => setPaidTo(e.target.value)} />
       <Input
         label="Their bill number"
@@ -502,7 +502,7 @@ function SpendCategories({
   return (
     <Modal
       open
-      title="What you spend on"
+      title="Expense categories"
       note="The headings your spending is sorted under, and what the totals at the bottom of the screen are grouped by."
       onClose={onClose}
     >

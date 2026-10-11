@@ -180,7 +180,7 @@ export function UpdateDialog({ run }: { run: UpdateRun }) {
   return (
     <Modal
       open
-      title="The update did not go through"
+      title="Update failed"
       onClose={stay}
       actions={
         <Button variant="primary" onClick={run.close}>

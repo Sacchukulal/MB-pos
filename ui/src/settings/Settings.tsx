@@ -224,7 +224,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
   if (!view) {
     return (
       <div className="mb-settings">
-        <Spinner label="Reading this shop's settings" />
+        <Spinner label="Loading settings" />
       </div>
     );
   }
@@ -234,7 +234,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
     return (
       <div className="mb-settings mb-settings--empty">
         <EmptyState
-          title="There is no shop to change the settings of"
+          title="No shop configured"
           says={
             view.trouble ??
             'Create a shop or restore a backup, and these settings will be here.'
@@ -317,7 +317,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
             </Panel>
           ) : (
             <EmptyState
-              title="Nothing here for you"
+              title="No accessible settings"
               hint="You do not have permission to change any of this shop's settings."
             />
           )}
@@ -405,7 +405,7 @@ function Paper({ preview, kitchen }: { preview: PreviewView | null; kitchen: boo
             ) : null}
           </>
         ) : (
-          <Spinner label="Drawing the sample" />
+          <Spinner label="Loading preview" />
         )}
       </Scroller>
     </aside>
@@ -439,7 +439,7 @@ function Found({
   if (found.length === 0) {
     return (
       <EmptyState
-        title="Nothing matches that"
+        title="No matching settings"
         hint="Try a plainer word: QR, thank you, round off, backup."
         action={<Button onClick={onClear}>Show the sections again</Button>}
       />

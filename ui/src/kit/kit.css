@@ -68,14 +68,11 @@
  * A toggle. Pressed is the accent, the same as a chosen segment, so "this is the one" looks the
  * same whether it stands alone (Cash, beside its box) or in a row (Dine in · Parcel).
  */
-.mb-button[aria-pressed='true'] {
+.mb-button[aria-pressed='true'],
+.mb-button[aria-pressed='true']:hover:not(:disabled) {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: var(--accent);
-}
-.mb-button[aria-pressed='true']:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
 }
 
 /* Ghost: no fill, no edge. A second action, a rail item, a row action. */
@@ -86,6 +83,16 @@
 .mb-button--quiet:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--text);
+}
+
+/* Quiet toggles retain their selection on hover. One complete colour pair per state. */
+.mb-button--quiet[aria-pressed='true'],
+.mb-button--quiet[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-color: transparent;
+  font-weight: var(--weight-bold);
+  box-shadow: none;
 }
 
 /*

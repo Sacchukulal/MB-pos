@@ -44,7 +44,7 @@ export function Before({
   return (
     <Modal
       open={open}
-      title="The bill, before it prints"
+      title="Bill preview"
       onClose={onClose}
       actions={
         onPrint ? (

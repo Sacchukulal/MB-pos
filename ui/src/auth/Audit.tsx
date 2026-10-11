@@ -86,7 +86,7 @@ export function Audit() {
 
       <div className="mb-row">
         <Select
-          label="Who"
+          label="Staff member"
           value={who}
           onChange={(e) => setWho(e.target.value)}
           options={[
@@ -95,7 +95,7 @@ export function Audit() {
           ]}
         />
         <Select
-          label="What"
+          label="Action"
           value={what}
           onChange={(e) => setWhat(e.target.value)}
           options={[
@@ -124,7 +124,7 @@ export function Audit() {
 
       {view && view.entries.length === 0 ? (
         <EmptyState
-          title="Nothing here yet"
+          title="No activity recorded"
           hint="Signing in, voiding a bill, changing a price and closing the day all land here."
         />
       ) : (

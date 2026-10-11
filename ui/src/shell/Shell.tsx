@@ -115,7 +115,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     // "Spends", not "Expenses": the rail is read at a glance and the shorter word is the one a
     // shopkeeper uses.
     id: 'expenses',
-    label: 'Spends',
+    label: 'Expenses',
     icon: 'banknote',
     render: () => <Expenses />,
     needs: 'expenses.manage',
@@ -260,6 +260,7 @@ export function Shell() {
   /** The More screen last opened, which is where the More button goes back to. */
   const [lastMore, setLastMore] = useState<string | null>(null);
   const setScreen = useCallback((id: string) => {
+    if (id === 'print-queue') { setQueueOpen(true); return; }
     const slash = id.indexOf('/');
     setSub(slash < 0 ? null : id.slice(slash + 1));
     setScreenOnly(slash < 0 ? id : id.slice(0, slash));
@@ -474,7 +475,7 @@ export function Shell() {
     async (id: string) => {
       try {
         await call('retry_print_job', { id });
-        toast.show('info', 'Trying that print again.');
+        toast.show('info', 'Print queued for retry.');
       } catch (cause) {
         if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
       }
@@ -497,7 +498,7 @@ export function Shell() {
   const onRetryAll = useCallback(async () => {
     try {
       const put = await call('retry_parked_print_jobs');
-      toast.show('info', `Trying ${plural(put, 'print')} again.`);
+      toast.show('info', `${plural(put, 'print')} queued for retry.`);
     } catch (cause) {
       if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
     }
@@ -708,7 +709,7 @@ export function Shell() {
             // A role with no screen at all. The counter still locks, so the next person can
             // sign in; the owner fixes the role.
             <EmptyState
-              title="Nothing to open here"
+              title="No accessible screens"
               hint="This role has no screens on the counter yet. The owner can change what it may do under Staff, on the Roles tab."
             />
           ) : (
@@ -1022,7 +1023,7 @@ function TopBar({
           onClick={onOpenQueue}
           aria-label={
             needsAttention
-              ? 'A print did not come out — open the print queue'
+              ? 'Printing failed — open the print queue'
               : 'Print queue'
           }
         >
@@ -1034,9 +1035,9 @@ function TopBar({
           */}
           <span className="mb-topbar__give">
             {needsAttention
-              ? 'NOT PRINTED'
+              ? 'Printing failed'
               : jobs.length > 0
-                ? `${jobs.length} printing`
+                ? `${jobs.length} print jobs`
                 : 'Printing'}
           </span>
         </button>
@@ -1167,7 +1168,7 @@ export function PrintQueuePanel({
   onClose: () => void;
   onRetry: (id: string) => void;
   onDismiss: (id: string) => void;
-  /** The same two things, for every parked job at once. */
+  /** Retry parked jobs; cancel all outstanding jobs. */
   onRetryAll: () => void;
   onDismissAll: () => void;
 }) {
@@ -1175,23 +1176,24 @@ export function PrintQueuePanel({
   return (
     <Modal
       open={open}
-      title="Printing"
+      title="Print queue"
       onClose={onClose}
       wide
       actions={
-        jobs.length > 1 ? (
-          <>
+        <>
+          {jobs.length > 1 ? (
             <Button variant="quiet" onClick={onDismissAll}>
-              Give up on all {jobs.length}
+              Cancel all prints ({jobs.length})
             </Button>
-            {parked > 1 ? <Button onClick={onRetryAll}>Try all {parked} again</Button> : null}
-          </>
-        ) : undefined
+          ) : null}
+          {parked > 0 && jobs.length > 1 ? <Button onClick={onRetryAll}>Retry failed ({parked})</Button> : null}
+          <Button variant="quiet" onClick={onClose}>Close</Button>
+        </>
       }
     >
       <div className="mb-queue__panel">
         {jobs.length === 0 ? (
-          <span className="mb-muted">Everything has printed.</span>
+          <span className="mb-muted">No pending print jobs.</span>
         ) : (
           jobs.map((job) => (
             <div
@@ -1203,7 +1205,7 @@ export function PrintQueuePanel({
                 .filter(Boolean)
                 .join(' ')}
             >
-              <div className="mb-stack">
+              <div className="mb-queue__description">
                 <span className="mb-queue__what">
                   {job.what}
                   {job.reason ? ` — ${job.reason}` : ''}
@@ -1211,19 +1213,21 @@ export function PrintQueuePanel({
                 <span className="mb-queue__where">
                   {job.printer} · {job.state}
                 </span>
-                {job.lastError ? (
+                {job.needsAttention && job.errorSummary ? <Hint>{job.errorSummary}</Hint> : null}
+                {job.lastError ? <details className="mb-queue__details">
+                  <summary>{job.needsAttention ? 'Details' : 'Previous error'}</summary>
                   <Hint>{job.lastError}</Hint>
-                ) : null}
+                </details> : null}
               </div>
-              {/* Any job can be given up on; only a parked one can be tried again. */}
-              <div className="mb-row">
+              {/* Cancelling concerns the print job, never the bill or order. */}
+              <div className="mb-queue__actions">
                 {job.needsAttention ? (
                   <Button size="sm" onClick={() => onRetry(job.id)}>
-                    Try again
+                    Retry
                   </Button>
                 ) : null}
                 <Button size="sm" variant="quiet" onClick={() => onDismiss(job.id)}>
-                  Give up
+                  Cancel print
                 </Button>
               </div>
             </div>

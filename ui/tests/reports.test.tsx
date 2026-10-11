@@ -20,6 +20,7 @@ vi.mock('../src/ipc/call', () => ({
 }));
 
 const { Reports } = await import('../src/reports/Reports');
+const { Bills } = await import('../src/reports/Bills');
 const { ToastProvider } = await import('../src/kit');
 
 import type { ReportListView } from '../src/ipc/generated/ReportListView';
@@ -32,10 +33,10 @@ const list: ReportListView = {
     { label: 'This month', from: '2026-08-01', to: '2026-08-09' },
   ],
   reports: [
-    { id: 'sales_day', title: 'Sales by day', group: 'Sales' },
-    { id: 'tax_rate', title: 'Tax, rate-wise', group: 'Tax' },
+    { id: 'sales_day', title: 'Sales by day', description: 'Sales grouped by business day.', group: 'Sales' },
+    { id: 'tax_rate', title: 'Tax, rate-wise', description: 'Tax grouped by rate.', group: 'Tax' },
     // A report invented for this test.
-    { id: 'wastage', title: 'Wastage by kitchen', group: 'Kitchen' },
+    { id: 'wastage', title: 'Wastage by kitchen', description: 'Recorded kitchen wastage.', group: 'Kitchen' },
   ],
 };
 
@@ -127,6 +128,107 @@ function open() {
   );
 }
 
+it('loads Bills immediately once, with a stable header while the first response is pending', async () => {
+  vi.useFakeTimers();
+  try {
+    const fresh = { ...(await answer('bills') as object), canExport: true };
+    let finish!: (value: unknown) => void;
+    call.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<ToastProvider><Bills periods={list.periods} /></ToastProvider>);
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith('bills', { filter: {
+      period: { from: '2026-08-09', to: '2026-08-09' }, query: null, cashier: null, state: null, mode: null,
+    } });
+    const from = screen.getByLabelText('From');
+    const output = screen.getByRole('button', { name: 'Export' });
+    expect(from).toHaveValue('09-08-2026');
+    expect(output).toBeDisabled();
+    await act(async () => { finish(fresh); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('From')).toBe(from);
+    expect(screen.getByRole('button', { name: 'Export' })).toBe(output);
+    expect(output).toBeEnabled();
+  } finally { vi.useRealTimers(); }
+});
+
+it('uses the backend business day without refetching when no report catalogue is available', async () => {
+  vi.useFakeTimers();
+  try {
+    const fresh = { ...(await answer('bills') as object), canExport: true };
+    call.mockResolvedValue(fresh);
+    render(<ToastProvider><Bills /></ToastProvider>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls[0]?.[1].filter.period).toBeNull();
+    expect(screen.getByLabelText('From')).toHaveValue('09-08-2026');
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'CSV' }));
+    expect(call).toHaveBeenLastCalledWith('bills_csv', { filter: {
+      period: { from: '2026-08-09', to: '2026-08-09' }, query: null, cashier: null, state: null, mode: null,
+    } });
+    await act(async () => {});
+  } finally { vi.useRealTimers(); }
+});
+
+it('delays only Bills search, ignores superseded responses, and keeps output disabled until current', async () => {
+  vi.useFakeTimers();
+  try {
+    const fresh = { ...(await answer('bills') as object), canExport: true };
+    call.mockResolvedValue(fresh);
+    render(<ToastProvider><Bills periods={list.periods} /></ToastProvider>);
+    await act(async () => {});
+    call.mockClear();
+    const pending: Array<(value: unknown) => void> = [];
+    call.mockImplementation(() => new Promise((resolve) => { pending.push(resolve); }));
+    const search = screen.getByRole('searchbox');
+    const output = screen.getByRole('button', { name: 'Export' });
+    fireEvent.change(search, { target: { value: 'a' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    fireEvent.change(search, { target: { value: 'ab' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(149); });
+    expect(call).not.toHaveBeenCalled();
+    expect(output).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls[0]?.[1].filter.query).toBe('ab');
+    // Dropdowns apply immediately, even while an older query is still running.
+    fireEvent.change(screen.getByLabelText('Paid by'), { target: { value: 'Card' } });
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(call.mock.calls[1]?.[1].filter.mode).toBe('Card');
+    await act(async () => { pending[0]?.(fresh); });
+    expect(output).toBeDisabled();
+    await act(async () => { pending[1]?.(fresh); });
+    expect(output).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Export' })).toBe(output);
+    fireEvent.click(screen.getByRole('button', { name: 'This month' }));
+    expect(call).toHaveBeenCalledTimes(3);
+    expect(call.mock.calls[2]?.[1].filter.period).toEqual({ from: '2026-08-01', to: '2026-08-09' });
+    expect(output).toBeDisabled();
+    await act(async () => { pending[2]?.(fresh); });
+  } finally { vi.useRealTimers(); }
+});
+
+it('keeps Bills controls usable after a failed refresh and refuses an incomplete date range', async () => {
+  const fresh = { ...(await answer('bills') as object), canExport: true };
+  call.mockResolvedValue(fresh);
+  render(<ToastProvider><Bills periods={list.periods} /></ToastProvider>);
+  const output = screen.getByRole('button', { name: 'Export' });
+  await waitFor(() => expect(output).toBeEnabled());
+  call.mockRejectedValueOnce({ code: 'db.failed', message: 'Could not read bills.' });
+  fireEvent.change(screen.getByLabelText('State'), { target: { value: 'settled' } });
+  expect(await screen.findByText('Could not load bills')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Export' })).toBe(output);
+  expect(output).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(output).toBeEnabled());
+  call.mockClear();
+  fireEvent.change(screen.getByLabelText('From'), { target: { value: '' } });
+  expect(screen.getByText('Choose a valid date range')).toBeTruthy();
+  expect(call).not.toHaveBeenCalled();
+  expect(output).toBeDisabled();
+});
+
 /** Unfold one group of the rail, the way a person does. */
 async function unfold(group: string) {
   await waitFor(() => expect(screen.getByRole('button', { name: group })).toBeTruthy());
@@ -156,6 +258,13 @@ it('renders a report it has never heard of, columns and all', async () => {
   expect(screen.getByText('1,650.00')).toBeTruthy();
   // The note came written.
   expect(screen.getByText('Two kitchens have no waste log for this period.')).toBeTruthy();
+});
+
+it('opens a dashboard report link without changing the default Bills destination', async () => {
+  render(<ToastProvider><Reports initial="sales_day?from=2026-08-01&to=2026-08-07" /></ToastProvider>);
+  await waitFor(() => expect(call).toHaveBeenCalledWith('report', {
+    id: 'sales_day', period: { from: '2026-08-01', to: '2026-08-07' },
+  }));
 });
 
 it('shows the comparison as the sentence Rust wrote, not as a percentage it worked out', async () => {
@@ -189,9 +298,10 @@ it('asks Rust for the period rather than working out what today is', async () =>
 
 it('exports the report on screen, through Rust, and says where it went', async () => {
   await openOnAReport();
-  await waitFor(() => expect(screen.getByText('Save as CSV')).toBeTruthy());
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Export' }));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Save as CSV' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'CSV' }));
   await waitFor(() =>
     expect(call).toHaveBeenCalledWith('report_csv', {
       id: 'sales_day',
@@ -203,8 +313,55 @@ it('exports the report on screen, through Rust, and says where it went', async (
     expect(screen.getByText('Saved as Wastage.csv, in your Documents folder.')).toBeTruthy(),
   );
 
-  fireEvent.click(screen.getByRole('button', { name: 'Save as PDF' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'PDF' }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('report_pdf', expect.anything()));
+});
+
+it('keeps period buttons, ISO requests and accessible context without a duplicate visible title', async () => {
+  await openOnAReport();
+  await waitFor(() => expect(screen.getByText('Tandoor')).toBeTruthy());
+  expect(screen.getByRole('heading', { name: 'Sales by day' })).toHaveClass('mb-visually-hidden');
+  expect(screen.getByRole('button', { name: 'Today' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('textbox', { name: 'From' })).toHaveValue('09-08-2026');
+  fireEvent.click(screen.getByRole('button', { name: 'Report info' }));
+  expect(screen.getByRole('dialog', { name: 'Sales by day' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('keeps report controls in place and prevents output while a new period loads', async () => {
+  await openOnAReport();
+  await waitFor(() => expect(screen.getByText('Tandoor')).toBeTruthy());
+  call.mockImplementation((command: string) => command === 'report' ? new Promise(() => {}) : answer(command));
+  fireEvent.click(screen.getByRole('button', { name: 'This month' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Print' })).toBeDisabled());
+  expect(screen.getByRole('button', { name: 'Share' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Today' })).toBeEnabled();
+  expect(screen.queryByText('Tandoor')).toBeNull();
+});
+
+it('shares through the existing commands and gives the menu keyboard focus and Escape return', async () => {
+  call.mockImplementation((command: string) => command === 'share_report'
+    ? Promise.resolve({ text: 'Report', says: 'Ready to share', caveat: '' }) : answer(command));
+  await openOnAReport();
+  const share = await screen.findByRole('button', { name: 'Share' });
+  await waitFor(() => expect(share).toBeEnabled());
+  share.focus();
+  fireEvent.click(share);
+  expect(screen.getByRole('menuitem', { name: 'Copy' })).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  expect(screen.getByRole('menuitem', { name: 'WhatsApp' })).toHaveFocus();
+  fireEvent.click(screen.getByRole('menuitem', { name: 'WhatsApp' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('share_report', {
+    id: 'sales_day', period: { from: '2026-08-09', to: '2026-08-09' }, channel: 'whats_app',
+  }));
+  share.focus();
+  fireEvent.click(share);
+  fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+  await waitFor(() => expect(share).toHaveFocus());
+  expect(screen.queryByRole('menu')).toBeNull();
 });
 
 it('prints the report on screen, on the shop printer, for the period chosen', async () => {

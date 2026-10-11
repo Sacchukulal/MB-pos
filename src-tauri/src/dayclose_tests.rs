@@ -1528,11 +1528,9 @@ fn the_dashboard_draws_the_period_it_is_asked_for() {
 
     // Today: by the hour, and every chart says one bill.
     let today_view = dashboard_on(&app, None).expect("today");
-    assert_eq!(today_view.title, "Today, so far");
     assert_eq!(today_view.from, today().to_string());
-    assert_eq!(today_view.stats[0].label, "Net sales");
-    assert_eq!(today_view.stats[0].value, one.to_plain_string());
-    assert_eq!(today_view.stats[0].note, "All payment methods · 1 bill");
+    assert_eq!(today_view.summary.sales, one.to_indian_string());
+    assert_eq!(today_view.summary.bills, "1 bill");
     let ids: Vec<&str> = today_view.charts.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(
         ids,
@@ -1550,7 +1548,7 @@ fn the_dashboard_draws_the_period_it_is_asked_for() {
     assert_eq!(trend.title, "Sales by hour");
     assert_eq!(trend.points.len(), 1, "one selling hour, no gaps to fill");
     assert_eq!(trend.points[0].share, 1000);
-    assert_eq!(trend.points[0].value, one.to_plain_string());
+    assert_eq!(trend.points[0].value, one.to_indian_string());
     let payment = &today_view.charts[1];
     assert_eq!(payment.kind, "donut");
     assert_eq!(payment.points[0].label, "Cash");
@@ -1571,9 +1569,9 @@ fn the_dashboard_draws_the_period_it_is_asked_for() {
         }),
     )
     .expect("three days");
-    assert!(three.title.ends_with("· 3 days"), "{}", three.title);
-    assert_eq!(three.stats[0].note, "All payment methods · 3 bills");
-    assert_eq!(three.stats[2].label, "Cash received");
+    assert_eq!(three.from, two_ago.to_string());
+    assert_eq!(three.summary.bills, "3 bills");
+    assert!(three.summary.drawer.is_none(), "a range has receipts, not one drawer balance");
     let trend = &three.charts[0];
     assert_eq!(trend.title, "Sales by day");
     assert_eq!(trend.points.len(), 3);

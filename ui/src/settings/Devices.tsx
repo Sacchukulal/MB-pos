@@ -80,7 +80,7 @@ export function Devices() {
   return (
     <Card className="mb-devices">
       <SectionHeader
-        title="What is plugged in"
+        title="Connected devices"
         note={view.says}
         action={
           <Button size="sm" variant="secondary" onClick={load}>

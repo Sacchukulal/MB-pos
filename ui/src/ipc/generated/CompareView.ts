@@ -14,6 +14,6 @@ period: string, before: string, now: string,
  */
 summary: string, 
 /**
- * `up`, `down` or `same`.
+ * `up`, `down`, `same`, or `none` when the previous value is zero.
  */
 direction: string, };

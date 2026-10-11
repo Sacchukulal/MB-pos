@@ -133,7 +133,7 @@ export function Delivery() {
             value={r.riderId}
             onChange={(e) => move(r, r.state, e.target.value)}
             options={[
-              { value: '', label: 'Nobody yet' },
+              { value: '', label: 'Unassigned' },
               ...view.allRiders.map((p) => ({ value: p.id, label: p.name })),
             ]}
           />
@@ -267,18 +267,18 @@ export function Delivery() {
         </Panel>
 
         <Panel
-          title="The riders"
+          title="Riders"
           note="What each of them collected, and what is still in their pocket."
           flush
           actions={
             <Button variant="secondary" onClick={() => setChoosingRiders(true)}>
-              Who can ride
+              Delivery riders
             </Button>
           }
         >
           {view.riders.length === 0 ? (
             <EmptyState
-              title="Nobody is out"
+              title="No active riders"
               /* The old words sent people to a screen that could not do it. */
               hint="Say who rides — the button above — and then give them an order."
             />
@@ -305,7 +305,7 @@ export function Delivery() {
       >
         <Stack>
           <Input
-            label="What happened"
+            label="Failure reason"
             value={why}
             autoFocus
             onChange={(e) => setWhy(e.target.value)}
@@ -333,7 +333,7 @@ export function Delivery() {
       >
         <Stack>
           <MoneyInput
-            label="How much they handed over"
+            label="Cash received"
             value={amount}
             autoFocus
             onChange={setAmount}
@@ -391,7 +391,7 @@ function WhoRides({
   const isRider = (id: string) => view.riders.some((r) => r.id === id);
 
   return (
-    <Modal open title="Who can ride" onClose={onClose}>
+    <Modal open title="Delivery riders" onClose={onClose}>
       <Stack>
         <p className="mb-muted">
           Anybody ticked here can be given a delivery, and the cash they collect

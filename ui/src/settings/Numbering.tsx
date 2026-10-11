@@ -38,7 +38,7 @@ export function Numbering() {
     [toast],
   );
 
-  if (!view) return <Spinner label="Reading the numbering" />;
+  if (!view) return <Spinner label="Loading numbering settings" />;
 
   return (
     <div className="mb-numbering">
@@ -80,7 +80,7 @@ function Counter({
           onChange={(event) => set({ prefix: event.currentTarget.value })}
         />
         <NumberInput
-          label="Pad with zeroes to"
+          label="Number of digits"
           hint="Digits. 0 means no padding: bill 7 prints as 7, not 0007."
           value={String(draft.padWidth)}
           onChange={(event) => set({ padWidth: Number(event.currentTarget.value) || 0 })}
@@ -92,7 +92,7 @@ function Counter({
           onChange={(event) => set({ start: Number(event.currentTarget.value) || 1 })}
         />
         <NumberInput
-          label="The next number"
+          label="Next number"
           hint={
             counter.kind === 'bill'
               ? 'IT MUST NEVER GO BACKWARDS. Two bills with the same number is a GST return the department will reject.'

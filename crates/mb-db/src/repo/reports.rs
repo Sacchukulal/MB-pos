@@ -297,6 +297,18 @@ impl<'a> ReportsRepo<'a> {
         Ok(out)
     }
 
+    /// Tips included in the payment allocation, signed on the original sale and return days.
+    pub fn sales_tips(&self, outlet: &str, period: Period) -> Result<Money, DbError> {
+        let amount: i64 = self.tx.query_row(
+            "SELECT COALESCE(SUM(CASE WHEN o.sale_count = 1 THEN p.tip ELSE -p.tip END), 0)
+               FROM report_sale_orders o JOIN payments p ON p.order_id = o.source_order_id
+              WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3 AND o.state = 'settled'",
+            rusqlite::params![outlet, encode::business_day_to_sql(period.from), encode::business_day_to_sql(period.to)],
+            |row| row.get(0),
+        )?;
+        Ok(encode::money_from_sql(amount))
+    }
+
     /// Unique live bills, even when one bill appears in multiple report buckets.
     pub fn sold_count(&self, outlet: &str, period: Period) -> Result<i64, DbError> {
         Ok(self.tx.query_row(

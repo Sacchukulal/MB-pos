@@ -109,7 +109,7 @@ describe('recording what goes out (scope 10.6)', () => {
     show();
     await screen.findByText('Mandi run');
 
-    fireEvent.change(screen.getByLabelText('What'), { target: { value: 'Milk' } });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Milk' } });
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '40' } });
     fireEvent.keyDown(screen.getByLabelText('Amount'), { key: 'Enter' });
 

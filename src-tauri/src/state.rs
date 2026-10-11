@@ -1095,12 +1095,14 @@ pub struct PrintJobView {
     pub printer: String,
     /// "Bill", "Kitchen ticket" — words, not tags.
     pub what: String,
-    /// "Waiting", "Printing", "Failed — will try again", "Not printed".
+    /// Queued, Printing, Retrying or Failed.
     pub state: String,
     /// True only for a parked job: the one the cashier has to see.
     pub needs_attention: bool,
     pub reason: Option<String>,
     pub last_error: Option<String>,
+    /// Short current failure; raw diagnostics remain in last_error.
+    pub error_summary: Option<String>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {

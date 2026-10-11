@@ -688,7 +688,7 @@ describe('the processing orders (2026-08-27)', () => {
 
   it('says so when nothing is cooking', () => {
     render(<Processing orders={[]} onOpen={vi.fn()} />);
-    expect(screen.getByText('Nothing cooking')).toBeInTheDocument();
+    expect(screen.getByText('No active kitchen orders')).toBeInTheDocument();
   });
 
   // 2026-09-13: the token is the number on the kitchen ticket and the bill, and the only one

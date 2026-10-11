@@ -25,6 +25,29 @@ fn send(app: &App, id: &str, payments: &[(&str, i64)], key: &str) -> crate::word
 }
 
 #[test]
+fn dashboard_return_breakdown_reconciles_tips_without_inventing_a_cash_refund() {
+    let scratch = Scratch::new("dashboard_return_tips");
+    let app = a_trading_shop(&scratch);
+    app.use_licensing(crate::licence_tests::licence_in(&scratch, "dashboard_return_tips", mb_license::Status::Active, 90));
+    crate::signin_tests::order_teas(&app, 4);
+    app.with_cart_mut(|state| {
+        state.settlement.set_tip(Money::from_paise(500)).expect("tip");
+        state.settlement.add(mb_core::Payment::new(PaymentMode::Cash, Money::from_paise(11000)).expect("cash")).expect("payment");
+        Ok(())
+    }).expect("cash with tip");
+    crate::flows::complete_bill_on(&app, None).expect("sale");
+    let id = crate::corrections::list_bills_on(&app).expect("bills")[0].order_id.clone();
+    make_historical(&app, &id);
+    send(&app, &id, &[], "dashboard_return_tips").expect("return recorded, refund still unpaid");
+    let summary = crate::reports::dashboard_on(&app, None).expect("dashboard").summary;
+    assert_eq!(summary.sales, "-₹105.00");
+    assert_eq!(summary.payments.iter().find(|r| r.id == "cash").expect("cash").value, "-₹110.00");
+    assert_eq!(summary.payments.iter().find(|r| r.id == "tips").expect("tips reversed").value, "₹5.00");
+    assert!(!summary.payments.iter().any(|r| r.id == "unallocated"));
+    assert_eq!(summary.drawer.expect("drawer").expected, "₹0.00", "a return is not a physical payout");
+}
+
+#[test]
 fn a_closed_mixed_bill_returns_today_once_and_keeps_the_original_and_close_intact() {
     let scratch = Scratch::new("historical_return_mixed"); let app = a_trading_shop(&scratch);
     let id = paid(&app, vec![(PaymentMode::Cash, 6000), (PaymentMode::Card, 4500)]);

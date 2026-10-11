@@ -6,7 +6,6 @@ import {
   Badge,
   Button,
   Caption,
-  DateRangePicker,
   EmptyState,
   Fact,
   Facts,
@@ -15,7 +14,6 @@ import {
   MoneyInput,
   Notice,
   Numeric,
-  PageHeader,
   Panel,
   RowMenu,
   Scroller,
@@ -23,7 +21,7 @@ import {
   Select,
   Spinner,
   Table,
-  Toolbar,
+  plural,
   useToast,
   freshId,
   type BadgeTone,
@@ -34,11 +32,15 @@ import type { BeforeLineView } from '../ipc/generated/BeforeLineView';
 import type { BillDetailView } from '../ipc/generated/BillDetailView';
 import type { BillRowView } from '../ipc/generated/BillRowView';
 import type { BillsView } from '../ipc/generated/BillsView';
+import type { BillFilter } from '../ipc/generated/BillFilter';
+import type { PeriodChoiceView } from '../ipc/generated/PeriodChoiceView';
 import type { BillCorrectionOffer } from '../ipc/generated/BillCorrectionOffer';
 import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { HistoryView } from '../ipc/generated/HistoryView';
 import { ReasonDialog, type ReasonKind } from '../corrections/Reason';
 import { useLicenceRevision } from '../shell/licence';
+import { useMay } from '../shell/permissions';
+import { ReportExport, ReportHeader, ReportPeriod } from './ReportHeader';
 
 type Pending =
   | { kind: 'revert'; bill: BillRowView }
@@ -55,7 +57,7 @@ const TONES: Record<string, BadgeTone> = {
 };
 
 const STATES = [
-  { value: '', label: 'Every state' },
+  { value: '', label: 'All states' },
   { value: 'settled', label: 'Paid' },
   { value: 'edited', label: 'Edited' },
   { value: 'voided', label: 'Voided' },
@@ -63,7 +65,7 @@ const STATES = [
 ];
 
 const MODES = [
-  { value: '', label: 'Any payment' },
+  { value: '', label: 'All payment modes' },
   { value: 'Cash', label: 'Cash' },
   { value: 'Card', label: 'Card' },
   { value: 'UPI', label: 'UPI' },
@@ -73,11 +75,22 @@ const MODES = [
 /** How long typing settles before Rust is asked again. */
 const SEARCH_SETTLE_MS = 150;
 
-export function Bills({ onGoTo, initialOrderId }: { onGoTo?: (screen: string) => void; initialOrderId?: string }) {
+export function Bills({ onGoTo, initialOrderId, periods = [] }: {
+  onGoTo?: (screen: string) => void;
+  initialOrderId?: string;
+  periods?: readonly PeriodChoiceView[];
+}) {
+  const may = useMay();
   const [view, setView] = useState<BillsView | null>(null);
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const initialPeriod = useRef<BillFilter['period']>(periods[0] ? { from: periods[0].from, to: periods[0].to } : null);
+  // null asks Rust for its current business day. Display its returned dates without
+  // converting that first response into another request for the same day.
+  const [period, setPeriod] = useState<BillFilter['period']>(null);
   const [query, setQuery] = useState('');
+  const [settledQuery, setSettledQuery] = useState('');
+  const [loadedFilter, setLoadedFilter] = useState<BillFilter | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [failed, setFailed] = useState(false);
   const [cashier, setCashier] = useState('');
   const [state, setState] = useState('');
   const [mode, setMode] = useState('');
@@ -102,45 +115,58 @@ export function Bills({ onGoTo, initialOrderId }: { onGoTo?: (screen: string) =>
 
   // One filter, asked for and saved: a file that does not match the list on screen is worse
   // than no file.
-  const filter = useMemo(
+  const filter = useMemo<BillFilter>(
     () => ({
-      period: from && to ? { from, to } : null,
-      query: query || null,
+      period: period ?? initialPeriod.current,
+      query: settledQuery || null,
       cashier: cashier || null,
       state: state || null,
       mode: mode || null,
     }),
-    [from, to, query, cashier, state, mode],
+    [period, settledQuery, cashier, state, mode],
   );
+
+  useEffect(() => {
+    if (query === settledQuery) return;
+    const timer = setTimeout(() => setSettledQuery(query), SEARCH_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [query, settledQuery]);
 
   const load = useCallback(async () => {
     const request = ++listRequest.current;
+    setFailed(false);
+    if (query !== settledQuery) { setBusy(true); return; }
+    if (filter.period && (!filter.period.from || !filter.period.to)) { setBusy(false); return; }
+    setBusy(true);
     try {
       const fresh = await call('bills', { filter });
       if (request !== listRequest.current) return;
-      setView(fresh);
-      // The first answer carries the presets; the screen opens on today.
       const today = fresh.periods[0];
-      if (!from && today) {
-        setFrom(today.from);
-        setTo(today.to);
-      }
+      if (!initialPeriod.current && today) initialPeriod.current = { from: today.from, to: today.to };
+      setView(fresh);
+      setLoadedFilter(filter);
     } catch (cause) {
+      if (request !== listRequest.current) return;
+      setFailed(true);
       complain(cause);
+    } finally {
+      if (request === listRequest.current) setBusy(false);
     }
-  }, [filter, from, complain]);
+  }, [filter, query, settledQuery, complain]);
+
+  const current = loadedFilter === filter && query === settledQuery && !busy && !failed;
 
   /** The list on screen, as a file in the Downloads folder that opens itself. */
   const save = (command: 'bills_csv' | 'bills_pdf') => {
-    call(command, { filter })
+    if (!current || !view?.canExport) return;
+    call(command, { filter: { ...filter, period: filter.period ?? initialPeriod.current } })
       .then((saved) => toast.show('ok', saved.message, saved.path))
       .catch(complain);
   };
 
   useEffect(() => {
-    setView((current) => current ? { ...current, totals: null, canExport: false } : current);
-    const timer = setTimeout(() => void load(), SEARCH_SETTLE_MS);
-    return () => { clearTimeout(timer); ++listRequest.current; };
+    void load();
+    return () => { ++listRequest.current; };
   }, [load, licenceRevision]);
 
   const open = useCallback(
@@ -310,11 +336,12 @@ export function Bills({ onGoTo, initialOrderId }: { onGoTo?: (screen: string) =>
     },
   ];
 
-  if (!view) return <Spinner label="Opening the bills" />;
-
-  const totals = view.totals;
+  const choices = view?.periods ?? periods;
+  const from = period?.from ?? initialPeriod.current?.from ?? choices[0]?.from ?? '';
+  const to = period?.to ?? initialPeriod.current?.to ?? choices[0]?.to ?? '';
+  const totals = current ? view?.totals : null;
   const subtitle =
-    totals && view.rows.length > 0
+    totals && view && view.rows.length > 0
       ? [
           `Taken ${totals.gross.text}`,
           totals.voids.paise > 0 ? `Voided ${totals.voids.text}` : '',
@@ -324,72 +351,37 @@ export function Bills({ onGoTo, initialOrderId }: { onGoTo?: (screen: string) =>
         ]
           .filter(Boolean)
           .join(' · ')
-      : view.waiting > 0
+      : current && view && view.waiting > 0
         ? `${view.waiting} waiting for approval`
         : undefined;
 
   return (
     <div className="mb-bills">
-      <PageHeader
+      <ReportHeader
         title="Bills"
-        count={totals ? view.rows.length : undefined}
-        subtitle={subtitle}
+        summary={totals || subtitle ? <span>{[totals ? plural(view?.rows.length ?? 0, 'bill') : '', subtitle].filter(Boolean).join(' · ')}</span> : undefined}
         actions={
-          view.canExport ? (
-            <>
-              <Button size="sm" variant="quiet" onClick={() => save('bills_csv')}>
-                Save as CSV
-              </Button>
-              <Button size="sm" variant="quiet" onClick={() => save('bills_pdf')}>
-                Save as PDF
-              </Button>
-            </>
+          (view ? view.canExport : may('reports.view') && may('reports.export')) ? (
+            <ReportExport disabled={!current} onExport={(format) => save(format === 'csv' ? 'bills_csv' : 'bills_pdf')} />
           ) : undefined
         }
-      />
-
-      <Toolbar
-        end={
-          <>
-            <div className="mb-reports__presets">
-              {view.periods.map((choice) => (
-                <Button
-                  size="sm"
-                  key={choice.label}
-                  variant={choice.from === from && choice.to === to ? 'primary' : 'quiet'}
-                  onClick={() => {
-                    setFrom(choice.from);
-                    setTo(choice.to);
-                  }}
-                >
-                  {choice.label}
-                </Button>
-              ))}
-            </div>
-            <DateRangePicker
-              from={from}
-              to={to}
-              onChange={(nextFrom, nextTo) => {
-                setFrom(nextFrom);
-                setTo(nextTo);
-              }}
-            />
-          </>
-        }
       >
+        <ReportPeriod periods={choices} from={from} to={to} onChange={(nextFrom, nextTo) => setPeriod({ from: nextFrom, to: nextTo })} />
+        <div className="mb-bills__filters">
         <SearchField
           what="Bill number, table, item"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
+        <div className="mb-bills__filter-picks">
         <Select
           size="sm"
           aria-label="Taken by"
           value={cashier}
           onChange={(event) => setCashier(event.target.value)}
           options={[
-            { value: '', label: 'Everybody' },
-            ...view.cashiers.map((p) => ({ value: p.id, label: p.name })),
+            { value: '', label: 'All cashiers' },
+            ...(view?.cashiers ?? []).map((p) => ({ value: p.id, label: p.name })),
           ]}
         />
         <Select
@@ -406,11 +398,16 @@ export function Bills({ onGoTo, initialOrderId }: { onGoTo?: (screen: string) =>
           onChange={(event) => setMode(event.target.value)}
           options={MODES}
         />
-      </Toolbar>
+        </div>
+        </div>
+      </ReportHeader>
 
-      {view.rows.length === 0 ? (
+      {failed ? <EmptyState title="Could not load bills" hint="Try again or change the filters."
+        action={<Button onClick={() => void load()}>Retry</Button>} /> :
+      period && (!period.from || !period.to) ? <EmptyState title="Choose a valid date range" /> :
+      !current || !view ? <Spinner label="Loading bills" /> : view.rows.length === 0 ? (
         <EmptyState
-          title="No bills here"
+          title="No matching bills"
           hint="Pick another day, or clear the search."
         />
       ) : (
@@ -436,7 +433,7 @@ export function Bills({ onGoTo, initialOrderId }: { onGoTo?: (screen: string) =>
         />
       ) : null}
 
-      {pending ? (
+      {pending && view ? (
         <Correction
           pending={pending}
           approvers={view.approvers}
@@ -542,7 +539,7 @@ function BillDialog({
     >
       {notice ? <Notice tone="warn">{notice}</Notice> : null}
       {!detail || !row ? (
-        <Spinner label="Opening the bill" />
+        <Spinner label="Loading bill" />
       ) : (
         <>
           <Facts>

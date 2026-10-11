@@ -220,7 +220,7 @@ function Account({
       </div>
 
       <SectionHeader
-        title="Take a repayment"
+        title="Record repayment"
         note={
           <>
             In a real payment mode — cash, card or UPI. Money arriving is money
@@ -232,7 +232,7 @@ function Account({
       <div className="mb-comp__choice">
         <MoneyInput label="Amount" value={amount} onChange={setAmount} />
         <Select
-          label="How"
+          label="Payment mode"
           value={mode}
           onChange={(e) => setMode(e.target.value)}
           options={[
@@ -268,9 +268,9 @@ function Account({
         </Button>
       </div>
 
-      <SectionHeader title="The account" />
+      <SectionHeader title="Transactions" />
       {account.movements.length === 0 ? (
-        <EmptyState title="Nothing yet" hint="Bills on the account and repayments both appear here." />
+        <EmptyState title="No transactions" hint="Bills on the account and repayments both appear here." />
       ) : (
         <table className="mb-ledger">
           <thead>
@@ -330,7 +330,7 @@ function Account({
             onChange={setAdjustment}
           />
           <Checkbox
-            label="They owe MORE (an opening balance, or a bill somebody missed)"
+            label="Increase amount owed"
             checked={increases}
             onChange={(e) => setIncreases(e.target.checked)}
           />
@@ -418,7 +418,7 @@ function EditCustomer({
       <Input label="GSTIN" value={gstin} onChange={(e) => setGstin(e.target.value)} />
       <Input label="Address" value={address} onChange={(e) => setAddress(e.target.value)} />
       <Checkbox
-        label="A customer here"
+        label="Active customer"
         checked={active}
         onChange={(e) => setActive(e.target.checked)}
       />

@@ -304,7 +304,7 @@ export function Floor() {
         {/* No rooms, no room picker. */}
         {floor.sections.length > 1 ? (
           <Segment
-            label="Which room"
+            label="Room"
             options={sections.map((name) => ({ value: name, label: name }))}
             value={section ?? 'All'}
             onChange={(name) => setSection(name === 'All' ? null : name)}
@@ -671,7 +671,7 @@ function Arrange({
             ...floor.sections.map((s) => ({ value: s.id, label: s.name })),
           ]}
         />
-        <Input label="Before the number" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+        <Input label="Table prefix" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
         <div className="mb-arrange__pair">
           <Input label="From" value={from} onChange={(e) => setFrom(e.target.value)} />
           <Input label="To" value={to} onChange={(e) => setTo(e.target.value)} />
@@ -862,7 +862,7 @@ function Grid({
         }
       />
     ) : (
-      <EmptyState title="Nothing here" hint="Try another room, or show everything." />
+      <EmptyState title="No matching tables" hint="Try another room, or show everything." />
     );
   }
   return (
@@ -1062,7 +1062,7 @@ function TableActions({
           onBack={() => setMergeTarget(null)} onFailed={onFailed}
           onMerged={(fresh) => onDone(fresh, `Table ${tile.label} joined table ${mergeTarget.label}.`)} />
       ) : busy.length === 0 ? (
-        <EmptyState title="Nothing to merge with" hint="No other table has an order on it." />
+        <EmptyState title="No tables available to merge" hint="No other table has an order on it." />
       ) : (
         <div className="mb-floor__mergelist">
           {busy.map((other) => (

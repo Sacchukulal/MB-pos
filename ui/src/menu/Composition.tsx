@@ -291,7 +291,7 @@ function EditGroup({
   onFailed: (cause: unknown) => void;
 }) {
   const [name, setName] = useState(group.name);
-  // "How many may they pick" as one choice rather than two numbers, because min and max as
+  // "Allowed selections" as one choice rather than two numbers, because min and max as
   // separate boxes is how you end up with "at least 3 of 2" — which Rust refuses, but nobody
   // should have been able to type.
   const [shape, setShape] = useState(() => {
@@ -326,7 +326,7 @@ function EditGroup({
   };
 
   return (
-    <Modal open title={group.name === '' ? 'A group of choices' : group.name} onClose={onClose} wide>
+    <Modal open title={group.name === '' ? 'Choice group' : group.name} onClose={onClose} wide>
       <Input
         label="Name"
         hint="Spice level, Add-ons — what the counter is being asked."
@@ -335,7 +335,7 @@ function EditGroup({
         onChange={(event) => setName(event.target.value)}
       />
       <Select
-        label="How many may they pick"
+        label="Allowed selections"
         value={shape}
         onChange={(event) => setShape(event.target.value)}
         options={[
@@ -347,7 +347,7 @@ function EditGroup({
       />
 
       <SectionHeader
-        title="The choices"
+        title="Choices"
         note={
           <>
             Leave the price blank when a choice is free. It may be a minus —
@@ -550,7 +550,7 @@ function EditCombo({
         onChange={setPrice}
       />
 
-      <SectionHeader title="What is in it" />
+      <SectionHeader title="Contents" />
       {parts.map(([itemId, qty], index) => (
         <div key={`${itemId}-${index}`} className="mb-comp__choice">
           <Select
@@ -563,7 +563,7 @@ function EditCombo({
             ]}
           />
           <Input
-            label="How many"
+            label="Quantity"
             value={qty}
             onChange={(event) => change(index, [itemId, event.target.value])}
           />

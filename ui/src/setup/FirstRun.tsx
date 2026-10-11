@@ -510,7 +510,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
             {problemCode === 'licence.bound_elsewhere' ? (
               <>
                 <Checkbox
-                  label="The old computer is gone — move the licence here"
+                  label="Transfer licence from an unavailable computer"
                   checked={moveHere}
                   onChange={(e) => setMoveHere(e.target.checked)}
                 />
@@ -626,7 +626,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ''))}
               />
               <Input
-                label="The same PIN again"
+                label="Confirm PIN"
                 maxLength={PIN_DIGITS}
                 value={pinAgain}
                 type="password"

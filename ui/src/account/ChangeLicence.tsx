@@ -223,7 +223,7 @@ export function ChangeLicence({
             onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
           />
           <Input
-            label="The same PIN again"
+            label="Confirm PIN"
             type="password"
             inputMode="numeric"
             maxLength={PIN_DIGITS}
@@ -237,7 +237,7 @@ export function ChangeLicence({
           />
           {problem?.code === 'licence.bound_elsewhere' && (
             <Checkbox
-              label="The old computer is gone. Move the licence here."
+              label="Transfer licence from an unavailable computer"
               checked={moveHere}
               onChange={(e) => setMoveHere(e.target.checked)}
             />

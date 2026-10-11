@@ -133,7 +133,7 @@ pub fn no_shop_yet() -> UiError {
     )
 }
 
-/// An instant, as a person at a counter reads it: `8 Aug, 4:32 pm`.
+/// A count with its noun.
 #[must_use]
 pub fn count(how_many: i64, one: &str, many: &str) -> String {
     match how_many {
@@ -173,22 +173,25 @@ pub fn clock(minutes_of_day: u32) -> String {
     format!("{hour}:{minute:02} {suffix}")
 }
 
+/// Human-facing numeric dates. BusinessDay's ISO representation remains the wire/storage format.
+#[must_use]
+pub fn date(value: mb_core::BusinessDay) -> String {
+    let (year, month, day) = value.to_ymd();
+    format!("{day:02}-{month:02}-{year:04}")
+}
+
 #[must_use]
 #[allow(
     clippy::integer_division,
     reason = "a clock is the one place a remainder is not a loss"
 )]
 pub fn when(at: mb_core::Timestamp) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
     let (days, seconds) = at.to_local_parts(mb_core::UtcOffset::INDIA);
-    let (_, month, day) = mb_core::time::civil_from_days(days);
-    let month_name = MONTHS
-        .get(usize::try_from(month.saturating_sub(1)).unwrap_or(0))
-        .copied()
-        .unwrap_or("?");
-    format!("{day} {month_name}, {}", clock(seconds / 60))
+    format!(
+        "{}, {}",
+        date(mb_core::BusinessDay::from_days_since_epoch(days)),
+        clock(seconds / 60)
+    )
 }
 
 /// "9:02 am" — the clock time of an instant, in the shop's own time.
@@ -573,17 +576,29 @@ mod tests {
     #[test]
     fn the_clock_reads_the_way_a_shopkeeper_says_it() {
         let at = mb_core::Timestamp::from_millis(1_786_186_920_000);
-        assert_eq!(when(at), "8 Aug, 4:32 pm");
+        assert_eq!(when(at), "08-08-2026, 4:32 pm");
     }
 
     #[test]
     fn midnight_and_noon_both_read_as_twelve() {
         // The two the modulo gets wrong if nobody looks: 0 and 12 are both "12", not "0".
         let midnight = mb_core::Timestamp::from_millis(1_786_213_800_000);
-        assert_eq!(when(midnight), "9 Aug, 12:00 am");
+        assert_eq!(when(midnight), "09-08-2026, 12:00 am");
         // 06:30 UTC = 12:00 IST.
         let noon = mb_core::Timestamp::from_millis(1_786_170_600_000);
-        assert_eq!(when(noon), "8 Aug, 12:00 pm");
+        assert_eq!(when(noon), "08-08-2026, 12:00 pm");
+    }
+
+    #[test]
+    fn display_dates_do_not_change_iso_dates_or_their_order() {
+        let leap = mb_core::BusinessDay::from_ymd(2024, 2, 29);
+        assert_eq!(date(leap), "29-02-2024");
+        assert_eq!(leap.to_string(), "2024-02-29");
+        let end = mb_core::BusinessDay::from_ymd(2026, 12, 31);
+        let next = mb_core::BusinessDay::from_ymd(2027, 1, 1);
+        assert_eq!(date(end), "31-12-2026");
+        assert_eq!(date(next), "01-01-2027");
+        assert!(end < next);
     }
 
     #[test]

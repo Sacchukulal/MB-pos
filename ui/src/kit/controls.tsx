@@ -70,7 +70,7 @@ interface FieldShellProps {
 }
 
 /** The label / hint / error scaffolding, once. */
-function FieldShell({ label, hint, error, children }: FieldShellProps) {
+export function FieldShell({ label, hint, error, children }: FieldShellProps) {
   const id = useId();
   const invalid = Boolean(error);
   return (
@@ -87,7 +87,7 @@ function FieldShell({ label, hint, error, children }: FieldShellProps) {
       ) : null}
       {children(id, invalid)}
       {error ? (
-        <span className="mb-field__error" role="alert">
+        <span id={`${id}-error`} className="mb-field__error" role="alert">
           {/* The icon is the form half of the signal. */}
           <span aria-hidden="true">⚠</span>
           {error}

@@ -149,7 +149,7 @@ describe('the account (scope 5.3)', () => {
     show();
     fireEvent.click(await screen.findByText('Open'));
 
-    const how = (await screen.findByLabelText('How')) as HTMLSelectElement;
+    const how = (await screen.findByLabelText('Payment mode')) as HTMLSelectElement;
     expect([...how.options].map((o) => o.value)).toEqual(['cash', 'card', 'upi']);
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '500' } });

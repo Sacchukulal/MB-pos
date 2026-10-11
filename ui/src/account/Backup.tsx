@@ -108,7 +108,7 @@ export function Backup() {
   if (!view) {
     return (
       <Panel title="Backup" className="mb-account__backup">
-        <Spinner label="Looking for backups" />
+        <Spinner label="Loading backups" />
       </Panel>
     );
   }
@@ -202,7 +202,7 @@ export function Backup() {
           </Line>
 
           <Line
-            label="Backups go to"
+            label="Backup folder"
             action={
               <>
                 {!view.folderIsDefault ? (
@@ -331,7 +331,7 @@ export function Backup() {
       </Panel>
 
       <Panel
-        title="Backups taken"
+        title="Backup history"
         className="mb-account__history"
         flush
         actions={

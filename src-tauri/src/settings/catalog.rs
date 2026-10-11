@@ -154,15 +154,15 @@ const LABEL_VALUES: &[Choice] = &[
 const SCALE_PROTOCOLS: &[Choice] = &[
     Choice {
         value: "status_then_weight",
-        label: "Status, then the weight (commonest)",
+        label: "Status and weight",
     },
     Choice {
         value: "weight_only",
-        label: "Just the weight",
+        label: "Weight only",
     },
     Choice {
         value: "raw",
-        label: "Show me what it is sending",
+        label: "Raw device output",
     },
 ];
 
@@ -338,11 +338,11 @@ const QR_MODES: &[Choice] = &[
 const MATCH_MODES: &[Choice] = &[
     Choice {
         value: "starts_with",
-        label: "Starts with what I type",
+        label: "Starts with search text",
     },
     Choice {
         value: "contains",
-        label: "Contains what I type",
+        label: "Contains search text",
     },
 ];
 
@@ -404,7 +404,7 @@ const REGISTRATIONS: &[Choice] = &[
 pub(crate) const BACKUP_SCHEDULES: &[Choice] = &[
     Choice {
         value: "off",
-        label: "Only when I press Back up now",
+        label: "Manual backup",
     },
     Choice {
         value: "hourly",

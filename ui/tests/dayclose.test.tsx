@@ -334,6 +334,17 @@ it('lists the last days with the chip and the sentence Rust wrote, and asks befo
   );
 });
 
+it('uses the shared calendar for planned holidays and sends the ISO date unchanged', async () => {
+  render(<ToastProvider><Days /></ToastProvider>);
+  const field = await screen.findByLabelText('A day the shop will be shut');
+  fireEvent.change(field, { target: { value: '12-10-2026' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Choose a day the shop will be shut' }));
+  expect(screen.getByRole('dialog', { name: 'A day the shop will be shut calendar' })).toBeTruthy();
+  fireEvent.keyDown(document.activeElement ?? document, { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'Mark a holiday' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('mark_holiday', { days: ['2026-10-12'] }));
+});
+
 /// The count is optional, and when it is there it travels with the day rather than beside it.
 it('sends the drawer count with the day when there is one', async () => {
   // The grid as Rust answers once four 500s have been typed into it.

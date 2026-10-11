@@ -585,7 +585,7 @@ function PurchaseEntry({
 
         <div className="mb-row">
           <MoneyInput label="Paid now" value={paidNow} onChange={setPaidNow} />
-          <Select label="How" value={paidMode} onChange={(e) => setPaidMode(e.target.value)} options={MODES} />
+          <Select label="Payment mode" value={paidMode} onChange={(e) => setPaidMode(e.target.value)} options={MODES} />
         </div>
 
         <div className="mb-row">
@@ -710,7 +710,7 @@ function SupplierAccount({
 
       <div className="mb-row">
         <MoneyInput label="Pay them" value={amount} onChange={setAmount} />
-        <Select label="How" value={mode} onChange={(e) => setMode(e.target.value)} options={MODES} />
+        <Select label="Payment mode" value={mode} onChange={(e) => setMode(e.target.value)} options={MODES} />
         <Input label="Reference" value={reference} onChange={(e) => setReference(e.target.value)} />
         <Button
           onClick={() =>
@@ -744,7 +744,7 @@ function SupplierAccount({
             onChange={(e) => setAdjust(onlyAmount(e.target.value))}
           />
           <Select
-            label="Which way"
+            label="Balance adjustment"
             value={increases ? 'up' : 'down'}
             onChange={(e) => setIncreases(e.target.value === 'up')}
             options={[
@@ -962,7 +962,7 @@ function RaiseOrder({
           options={view.suppliers.map((s) => ({ value: s.id, label: s.name }))}
         />
         <Input
-          label="Your number for it"
+          label="Reference number"
           hint="Leave it blank and we will give it one."
           value={number}
           onChange={(e) => setNumber(e.target.value)}
@@ -987,7 +987,7 @@ function RaiseOrder({
             ]}
           />
           <Input
-            label="How much"
+            label="Quantity"
             value={line.qty}
             onChange={(e) => setLine(index, { qty: e.target.value })}
           />

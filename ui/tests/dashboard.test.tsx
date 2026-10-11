@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DashboardView } from '../src/ipc/generated/DashboardView';
 
@@ -16,9 +16,17 @@ const presets = [
   { label: 'Yesterday', from: '2026-09-27', to: '2026-09-27' },
 ] as const;
 const view: DashboardView = {
-  title: 'Today, so far', from: presets[0].from, to: presets[0].to,
-  stats: [{ label: 'Takings', value: '2,400.00', note: '12 bills' }],
-  compare: null, attention: [], quiet: 'Nothing needs you.',
+  from: presets[0].from, to: presets[0].to,
+  summary: { sales: '2,400.00', bills: '12 bills', payments: [
+    { id: 'cash', label: 'Cash', value: '1,000.00', note: '' },
+    { id: 'upi', label: 'UPI', value: '1,400.00', note: '' },
+  ], paymentNote: '', secondary: [], details: [], drawer: {
+    expected: '1,200.00', rows: [
+      { id: 'opening', label: 'Opening cash', value: '200.00', note: '' },
+      { id: 'receipts', label: 'Cash payments', value: '1,000.00', note: '' },
+    ],
+  }, drawerUnavailable: '' },
+  compare: null, attention: [],
   charts: [{ id: 'sales', title: 'Sales by hour', kind: 'columns', note: '', empty: 'Nothing sold.',
     points: [{ label: '9 am', value: '800.00', note: '4 bills', share: 500, hue: 0 },
       { label: '10 am', value: '1,600.00', note: '8 bills', share: 1000, hue: 0 }] }],
@@ -65,7 +73,7 @@ it('ignores a late response from an older period and remembers the selected pres
   render(<Dashboard presets={presets} />);
   fireEvent.click(screen.getByRole('button', { name: 'Yesterday' }));
   await screen.findByText('2,400.00');
-  await act(async () => resolveOld({ ...view, stats: [{ label: 'Takings', value: 'OLD', note: '' }] }));
+  await act(async () => resolveOld({ ...view, summary: { ...view.summary, sales: 'OLD' } }));
   expect(screen.queryByText('OLD')).toBeNull();
   expect(call).toHaveBeenLastCalledWith('dashboard', { period: { from: presets[1].from, to: presets[1].to } });
   cleanup();
@@ -92,7 +100,7 @@ it('keeps the chart mounted during refresh and replaces figures when the request
   expect(screen.getByText('2,400.00')).toBeTruthy();
   expect(screen.getByText('Updating figures…')).toBeTruthy();
   expect(document.querySelector('.mb-trend__plot')).toBe(plot);
-  await act(async () => finish({ ...view, stats: [{ label: 'Takings', value: '3,200.00', note: '16 bills' }] }));
+  await act(async () => finish({ ...view, summary: { ...view.summary, sales: '3,200.00', bills: '16 bills' } }));
   expect(screen.getByText('3,200.00')).toBeTruthy();
   expect(screen.queryByText('Updating figures…')).toBeNull();
   expect(screen.getByRole('button', { name: 'Bars' }).getAttribute('aria-pressed')).toBe('true');
@@ -128,7 +136,7 @@ it('clears old figures and avoids a request for a missing or reversed date range
   expect(await screen.findByText('Choose an end date on or after the start date.')).toBeTruthy();
   expect(screen.queryByText('2,400.00')).toBeNull();
   fireEvent.change(screen.getByLabelText('From'), { target: { value: '' } });
-  expect(await screen.findByText('Choose a start and end date to see your overview.')).toBeTruthy();
+  expect(await screen.findByText('Choose a start and end date.')).toBeTruthy();
   expect(call).toHaveBeenCalledTimes(requests);
 });
 
@@ -148,6 +156,54 @@ it('keeps empty charts honest and hides billing shortcuts without billing permis
   expect(await screen.findByText('Nothing sold.')).toBeTruthy();
   expect(document.querySelector('.mb-trend__plot')).toBeNull();
   expect(screen.queryByRole('button', { name: 'New bill' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Explore reports' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Reports' }));
   expect(go).toHaveBeenCalledWith('reports');
+});
+
+it('keeps sales payments visible and drawer movements behind Check cash', async () => {
+  render(<Dashboard presets={presets} />);
+  await screen.findByText('2,400.00');
+  expect(screen.queryByText('Business overview')).toBeNull();
+  expect(screen.queryByText('Today, so far')).toBeNull();
+  expect(screen.queryByText('Opening cash')).toBeNull();
+  expect(screen.getByText('No pending issues')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Check cash' }));
+  const dialog = screen.getByRole('dialog', { name: 'Check cash' });
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(within(dialog).getByText('Opening cash')).toBeTruthy();
+  expect(within(dialog).getByText('1,200.00')).toBeTruthy();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+});
+
+it('renders custom modes, credit and signed adjustments without a fixed metric count', async () => {
+  call.mockResolvedValue({ ...view, summary: { ...view.summary, payments: [
+    ...view.summary.payments,
+    { id: 'other:meal voucher', label: 'Meal voucher', value: '300.00', note: '' },
+    { id: 'credit', label: 'On credit', value: '200.00', note: 'Not money received.' },
+    { id: 'tips', label: 'Less tips', value: '-50.00', note: 'Tips are not sales.' },
+  ] } });
+  render(<Dashboard presets={presets} />);
+  await screen.findByText('Meal voucher');
+  expect(screen.getByText('On credit')).toBeTruthy();
+  expect(screen.getByText('-50.00')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+  const dialog = screen.getByRole('dialog', { name: 'Sales details' });
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(within(dialog).getByText('Not money received.')).toBeTruthy();
+});
+
+it('shows unavailable cash honestly and preserves direct alert actions', async () => {
+  call.mockResolvedValue({ ...view, summary: { ...view.summary, drawer: null,
+    drawerUnavailable: 'Choose one day to check drawer cash.' },
+    attention: [{ tone: 'danger', title: 'Printing failed', detail: '2 jobs waiting to print.', target: 'print-queue', action: 'Open print queue' }] });
+  const go = vi.fn();
+  render(<Dashboard presets={presets} onGoTo={go} />);
+  await screen.findByText('Printing failed');
+  expect(screen.queryByText('No pending issues')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Open print queue' }));
+  expect(go).toHaveBeenCalledWith('print-queue');
+  fireEvent.click(screen.getByRole('button', { name: 'Check cash' }));
+  expect(screen.getByText('Choose one day to check drawer cash.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Count cash' })).toBeNull();
 });

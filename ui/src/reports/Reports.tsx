@@ -3,15 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  Badge,
   Button,
-  DateRangePicker,
   EmptyState,
   Icon,
   Locked,
   Pick,
+  Panel,
   Scroller,
-  SectionHeader,
+  RowMenu,
   Spinner,
   Table,
   useToast,
@@ -23,7 +22,7 @@ import { BILL_LOOKUP_PERMISSIONS, useMay } from '../shell/permissions';
 import { useLicenceRevision } from '../shell/licence';
 import { Bills } from './Bills';
 import { Days } from './Days';
-import type { PeriodChoiceView } from '../ipc/generated/PeriodChoiceView';
+import { ReportExport, ReportHeader, ReportPeriod } from './ReportHeader';
 import type { ReportEntryView } from '../ipc/generated/ReportEntryView';
 import type { ReportListView } from '../ipc/generated/ReportListView';
 import type { ReportView } from '../ipc/generated/ReportView';
@@ -56,19 +55,26 @@ export function Reports({
   /** The whole Reports area waits for Rust's current licence decision. */
   const [checkedRevision, setCheckedRevision] = useState<number | null>(null);
   const [allowed, setAllowed] = useState(false);
-  const initialOrderId = initial?.startsWith('bills/') ? initial.slice('bills/'.length) : undefined;
+  const [initialId, initialQuery] = (initial ?? '').split('?');
+  const initialDates = new URLSearchParams(initialQuery);
+  const requestedFrom = initialDates.get('from') ?? '';
+  const requestedTo = initialDates.get('to') ?? '';
+  const validRequestedPeriod = /^\d{4}-\d{2}-\d{2}$/.test(requestedFrom) && /^\d{4}-\d{2}-\d{2}$/.test(requestedTo) && requestedFrom <= requestedTo;
+  const initialOrderId = initialId?.startsWith('bills/') ? initialId.slice('bills/'.length) : undefined;
   // The dashboard has its own home in the logo; Reports opens on the bill history.
-  const [chosen, setChosen] = useState<string>(initial === DAYS || !mayBills ? DAYS : BILLS);
+  const [chosen, setChosen] = useState<string>(initialId === DAYS || !mayBills ? DAYS : BILLS);
   useEffect(() => {
-    if (initial === DAYS) setChosen(DAYS);
-    else if (initial === BILLS || initialOrderId) setChosen(BILLS);
-  }, [initial, initialOrderId]);
+    if (initialId === DAYS) setChosen(DAYS);
+    else if (initialId === BILLS || initialOrderId) setChosen(BILLS);
+    else if (initialId && list?.reports.some((entry) => entry.id === initialId)) setChosen(initialId);
+  }, [initialId, initialOrderId, list]);
   // Which groups are unfolded. The rail is nine groups long; folded is how a person finds
   // anything in it, and which ones are open is a look preference, not a fact about the shop.
   const [unfolded, setUnfolded] = useState<readonly string[]>(() => opened());
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [report, setReport] = useState<ReportView | null>(null);
+  const [loadedFor, setLoadedFor] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -109,8 +115,8 @@ export function Reports({
         setList(fresh);
         const today = fresh.periods[0];
         if (today) {
-          setFrom(today.from);
-          setTo(today.to);
+          setFrom(validRequestedPeriod ? requestedFrom : today.from);
+          setTo(validRequestedPeriod ? requestedTo : today.to);
         }
       })
       .catch((cause) => {
@@ -127,7 +133,7 @@ export function Reports({
         complain(cause);
       });
     return () => { current = false; };
-  }, [complain, licenceRevision, mayBills]);
+  }, [complain, licenceRevision, mayBills, requestedFrom, requestedTo, validRequestedPeriod]);
 
   // One effect, one call: whenever the report or the period changes, ask again.
   useEffect(() => {
@@ -136,7 +142,12 @@ export function Reports({
     setBusy(true);
     setReport(null);
     call('report', { id: chosen, period: { from, to } })
-      .then((fresh) => { if (current) setReport(fresh); })
+      .then((fresh) => {
+        if (current) {
+          setReport(fresh);
+          setLoadedFor(`${chosen}/${from}/${to}`);
+        }
+      })
       .catch((cause) => {
         if (!current) return;
         setReport(null);
@@ -172,20 +183,22 @@ export function Reports({
   const checking = checkedRevision !== licenceRevision;
   if (!allowed) return locked && !checking
     ? <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />
-    : <Spinner label="Opening the reports" />;
+    : <Spinner label="Loading reports" />;
 
+  const currentReport = loadedFor === `${chosen}/${from}/${to}` ? report : null;
+  const selected = list?.reports.find((entry) => entry.id === chosen);
   const columns: readonly Column<Line>[] =
-    report?.columns.map((spec, index) => ({
+    currentReport?.columns.map((spec, index) => ({
       key: `${index}`,
       header: spec.header,
       numeric: spec.numeric,
       render: (line: Line) => line.cells[index] ?? '',
     })) ?? [];
-  const lines: readonly Line[] = report?.rows.map((cells, at) => ({ at, cells })) ?? [];
+  const lines: readonly Line[] = currentReport?.rows.map((cells, at) => ({ at, cells })) ?? [];
 
   return (
     <>
-    {checking ? <Spinner label="Opening the reports" /> : null}
+    {checking ? <Spinner label="Loading reports" /> : null}
     <div className="mb-railpage mb-reports__gate" hidden={checking} inert={checking}>
       <Scroller inset className="mb-reports__rail">
         {/* At the top and on their own: the bills and the day itself. */}
@@ -242,106 +255,37 @@ export function Reports({
 
       <div className="mb-reports__body">
         {chosen === BILLS ? (
-          <Bills onGoTo={onGoTo} initialOrderId={initialOrderId} />
+          <Bills onGoTo={onGoTo} initialOrderId={initialOrderId} periods={list?.periods} />
         ) : chosen === DAYS ? (
           <Days />
         ) : locked || !list ? (
           <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />
         ) : (
           <>
-        <div className="mb-reports__when">
-          <div className="mb-reports__presets">
-            {list.periods.map((choice: PeriodChoiceView) => (
-              <Button
-                size="sm"
-                key={choice.label}
-                variant={choice.from === from && choice.to === to ? 'primary' : 'quiet'}
-                onClick={() => {
-                  setFrom(choice.from);
-                  setTo(choice.to);
-                }}
-              >
-                {choice.label}
-              </Button>
-            ))}
-          </div>
-          <DateRangePicker
-            from={from}
-            to={to}
-            onChange={(nextFrom, nextTo) => {
-              setFrom(nextFrom);
-              setTo(nextTo);
-            }}
-          />
-        </div>
+        <ReportHeader title={selected?.title ?? 'Reports'}
+          info={selected?.description}
+          summary={currentReport?.compare ? <div className="mb-reports__compare">
+            <span>{currentReport.compare.summary}</span>
+            <span className="mb-reports__against">· Compared with {currentReport.compare.period}</span>
+          </div> : undefined}
+          actions={mayExport ? <>
+            <Button size="sm" variant="secondary" disabled={!currentReport} onClick={print}>Print</Button>
+            <RowMenu text="Share" label="Share" icon="chevron-down" keyboardNavigation disabled={!currentReport}>
+              <Button role="menuitem" size="sm" variant="quiet" onClick={() => share('copy')}>Copy</Button>
+              <Button role="menuitem" size="sm" variant="quiet" onClick={() => share('whats_app')}>WhatsApp</Button>
+              <Button role="menuitem" size="sm" variant="quiet" onClick={() => share('email')}>Email</Button>
+            </RowMenu>
+            <ReportExport disabled={!currentReport} onExport={(format) => save(format === 'csv' ? 'report_csv' : 'report_pdf')} />
+          </> : undefined}>
+          <ReportPeriod periods={list.periods} from={from} to={to} onChange={(nextFrom, nextTo) => {
+            setFrom(nextFrom);
+            setTo(nextTo);
+          }} />
+        </ReportHeader>
 
-        {report ? (
-          <>
-            <SectionHeader
-              title={report.title}
-              note={report.subtitle}
-              action={
-                mayExport ? (
-                  <div className="mb-reports__exports">
-                    {/*
-                      Paper first, because a shop with a printer on the counter asks for it
-                      before it asks for a file; then sending it, then saving it.
-                    */}
-                    <Button size="sm" variant="quiet" onClick={print}>
-                      <Icon name="printer" size="sm" />
-                      Print
-                    </Button>
-                    <Button size="sm" variant="quiet" onClick={() => share('copy')}>
-                      Copy
-                    </Button>
-                    <Button size="sm" variant="quiet" onClick={() => share('whats_app')}>
-                      WhatsApp
-                    </Button>
-                    <Button size="sm" variant="quiet" onClick={() => share('email')}>
-                      Email
-                    </Button>
-                    <Button size="sm" variant="quiet" onClick={() => save('report_csv')}>
-                      Save as CSV
-                    </Button>
-                    <Button size="sm" variant="quiet" onClick={() => save('report_pdf')}>
-                      Save as PDF
-                    </Button>
-                  </div>
-                ) : undefined
-              }
-            />
-
-            {report.compare ? (
-              <div className="mb-reports__compare">
-                <Badge
-                  tone={
-                    report.compare.direction === 'up'
-                      ? 'ok'
-                      : report.compare.direction === 'down'
-                        ? 'warn'
-                        : 'neutral'
-                  }
-                >
-                  <Icon
-                    name={
-                      report.compare.direction === 'up'
-                        ? 'chevron-up'
-                        : report.compare.direction === 'down'
-                          ? 'chevron-down'
-                          : 'minus'
-                    }
-                    size="sm"
-                  />
-                </Badge>
-                {/* The whole sentence, written in Rust. */}
-                <span>{report.compare.summary}</span>
-                <span className="mb-reports__against">
-                  Compared against {report.compare.period}
-                </span>
-              </div>
-            ) : null}
-
+        {currentReport ? (
             <Scroller wide className="mb-reports__sheet">
+              <Panel flush>
               <Table
                 columns={columns}
                 rows={lines}
@@ -349,24 +293,23 @@ export function Reports({
                 // The totals belong to the table: a second table underneath could not agree
                 // with it about column widths, and a column of rupees that does not line up
                 // looks broken (§3).
-                footer={report.totals ?? undefined}
+                footer={currentReport.totals ?? undefined}
                 empty={
                   <EmptyState
-                    title="Nothing in this period"
-                    hint="Pick a different date range, or a different report."
+                    title="No records in this period"
+                    hint="Choose another date range or report."
                   />
                 }
               />
-            </Scroller>
-
-            {report.notes.map((note) => (
+              </Panel>
+            {currentReport.notes.map((note) => (
               <p className="mb-reports__note" key={note}>
                 {note}
               </p>
             ))}
-          </>
+            </Scroller>
         ) : busy ? (
-          <Spinner label="Adding it up" />
+          <Spinner label="Loading report" />
         ) : (
           <EmptyState title="Pick a report" hint="Choose one from the list on the left." />
         )}

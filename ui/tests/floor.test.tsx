@@ -459,7 +459,7 @@ describe('empty is not a lecture (P30.5)', () => {
     call.mockImplementation((name: string) => Promise.resolve(name === 'combine_candidates' ? floor().tiles : floor()));
     show();
     await screen.findAllByTitle('4 seats');
-    expect(screen.queryByRole('group', { name: 'Which room' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Room' })).toBeNull();
 
     cleanup();
     call.mockResolvedValue(
@@ -472,7 +472,7 @@ describe('empty is not a lecture (P30.5)', () => {
     );
     show();
     await screen.findAllByTitle('4 seats');
-    expect(screen.getByRole('group', { name: 'Which room' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Room' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'AC room' })).toBeTruthy();
   });
 

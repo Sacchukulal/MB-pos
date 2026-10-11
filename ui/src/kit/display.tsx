@@ -6,6 +6,7 @@ import type { MoneyView } from '../ipc/generated/MoneyView';
 import { cx } from './cx';
 import { Button } from './controls';
 import { InfoTip } from './InfoTip';
+import { DatePicker } from './DatePicker';
 
 export function Card({
   children,
@@ -70,6 +71,7 @@ export function StatCard({
   value,
   note,
   className,
+  plain = false,
 }: {
   label: string;
   value: ReactNode;
@@ -77,15 +79,18 @@ export function StatCard({
   note?: ReactNode;
   /** A screen's own class on the card, to place it or give it a tone. */
   className?: string;
+  /** An unboxed statistic inside a connected summary; existing cards keep their defaults. */
+  plain?: boolean;
 }) {
+  const Surface = plain ? 'div' : Card;
   return (
-    <Card className={className}>
+    <Surface className={className}>
       <div className="mb-stat">
         <span className="mb-stat__label">{label}</span>
         <span className="mb-stat__value">{value}</span>
         {note ? <span className="mb-stat__note">{note}</span> : null}
       </div>
-    </Card>
+    </Surface>
   );
 }
 
@@ -404,37 +409,17 @@ export function DateRangePicker({
   from,
   to,
   onChange,
+  size,
 }: {
   from: string;
   to: string;
   onChange: (from: string, to: string) => void;
+  size?: 'sm' | 'md';
 }) {
   return (
     <div className="mb-daterange">
-      <div className="mb-field">
-        <label className="mb-field__label" htmlFor="mb-range-from">
-          From
-        </label>
-        <input
-          id="mb-range-from"
-          type="date"
-          className="mb-input"
-          value={from}
-          onChange={(event) => onChange(event.target.value, to)}
-        />
-      </div>
-      <div className="mb-field">
-        <label className="mb-field__label" htmlFor="mb-range-to">
-          To
-        </label>
-        <input
-          id="mb-range-to"
-          type="date"
-          className="mb-input"
-          value={to}
-          onChange={(event) => onChange(from, event.target.value)}
-        />
-      </div>
+        <DatePicker label="From" size={size} value={from} onChange={(value) => onChange(value, to)} />
+        <DatePicker label="To" size={size} value={to} onChange={(value) => onChange(from, value)} />
     </div>
   );
 }

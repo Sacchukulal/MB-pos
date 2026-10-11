@@ -42,9 +42,9 @@ import './stock.css';
 
 /** What a material is measured in. */
 const DIMENSIONS = [
-  { value: 'weight', label: 'Weight — grams and kilos' },
-  { value: 'volume', label: 'Volume — millilitres and litres' },
-  { value: 'count', label: 'Count — pieces' },
+  { value: 'weight', label: 'Weight (g, kg)' },
+  { value: 'volume', label: 'Volume (ml, l)' },
+  { value: 'count', label: 'Count (pieces)' },
 ];
 
 /** The movements a person types. */
@@ -424,7 +424,7 @@ function BuyList({ view, onReport }: { view: InventoryView; onReport: (cause: un
 
 function Movements({ rows }: { rows: StockMovementView[] }) {
   if (rows.length === 0) {
-    return <EmptyState title="Nothing has moved yet" hint="Buying, selling and wasting all show up here." />;
+    return <EmptyState title="No stock movements" hint="Buying, selling and wasting all show up here." />;
   }
   const columns: Column<StockMovementView>[] = [
     { key: 'when', header: 'When', render: (m) => m.when },
@@ -472,7 +472,7 @@ function Problems({
   if (view.problems.length === 0) {
     return (
       <EmptyState
-        title="Nothing needs a look"
+        title="No stock alerts"
         hint="A bill that could not take something off the shelf is listed here. The bill always goes through."
       />
     );
@@ -588,7 +588,7 @@ function MaterialForm({
         />
         <Input label="Group" value={category} onChange={(e) => setCategory(e.target.value)} hint="Vegetables, dry goods, dairy — your own words." />
         <Input
-          label="Where you buy it"
+          label="Supplier"
           value={buyFrom}
           onChange={(e) => setBuyFrom(e.target.value)}
           hint="The buy list is grouped by this. A place is fine: the vegetable market, the milk van."
@@ -614,17 +614,17 @@ function MaterialForm({
           {packs.map((pack, n) => (
             <div key={n} className="mb-stock__pack">
               <Input
-                label="Called"
+                label="Pack name"
                 value={pack.name}
                 onChange={(e) => setPacks(packs.map((p, i) => (i === n ? { ...p, name: e.target.value } : p)))}
               />
               <Input
-                label="Holds"
+                label="Pack quantity"
                 value={pack.size}
                 onChange={(e) => setPacks(packs.map((p, i) => (i === n ? { ...p, size: e.target.value } : p)))}
               />
               <Select
-                label="of"
+                label="Unit"
                 value={pack.unit}
                 onChange={(e) => setPacks(packs.map((p, i) => (i === n ? { ...p, unit: e.target.value } : p)))}
                 options={[baseOf(dimension), ...standardOf(dimension)].map((u) => ({ value: u, label: u }))}
@@ -637,20 +637,20 @@ function MaterialForm({
         </div>
 
         <div className="mb-stock__pack">
-          <Input label="Buy more when it drops to" value={reorderLevel} onChange={(e) => setReorderLevel(e.target.value)} />
-          <Input label="and then buy" value={reorderQty} onChange={(e) => setReorderQty(e.target.value)} />
+          <Input label="Reorder level" value={reorderLevel} onChange={(e) => setReorderLevel(e.target.value)} />
+          <Input label="Reorder quantity" value={reorderQty} onChange={(e) => setReorderQty(e.target.value)} />
           <Select
-            label="counted in"
+            label="Unit"
             value={reorderUnit}
             onChange={(e) => setReorderUnit(e.target.value)}
             options={units.map((u) => ({ value: u, label: u }))}
           />
         </div>
 
-        <Checkbox label="It goes bad" checked={perishable} onChange={(e) => setPerishable(e.target.checked)} />
+        <Checkbox label="Perishable" checked={perishable} onChange={(e) => setPerishable(e.target.checked)} />
         {perishable ? (
           <Input
-            label="Keeps for (days)"
+            label="Shelf life (days)"
             value={shelfLife}
             onChange={(e) => setShelfLife(e.target.value)}
             hint="You will be told when some has been sitting longer than this. Batches are not tracked."
@@ -722,11 +722,11 @@ function MoveForm({
     >
       <div className="mb-stack">
         <div className="mb-muted">On the shelf now: {material.onHand}</div>
-        <Select label="What happened" value={kind} onChange={(e) => setKind(e.target.value)} options={KINDS} />
+        <Select label="Adjustment type" value={kind} onChange={(e) => setKind(e.target.value)} options={KINDS} />
         <div className="mb-stock__pack">
-          <Input label="How much" value={qty} onChange={(e) => setQty(e.target.value)} autoFocus />
+          <Input label="Quantity" value={qty} onChange={(e) => setQty(e.target.value)} autoFocus />
           <Select
-            label="in"
+            label="Unit"
             value={unit}
             onChange={(e) => setUnit(e.target.value)}
             options={material.units.map((u: UnitView) => ({ value: u.name, label: u.name }))}
@@ -891,7 +891,7 @@ export function RecipeEditor({
           <div className="mb-stock__pack">
             <Input label="One batch makes" value={batchQty} onChange={(e) => setBatchQty(e.target.value)} />
             <Select
-              label="of"
+              label="Unit"
               value={batchUnit}
               onChange={(e) => setBatchUnit(e.target.value)}
               options={unitsFor(ownerId).map((u) => ({ value: u.name, label: u.name }))}
@@ -921,12 +921,12 @@ export function RecipeEditor({
               ]}
             />
             <Input
-              label="How much"
+              label="Quantity"
               value={line.qty}
               onChange={(e) => setLines(lines.map((l, i) => (i === n ? { ...l, qty: e.target.value } : l)))}
             />
             <Select
-              label="in"
+              label="Unit"
               value={line.unit}
               onChange={(e) => setLines(lines.map((l, i) => (i === n ? { ...l, unit: e.target.value } : l)))}
               options={unitsFor(line.materialId).map((u) => ({ value: u.name, label: u.name }))}
@@ -1038,7 +1038,7 @@ function Variance({ onReport }: { onReport: (cause: unknown) => void }) {
 
       {rows !== null && rows.length === 0 ? (
         <EmptyState
-          title="Nothing to compare yet"
+          title="No comparison data"
           hint="Needs recipes and a stock count. Do a count and come back."
         />
       ) : (

@@ -242,7 +242,7 @@ describe('the stock screen', () => {
   it('sends back what a person typed and which unit they typed it in', async () => {
     draw();
     fireEvent.click((await screen.findAllByText('Move'))[0]!);
-    fireEvent.change(screen.getByLabelText('How much'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Record it' }));
     // "2" and "bag", never 50000. Rust converts.
     expect(call).toHaveBeenCalledWith('record_stock_movement', {

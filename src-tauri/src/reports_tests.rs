@@ -147,8 +147,15 @@ fn assert_live_sales(app: &App, paise: i64, count: i64) {
         assert_eq!(totals.last(), Some(&amount), "{id} has the wrong sales");
     }
     let dashboard = crate::reports::dashboard_on(app, Some(today())).expect("dashboard");
-    let stat = |label: &str| dashboard.stats.iter().find(|s| s.label == label).expect("stat");
-    assert_eq!(stat("Net sales").value, amount);
+    let summary = &dashboard.summary;
+    assert_eq!(mb_core::Money::parse(&summary.sales).expect("sales").paise(), paise);
+    let allocated: i64 = summary.payments.iter().map(|row|
+        mb_core::Money::parse(&row.value).expect("payment").paise()).sum();
+    assert_eq!(allocated, paise, "connected summary must reconcile");
+    let cash = summary.drawer.as_ref().expect("one day drawer");
+    let movements: i64 = cash.rows.iter().map(|row|
+        mb_core::Money::parse(&row.value).expect("movement").paise()).sum();
+    assert_eq!(movements, mb_core::Money::parse(&cash.expected).expect("expected").paise());
     for id in ["trend", "payment", "types", "cashiers"] {
         let chart = dashboard.charts.iter().find(|chart| chart.id == id).expect("chart");
         let sum: i64 = chart.points.iter().map(|point|
@@ -156,7 +163,8 @@ fn assert_live_sales(app: &App, paise: i64, count: i64) {
         assert_eq!(sum, paise, "{id} chart disagrees with report totals");
     }
     let average = if count > 0 { paise.checked_div(count).expect("nonzero") } else { 0 };
-    assert_eq!(stat("Average bill").value, mb_core::Money::from_paise(average).to_plain_string());
+    assert_eq!(summary.details.iter().find(|s| s.id == "average").expect("average").value,
+        mb_core::Money::from_paise(average).to_indian_string());
 }
 
 fn drawer(app: &App) -> mb_db::repo::money::CashPosition {
@@ -248,13 +256,70 @@ fn archived_daily_totals_agree_with_dashboard_sales_and_active_bill_count() {
             }))
     }).map_err(|e| crate::words::from_db(&e))).expect("archive");
     let report = crate::reports::report_on(&app, "sales_day".to_owned(), today()).expect("report");
+    assert_eq!(report.rows[0][0], crate::words::date(day));
+    assert_eq!(report.subtitle, crate::words::date(day));
+    assert_eq!(today().from, day.to_string(), "queries must remain ISO dates");
     let totals = report.totals.expect("totals");
     assert_eq!(totals[1], "2");
     assert_eq!(totals.last().map(String::as_str), Some("130.00"));
     let dashboard = crate::reports::dashboard_on(&app, Some(today())).expect("dashboard");
-    let stat = |label: &str| dashboard.stats.iter().find(|s| s.label == label).expect("stat");
-    assert_eq!(stat("Net sales").value, "130.00");
-    assert_eq!(stat("Average bill").value, "65.00");
-    assert_eq!(stat("Expected cash in drawer").value, "—", "a summary cannot reconstruct a drawer");
+    assert_eq!(dashboard.summary.sales, "₹130.00");
+    assert_eq!(dashboard.summary.details.iter().find(|s| s.id == "average").expect("average").value, "₹65.00");
     assert!(dashboard.attention.iter().any(|a| a.title.contains("Archived")));
+    assert!(dashboard.summary.payments.is_empty());
+    assert!(dashboard.summary.drawer.is_none());
+    assert!(dashboard.summary.payment_note.contains("archived"));
+}
+
+#[test]
+fn dashboard_keeps_every_tender_tips_and_credit_collections_distinct() {
+    use mb_core::{CustomerId, Money, Payment, PaymentMode};
+    let scratch = Scratch::new("dashboard_modes");
+    let app = a_licensed_shop(&scratch, "dashboard_modes");
+    crate::credit::save_customer_on(&app, crate::credit::CustomerEdit {
+        id: "cus_dashboard".to_owned(), name: "Regular".to_owned(), phone: "9000000088".to_owned(),
+        gstin: String::new(), address: String::new(), credit_limit: "5000".to_owned(), is_active: true,
+    }).expect("customer");
+    crate::ipc::cart_add_on(&app, "itm_tea".to_owned(), Some("10".to_owned()), None).expect("tea");
+    let total = app.with_cart(|state| Ok(state.bill(&app.shop_config())?.grand_total)).expect("bill");
+    app.with_cart_mut(|state| {
+        state.settlement.set_tip(Money::from_paise(500)).expect("tip");
+        for (mode, amount) in [
+            (PaymentMode::Cash, 1500), (PaymentMode::Upi, 1000), (PaymentMode::Card, 1000),
+            (PaymentMode::Other("Meal voucher".to_owned()), 1000),
+            (PaymentMode::Credit(CustomerId::new("cus_dashboard")), total.paise() - 4000),
+        ] {
+            state.settlement.add(Payment::new(mode, Money::from_paise(amount)).expect("payment")).expect("added");
+        }
+        Ok(())
+    }).expect("split");
+    crate::flows::complete_bill_on(&app, None).expect("settled");
+    let dashboard = crate::reports::dashboard_on(&app, Some(today())).expect("dashboard");
+    let summary = dashboard.summary;
+    let ids: Vec<_> = summary.payments.iter().map(|p| p.id.as_str()).collect();
+    for id in ["cash", "upi", "card", "other:meal voucher", "credit", "tips"] { assert!(ids.contains(&id), "missing {id}"); }
+    assert!(!ids.contains(&"unallocated"));
+    assert_eq!(summary.payments.iter().find(|p| p.id == "credit").expect("credit").label, "On credit");
+    assert_eq!(summary.payments.iter().find(|p| p.id == "other:meal voucher").expect("custom").label, "meal voucher");
+    let sum: i64 = summary.payments.iter().map(|p| Money::parse(&p.value).expect("money").paise()).sum();
+    assert_eq!(sum, total.paise());
+    assert_eq!(summary.drawer.expect("drawer").expected, Money::from_paise(1500).to_indian_string());
+    crate::credit::record_repayment_on(&app, "cus_dashboard".to_owned(), "10".to_owned(), "cash".to_owned(), String::new()).expect("repayment");
+    let repaid = crate::reports::dashboard_on(&app, Some(today())).expect("dashboard after repayment").summary;
+    assert_eq!(repaid.sales, total.to_indian_string(), "repayment is not another sale");
+    assert_eq!(repaid.secondary.iter().find(|r| r.id == "collections").expect("collection").value, "₹10.00");
+    assert_eq!(repaid.drawer.expect("drawer").expected, "₹25.00");
+}
+
+#[test]
+fn dashboard_empty_and_multi_day_periods_do_not_invent_drawer_balances() {
+    let scratch = Scratch::new("dashboard_period_shapes");
+    let app = a_licensed_shop(&scratch, "dashboard_period_shapes");
+    let view = crate::reports::dashboard_on(&app, Some(today())).expect("empty");
+    assert_eq!(view.summary.sales, "₹0.00");
+    assert!(view.summary.payments.is_empty());
+    let day = crate::flows::today(crate::flows::now());
+    let view = crate::reports::dashboard_on(&app, Some(PeriodArg { from: day.previous().to_string(), to: day.to_string() })).expect("range");
+    assert!(view.summary.drawer.is_none());
+    assert!(view.summary.drawer_unavailable.contains("one day"));
 }

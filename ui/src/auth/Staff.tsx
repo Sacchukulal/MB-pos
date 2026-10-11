@@ -265,8 +265,8 @@ function PersonCard({
         </Fact>
         <Fact label="PIN">{person.hasPin ? 'Set' : 'None'}</Fact>
         <Fact label="Mobile">{person.phone === '' ? '—' : `+91 ${person.phone}`}</Fact>
-        <Fact label="What they do">{person.designation || '—'}</Fact>
-        <Fact label="Which part of the shop">{person.department || '—'}</Fact>
+        <Fact label="Designation">{person.designation || '—'}</Fact>
+        <Fact label="Department">{person.department || '—'}</Fact>
         <Fact label="Working">{WORKING_WORDS[person.employmentType] ?? person.employmentType}</Fact>
         <Fact label="Joined">{person.joined || '—'}</Fact>
         <Fact label="Where they live">{person.address || '—'}</Fact>
@@ -372,7 +372,7 @@ function EditPerson({
             onChange={(e) => set('pin', digits(e.target.value))}
           />
           <Input
-            label="The same PIN again"
+            label="Confirm PIN"
             maxLength={PIN_DIGITS}
             value={pinAgain}
             type="password"
@@ -402,7 +402,7 @@ function EditPerson({
           )}
           {edit.status === 'left' ? (
             <Input
-              label="The day they left"
+              label="Leaving date"
               hint="It takes them off the payroll and off the roster — nothing about their past is deleted."
               value={edit.leftOn}
               placeholder="2026-08-31"
@@ -419,13 +419,13 @@ function EditPerson({
         <SectionHeader title="At work" />
         <Fields columns>
           <Input
-            label="What they do"
+            label="Designation"
             hint="Cook, cashier, cleaner. It goes on the payslip."
             value={edit.designation}
             onChange={(e) => set('designation', e.target.value)}
           />
           <Input
-            label="Which part of the shop"
+            label="Department"
             hint="Kitchen, counter, delivery. Leave it blank if you have only one."
             value={edit.department}
             onChange={(e) => set('department', e.target.value)}
@@ -442,7 +442,7 @@ function EditPerson({
             onChange={(e) => set('address', e.target.value)}
           />
           <Input
-            label="Who to call in an emergency"
+            label="Emergency contact"
             value={edit.emergencyName}
             onChange={(e) => set('emergencyName', e.target.value)}
           />

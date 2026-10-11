@@ -1,0 +1,20 @@
+.mb-date { --date-height: var(--control-md); position: relative; min-width: 0; width: var(--field-sm); max-width: 100%; }
+.mb-date--sm { --date-height: var(--control-sm); }
+.mb-date > .mb-input { width: 100%; height: var(--date-height); padding-right: var(--date-height); font-variant-numeric: tabular-nums; }
+.mb-date--sm > .mb-input { font-size: var(--text-xs); }
+.mb-date > .mb-button.mb-button--icon { position: absolute; right: var(--space-1); top: var(--space-1); width: calc(var(--date-height) - var(--space-1) * 2); height: calc(var(--date-height) - var(--space-1) * 2); }
+.mb-calendar { position: fixed; z-index: var(--layer-dropdown); width: var(--calendar-width); max-width: calc(100vw - var(--space-4)); max-height: calc(100dvh - var(--space-4)); overflow: auto; padding: var(--space-3); gap: var(--space-2); animation: none; }
+.mb-calendar__head, .mb-calendar__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1); }
+.mb-calendar__head > .mb-button { padding-inline: var(--space-2); }
+.mb-calendar__week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--space-1); }
+.mb-calendar__grid { display: grid; gap: var(--space-1); }
+.mb-calendar__week [role='columnheader'] { padding-block: var(--space-2); text-align: center; color: var(--text-muted); font-size: var(--text-xs); }
+.mb-calendar__day { border: var(--border-width) solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text); height: var(--control-md); padding: 0; font: inherit; font-size: var(--text-sm); font-variant-numeric: tabular-nums; cursor: pointer; }
+.mb-calendar__day[data-outside] { color: var(--text-muted); }
+.mb-calendar__day:hover:not(:disabled) { background: var(--surface-2); }
+.mb-calendar__day[aria-current='date'] { border-color: var(--border-strong); font-weight: var(--weight-bold); }
+.mb-calendar__day[aria-selected='true'], .mb-calendar__day[aria-selected='true']:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: var(--weight-bold); }
+.mb-calendar__day:disabled { opacity: var(--dim-disabled); cursor: not-allowed; }
+.mb-calendar__months { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+.mb-calendar__months > .mb-button { padding-inline: var(--space-1); }
+.mb-calendar__foot { border-top: var(--border-width) solid var(--border); padding-top: var(--space-2); }

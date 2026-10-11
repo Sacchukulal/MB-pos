@@ -54,7 +54,7 @@ export function Version() {
   if (!view) {
     return (
       <Panel title="Version">
-        <Spinner label="Looking at this version" />
+        <Spinner label="Loading version" />
       </Panel>
     );
   }
@@ -121,7 +121,7 @@ export function Version() {
 
       {view.previous ? (
         <Lines>
-          <Line label="Before this">
+          <Line label="Previous version">
             <span className="mb-code">{view.previous}</span>
             <Button size="sm" variant="quiet" onClick={() => setConfirmingBack(true)}>
               Go back

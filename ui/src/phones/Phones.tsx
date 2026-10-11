@@ -286,7 +286,7 @@ export function Phones() {
             {/* Whose phone it is decides what it may do: a waiter's phone acts as the waiter,
                 a shared tablet acts as nobody. */}
             <Select
-              label="Whose phone"
+              label="Staff member"
               value={owner}
               onChange={(e) => setPicked({ id: asking.requestId, owner: e.target.value })}
               options={[

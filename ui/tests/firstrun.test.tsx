@@ -353,11 +353,11 @@ it('offers to move the licence only when it is bound elsewhere', async () => {
   });
   render(<FirstRun onDone={vi.fn()} />);
   await atSignIn();
-  expect(screen.queryByLabelText(/move the licence here/)).toBeNull();
+  expect(screen.queryByLabelText(/Transfer licence from an unavailable computer/)).toBeNull();
   await signInAs('m@x.in', 'pw');
 
   expect(await screen.findByText(/another computer/)).toBeTruthy();
-  const move = await screen.findByLabelText(/move the licence here/);
+  const move = await screen.findByLabelText(/Transfer licence from an unavailable computer/);
   const open = screen.getByRole('button', { name: 'Open it here' }) as HTMLButtonElement;
   expect(open.disabled).toBe(true);
   fireEvent.click(move);
@@ -399,7 +399,7 @@ it('asks for the PIN rule Rust actually holds', async () => {
   const pin = await screen.findByLabelText('A PIN, 4 digits');
   fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
   fireEvent.change(pin, { target: { value: '123' } });
-  fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '123' } });
+  fireEvent.change(screen.getByLabelText('Confirm PIN'), { target: { value: '123' } });
   fireEvent.click(screen.getByRole('button', { name: 'Start billing' }));
 
   expect(await screen.findByText('A PIN is 4 digits.')).toBeTruthy();
@@ -424,7 +424,7 @@ it('gives the PIN to the owner row that already exists, signs in with it and ope
   const who = (await screen.findByLabelText('Your name')) as HTMLInputElement;
   expect(who.value).toBe('Meena');
   fireEvent.change(screen.getByLabelText('A PIN, 4 digits'), { target: { value: '4829' } });
-  fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '4829' } });
+  fireEvent.change(screen.getByLabelText('Confirm PIN'), { target: { value: '4829' } });
   fireEvent.click(screen.getByRole('button', { name: 'Start billing' }));
 
   await waitFor(() => expect(done).toHaveBeenCalled());

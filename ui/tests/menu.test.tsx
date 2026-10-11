@@ -110,7 +110,7 @@ describe('a group of choices (scope 6.2)', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Add-ons' },
     });
-    fireEvent.change(screen.getByLabelText('How many may they pick'), {
+    fireEvent.change(screen.getByLabelText('Allowed selections'), {
       target: { value: 'any' },
     });
     fireEvent.click(screen.getByText('Save'));
@@ -129,7 +129,7 @@ describe('a group of choices (scope 6.2)', () => {
     render(<ModifierGroups onFailed={vi.fn()} />);
 
     fireEvent.click(await screen.findByText('Add a group'));
-    const shape = screen.getByLabelText('How many may they pick') as HTMLSelectElement;
+    const shape = screen.getByLabelText('Allowed selections') as HTMLSelectElement;
     const offered = [...shape.options].map((o) => o.value);
     // Four shapes, every one of them satisfiable.
     expect(offered).toEqual(['one', 'atMostOne', 'any', 'atLeastOne']);
@@ -185,7 +185,7 @@ describe('a combo (scope 6.3)', () => {
     fireEvent.change(screen.getByLabelText('Combo price'), { target: { value: '199' } });
     fireEvent.click(screen.getByText('Add something'));
     fireEvent.change(screen.getByLabelText('Item'), { target: { value: 'itm_dosa' } });
-    fireEvent.change(screen.getByLabelText('How many'), { target: { value: '0.5' } });
+    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '0.5' } });
     fireEvent.click(screen.getByText('Save'));
 
     const sent = call.mock.calls.find((c) => c[0] === 'save_combo');

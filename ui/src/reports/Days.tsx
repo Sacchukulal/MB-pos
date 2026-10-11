@@ -11,11 +11,11 @@ import {
   Badge,
   Button,
   ConfirmDialog,
+  DatePicker,
   Input,
   Modal,
   Money,
   Numeric,
-  PageHeader,
   Panel,
   Row,
   Scroller,
@@ -34,6 +34,7 @@ import type { DaysView } from '../ipc/generated/DaysView';
 import type { DrawerView } from '../ipc/generated/DrawerView';
 import type { UnconfirmedView } from '../ipc/generated/UnconfirmedView';
 import { Section, editsList, withEdit, type Edits } from '../settings/Form';
+import { ReportHeader } from './ReportHeader';
 
 /** The chip for a day's state, in a colour that is never the only signal. */
 const TONES: Record<string, BadgeTone> = {
@@ -196,7 +197,7 @@ export function Days() {
       .catch(complain);
   };
 
-  if (!view) return <Spinner label="Reading the days" />;
+  if (!view) return <Spinner label="Loading day status" />;
 
   const columns: readonly Column<DayRowView>[] = [
     { key: 'day', header: 'Day', nowrap: true, render: (row) => row.daySays },
@@ -302,15 +303,10 @@ export function Days() {
 
   return (
     <Scroller className="mb-days">
-      <PageHeader
+      <ReportHeader
         title="Day open/close"
-        subtitle={view.todayClosedSays || view.todaySays}
-        note={
-          <>
-            {view.dayRunsSays}
-            {view.carrySays ? ` ${view.carrySays}` : ''}
-          </>
-        }
+        summary={view.todayClosedSays || view.todaySays}
+        info={[view.dayRunsSays, view.carrySays].filter(Boolean).join(' ')}
         actions={todayActions}
       />
 
@@ -442,11 +438,10 @@ export function Days() {
             title="Holidays ahead"
             actions={
               <Row gap="inline" wrap={false}>
-                <Input
+                <DatePicker
                   aria-label="A day the shop will be shut"
-                  type="date"
                   value={ahead}
-                  onChange={(event) => setAhead(event.target.value)}
+                  onChange={setAhead}
                 />
                 <Button
                   disabled={ahead === ''}

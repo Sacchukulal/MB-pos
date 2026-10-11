@@ -11,4 +11,4 @@ tone: string, title: string,
 /**
  * A whole sentence saying what to do about it.
  */
-detail: string, };
+detail: string, target: string, action: string, };

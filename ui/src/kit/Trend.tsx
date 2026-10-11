@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { PointView } from '../ipc/generated/PointView';
 import { Button } from './controls';
 import { Icon } from './Icon';
+import './trend.css';
 
 const HEIGHT = 128;
 const LEFT = 30;
@@ -76,6 +77,6 @@ export function ChartPlaceholder({ kind, message }: { kind: string; message: str
     {kind === 'donut' ? <div className="mb-chartblank__ring" aria-hidden="true"><Icon name="wallet" size="lg" /></div> :
       kind === 'columns' ? <div className="mb-chartblank__grid" aria-hidden="true"><span /><span /><span /><span /></div> :
         <div className="mb-chartblank__ranks" aria-hidden="true"><span /><span /><span /></div>}
-    <div className="mb-chartblank__words"><span className="mb-chartblank__icon"><Icon name={kind === 'columns' ? 'chart' : kind === 'donut' ? 'card' : 'boxes'} /></span><strong>{message || 'No activity in this period'}</strong><span>Recorded activity will appear here.</span></div>
+    <div className="mb-chartblank__words"><span className="mb-chartblank__icon"><Icon name={kind === 'columns' ? 'chart' : kind === 'donut' ? 'card' : 'boxes'} /></span><strong>{message || 'No activity in this period'}</strong></div>
   </div>;
 }

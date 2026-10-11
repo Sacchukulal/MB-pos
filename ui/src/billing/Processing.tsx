@@ -76,7 +76,7 @@ export function Processing({
     return (
       <EmptyState
         small
-        title="Nothing cooking"
+        title="No active kitchen orders"
         hint="Orders sent to the kitchen and bills reopened for editing show here."
       />
     );

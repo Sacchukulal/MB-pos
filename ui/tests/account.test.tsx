@@ -161,7 +161,7 @@ it('takes the key, then the PIN twice, then changes the licence', async () => {
 
   const pin = await screen.findByLabelText('Your PIN');
   fireEvent.change(pin, { target: { value: '4839' } });
-  fireEvent.change(screen.getByLabelText('The same PIN again'), { target: { value: '4839' } });
+  fireEvent.change(screen.getByLabelText('Confirm PIN'), { target: { value: '4839' } });
 
   call.mockResolvedValueOnce({ ...active, ownerName: 'Ravi', shopName: "Ravi's Cafe" });
   fireEvent.click(screen.getByRole('button', { name: 'Use this licence' }));

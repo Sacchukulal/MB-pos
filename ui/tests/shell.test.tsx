@@ -153,7 +153,8 @@ it('opens the full dashboard from the logo without a More or Reports rail', asyn
   });
   const { container } = show();
   fireEvent.click(await screen.findByRole('button', { name: 'Magic Bill dashboard' }));
-  expect(await screen.findByRole('heading', { name: 'Business overview' })).toBeTruthy();
+  expect(await screen.findByRole('group', { name: 'Dashboard period' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Business overview' })).toBeNull();
   expect(screen.getByRole('button', { name: 'Magic Bill dashboard' }).getAttribute('aria-current')).toBe('page');
   expect(container.querySelector('.mb-reports__rail')).toBeNull();
   expect(container.querySelector('.mb-more__rail')).toBeNull();
@@ -209,7 +210,7 @@ it('shows a person with no screens an honest empty page instead of Billing', { t
   for (const digit of ['4', '8', '2', '9']) {
     fireEvent.click(await screen.findByRole('button', { name: digit }));
   }
-  await screen.findByText('Nothing to open here');
+  await screen.findByText('No accessible screens');
   // And the billing screen was never mounted: not one of its commands went out.
   expect(call).not.toHaveBeenCalledWith('menu_items');
   expect(screen.queryByRole('button', { name: /More/ })).toBeNull();
@@ -241,10 +242,11 @@ it('offers one press for every job that did not print', () => {
     id,
     printer: 'TVS',
     what: 'Kitchen ticket',
-    state: 'NOT PRINTED — needs you',
+    state: 'Failed',
     needsAttention: true,
     reason: `table ${id}`,
     lastError: 'the printer did not finish within 90 seconds',
+    errorSummary: 'Printer timed out. Check the printer connection.',
   });
   const onRetryAll = vi.fn();
   const onDismissAll = vi.fn();
@@ -259,13 +261,13 @@ it('offers one press for every job that did not print', () => {
       onDismissAll={onDismissAll}
     />,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Try all 2 again' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Give up on all 2' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry failed (2)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel all prints (2)' }));
   expect(onRetryAll).toHaveBeenCalledTimes(1);
   expect(onDismissAll).toHaveBeenCalledTimes(1);
   // Each job keeps its own two, so one can still be treated differently.
-  expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(2);
-  expect(screen.getAllByRole('button', { name: 'Give up' })).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: 'Cancel print' })).toHaveLength(2);
 
   // A job still waiting or printing can be given up on too — that is the one that wedges a
   // printer — but only a parked one is offered another try.
@@ -280,10 +282,12 @@ it('offers one press for every job that did not print', () => {
       onDismissAll={onDismissAll}
     />,
   );
-  expect(screen.getAllByRole('button', { name: 'Give up' })).toHaveLength(2);
-  expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
-  expect(screen.getByRole('button', { name: 'Give up on all 2' })).toBeTruthy();
-  expect(screen.queryByRole('button', { name: /Try all/ })).toBeNull();
+  expect(screen.getAllByRole('button', { name: 'Cancel print' })).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Cancel all prints (2)' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Retry failed (1)' })).toBeTruthy();
+  expect(screen.getAllByText('Printer timed out. Check the printer connection.')).toHaveLength(1);
+  expect(screen.getByText('Previous error').closest('details')).not.toHaveAttribute('open');
 
   rerender(
     <PrintQueuePanel
@@ -296,5 +300,32 @@ it('offers one press for every job that did not print', () => {
       onDismissAll={onDismissAll}
     />,
   );
-  expect(screen.queryByRole('button', { name: /Try all/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Retry failed/ })).toBeNull();
+});
+
+it('closes the print queue without cancelling and keeps diagnostics expandable', async () => {
+  const onClose = vi.fn(); const onDismiss = vi.fn(); const onRetry = vi.fn();
+  const onDismissAll = vi.fn(); const onRetryAll = vi.fn();
+  const user = (await import('@testing-library/user-event')).default.setup();
+  const job: PrintJobView = { id: 'job-1', printer: 'Counter', what: 'Bill', reason: 'BILL//0123',
+    state: 'Failed', needsAttention: true, lastError: 'Original spooler diagnostic',
+    errorSummary: 'Printing failed. Check the printer.' };
+  const props = { open: true, onClose, onDismiss, onRetry, onDismissAll, onRetryAll };
+  const { rerender } = render(<PrintQueuePanel {...props} jobs={[job]} />);
+  const details = screen.getByText('Details').closest('details');
+  expect(details).not.toHaveAttribute('open');
+  await user.click(screen.getByText('Details'));
+  expect(details).toHaveAttribute('open');
+  expect(screen.getByText('Original spooler diagnostic')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Close' }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  expect(onDismiss).not.toHaveBeenCalled(); expect(onDismissAll).not.toHaveBeenCalled();
+  expect(onRetry).not.toHaveBeenCalled(); expect(onRetryAll).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(onRetry).toHaveBeenCalledWith('job-1');
+  await user.click(screen.getByRole('button', { name: 'Cancel print' }));
+  expect(onDismiss).toHaveBeenCalledWith('job-1');
+  rerender(<PrintQueuePanel {...props} jobs={[]} />);
+  expect(screen.getByText('No pending print jobs.')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Close' })).toBeVisible();
 });

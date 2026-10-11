@@ -204,7 +204,7 @@ export function Count() {
 
       {view.id === null ? (
         <EmptyState
-          title="Nothing is being counted"
+          title="No active stock count"
           hint="Print the sheet, count the store, type it in here."
         />
       ) : (
@@ -251,7 +251,7 @@ export function Count() {
 
           {view.lines.length === 0 ? (
             <EmptyState
-              title="Nothing written down yet"
+              title="No counted items"
               hint="Pick a material, type what is on the shelf, press Enter. Only what you count is adjusted."
             />
           ) : (

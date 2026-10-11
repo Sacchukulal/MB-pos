@@ -55,13 +55,13 @@
   font: inherit;
   cursor: pointer;
   -webkit-app-region: no-drag;
-  transition: background var(--motion-normal) var(--ease), border-color var(--motion-normal) var(--ease);
+  transition: background var(--motion-normal) var(--ease);
 }
 
-.mb-topbar__home:hover,
+.mb-topbar__home:hover { background: var(--surface-2); }
+
 .mb-topbar__home[aria-current='page'] {
-  background: var(--dash-wash);
-  border-color: var(--dash-green);
+  background: var(--surface-sunk);
 }
 
 /* Keep the extra logo hit area from squeezing More off the minimum-size window. */
@@ -354,11 +354,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  min-width: var(--panel-width);
+  min-width: 0;
 }
 
 .mb-queue__job {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
@@ -366,6 +367,37 @@
   background: var(--surface-2);
   border-radius: var(--radius-md);
   border-left: var(--tile-stripe) solid var(--border-strong);
+}
+
+.mb-queue__description {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 var(--panel-width);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mb-queue__actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  max-width: 100%;
+}
+
+.mb-queue__details {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.mb-queue__details > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.mb-queue__details[open] > summary {
+  margin-bottom: var(--space-1);
 }
 
 .mb-queue__job--attention {

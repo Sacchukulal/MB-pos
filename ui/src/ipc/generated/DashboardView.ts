@@ -2,21 +2,17 @@
 import type { AttentionView } from "./AttentionView";
 import type { ChartView } from "./ChartView";
 import type { CompareView } from "./CompareView";
-import type { StatView } from "./StatView";
+import type { DashboardSummaryView } from "./DashboardSummaryView";
 
 /**
- * The first thing an owner sees, and the reason it is first.
+ * Recorded sales, payment allocation and expected drawer cash for a business period.
  */
 export type DashboardView = { 
 /**
- * "Today, so far", "Yesterday", "1 September to 9 September · 9 days".
- */
-title: string, 
-/**
  * The period the figures are for, as the date boxes show it.
  */
-from: string, to: string, stats: Array<StatView>, compare: CompareView | null, charts: Array<ChartView>, 
+from: string, to: string, summary: DashboardSummaryView, compare: CompareView | null, charts: Array<ChartView>, 
 /**
  * Things that need a person.
  */
-attention: Array<AttentionView>, quiet: string, };
+attention: Array<AttentionView>, };

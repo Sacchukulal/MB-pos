@@ -1,0 +1,39 @@
+.mb-trend { margin-top: var(--space-2); }
+.mb-trend__toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.mb-trend__readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); font-size: var(--text-xs); color: var(--text-faint); }
+.mb-trend__readout strong { font-size: var(--text-lg); color: var(--text); font-weight: var(--weight-bold); }
+.mb-trend__switch { display: flex; gap: var(--space-1); }
+.mb-trend__switch .mb-button { font-size: var(--text-xs); min-height: var(--trend-control); border-radius: var(--radius-pill); }
+.mb-trend__plot { width: 100%; height: var(--trend-height); display: block; margin-top: var(--space-2); overflow: visible; }
+.mb-trend__grid { stroke: var(--trend-grid); stroke-dasharray: 3 6; }
+.mb-trend__area { pointer-events: none; animation: mb-trend-fill var(--trend-chart-motion) var(--ease-out) both; }
+.mb-trend__line { fill: none; stroke: var(--trend-green); stroke-width: var(--trend-plot-stroke); stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 0; animation: mb-trend-draw var(--trend-chart-motion) var(--ease-out) both; }
+.mb-trend__gradienttop { stop-color: var(--trend-green); stop-opacity: var(--trend-gradient-top); }
+.mb-trend__gradientbottom { stop-color: var(--trend-green); stop-opacity: var(--trend-gradient-bottom); }
+.mb-trend__guide { stroke: var(--trend-green); stroke-dasharray: 3 5; opacity: var(--dim-faint); pointer-events: none; }
+.mb-trend__dot { fill: var(--surface); stroke: var(--trend-green); stroke-width: var(--border-width-thick); opacity: 0; transition: opacity var(--motion-fast) var(--ease); }
+.mb-trend__dot--active, .mb-trend__point:hover .mb-trend__dot, .mb-trend__point:focus .mb-trend__dot { opacity: 1; }
+.mb-trend__point:focus { outline: none; }
+.mb-trend__point:focus-visible .mb-trend__hit { fill: var(--trend-wash); }
+.mb-trend__hit { fill: transparent; }
+.mb-trend__bar { fill: var(--trend-green); opacity: var(--dim-quiet); transform-box: fill-box; transform-origin: center bottom; animation: mb-trend-rise var(--trend-chart-motion) var(--ease-out) both; transition: opacity var(--motion-fast) var(--ease); }
+.mb-trend__bar--active { opacity: 1; }
+.mb-trend__label { fill: var(--text-faint); font-size: var(--text-xs); font-family: var(--font-ui); }
+.mb-chartblank { min-height: var(--trend-height); display: flex; align-items: center; justify-content: center; gap: var(--space-3); position: relative; }
+.mb-chartblank__words { display: flex; flex-direction: column; gap: var(--space-2); position: relative; font-size: var(--text-xs); color: var(--text-faint); }
+.mb-chartblank__words strong { color: var(--text-muted); font-weight: var(--weight-medium); }
+.mb-chartblank__icon { color: var(--trend-green); }
+.mb-chartblank__grid { position: absolute; inset: var(--space-4) 0; display: flex; flex-direction: column; justify-content: space-between; }
+.mb-chartblank__grid span { border-top: var(--border-width) solid var(--trend-grid); }
+.mb-chartblank__ring { display: grid; place-items: center; width: var(--trend-ring); height: var(--trend-ring); border: var(--space-2) solid var(--chart-track); border-radius: 50%; color: var(--text-faint); flex: none; }
+.mb-chartblank--donut .mb-chartblank__icon, .mb-chartblank--bars .mb-chartblank__icon { display: none; }
+.mb-chartblank--bars { flex-direction: column; }
+.mb-chartblank__ranks { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; }
+.mb-chartblank__ranks span { height: var(--space-1); background: var(--chart-track); border-radius: var(--radius-pill); }
+@keyframes mb-trend-arrive { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: translateY(0); } }
+@keyframes mb-trend-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes mb-trend-fill { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mb-trend-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes mb-trend-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+
+@media (prefers-reduced-motion: reduce) { .mb-trend *, .mb-chartblank * { animation: none !important; transition: none !important; } }

@@ -227,7 +227,7 @@ export function Tax() {
       .catch(complain);
   };
 
-  if (!page || !shop) return <Spinner label="Reading the tax book" />;
+  if (!page || !shop) return <Spinner label="Loading tax settings" />;
 
   const dirty =
     shop.registration !== page.registration ||

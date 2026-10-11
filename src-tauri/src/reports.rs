@@ -52,7 +52,7 @@ pub struct CompareView {
     pub now: String,
     /// The whole sentence: "up 8% on the 31 days before".
     pub summary: String,
-    /// `up`, `down` or `same`.
+    /// `up`, `down`, `same`, or `none` when the previous value is zero.
     pub direction: String,
 }
 
@@ -61,6 +61,7 @@ pub struct CompareView {
 pub struct Entry {
     pub id: &'static str,
     pub title: &'static str,
+    pub description: &'static str,
     pub group: &'static str,
     pub needs: Permission,
     pub kind: Kind,
@@ -115,13 +116,15 @@ pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "sales_day",
         title: "Sales by day",
+        description: "Sales grouped by business day, including returns recorded in the selected period.",
         group: "Sales",
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::Day),
     },
     Entry {
         id: "sales_hour",
-        title: "Sales by hour — your peak",
+        title: "Sales by hour",
+        description: "Sales grouped by hour to show the busiest times.",
         group: "Sales",
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::Hour),
@@ -129,6 +132,7 @@ pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "sales_type",
         title: "Sales by order type",
+        description: "Sales grouped by dine-in, parcel, self-service and delivery orders.",
         group: "Sales",
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::OrderType),
@@ -136,6 +140,7 @@ pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "sales_mode",
         title: "Sales by payment mode",
+        description: "Sales grouped by payment mode. A split payment can appear in more than one row.",
         group: "Sales",
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::PaymentMode),
@@ -143,6 +148,7 @@ pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "sales_cashier",
         title: "Sales by cashier",
+        description: "Sales grouped by the staff member who settled the bill.",
         group: "Sales",
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::Cashier),
@@ -150,6 +156,7 @@ pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "sales_section",
         title: "Sales by section",
+        description: "Sales grouped by the section assigned to the order.",
         group: "Sales",
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::Section),
@@ -157,6 +164,7 @@ pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "sales_terminal",
         title: "Sales by till",
+        description: "Sales grouped by counter terminal.",
         group: "Sales",
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::Terminal),
@@ -164,6 +172,7 @@ pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "items",
         title: "Item sales",
+        description: "Quantity and sales by menu item. The total counts each bill once.",
         group: "Items",
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::Item),
@@ -171,13 +180,15 @@ pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "categories",
         title: "Category sales",
+        description: "Quantity and sales by menu category. The total counts each bill once.",
         group: "Items",
         needs: Permission::ReportsView,
         kind: Kind::Sales(SalesBy::Category),
     },
     Entry {
         id: "stopped",
-        title: "Items that stopped selling",
+        title: "Items with no recent sales",
+        description: "Items sold in the previous period but not in the selected period.",
         group: "Items",
         needs: Permission::ReportsView,
         kind: Kind::StoppedSelling,
@@ -186,28 +197,32 @@ pub const CATALOGUE: &[Entry] = &[
     // same permission — so this is consistent rather than a new rule.
     Entry {
         id: "margin",
-        title: "Menu engineering — volume against margin",
+        title: "Item sales and margins",
+        description: "Item quantities, revenue, recorded cost and margin. Items without a cost price have no calculated margin.",
         group: "Items",
         needs: Permission::ReportsView,
         kind: Kind::MenuEngineering,
     },
     Entry {
         id: "tax_rate",
-        title: "Tax, rate-wise",
+        title: "Tax by rate",
+        description: "Taxable sales and tax amounts grouped by rate.",
         group: "Tax",
         needs: Permission::ReportsView,
         kind: Kind::TaxByRate,
     },
     Entry {
         id: "tax_hsn",
-        title: "Tax, HSN-wise",
+        title: "Tax by HSN",
+        description: "Taxable sales and tax amounts grouped by HSN code.",
         group: "Tax",
         needs: Permission::ReportsView,
         kind: Kind::TaxByHsn,
     },
     Entry {
         id: "gstr1_b2cs",
-        title: "GSTR-1 (B2CS) — for the GST offline tool",
+        title: "GSTR-1 B2CS",
+        description: "B2CS data for the GST offline tool. Its CSV retains the required import format.",
         group: "Tax",
         needs: Permission::ReportsView,
         kind: Kind::Gstr1B2cs,
@@ -215,7 +230,8 @@ pub const CATALOGUE: &[Entry] = &[
     // Beside the other two, and that is not cosmetic.
     Entry {
         id: "input_credit",
-        title: "Input tax credit on purchases",
+        title: "Purchase tax credit",
+        description: "Input tax credit recorded on purchases, subject to the shop's tax scheme.",
         group: "Tax",
         needs: Permission::ReportsView,
         kind: Kind::InputCredit,
@@ -223,34 +239,39 @@ pub const CATALOGUE: &[Entry] = &[
     Entry {
         id: "control",
         title: "Voids, discounts, refunds and reprints",
+        description: "Bill adjustments and reprints in the selected period, with their recorded reasons.",
         group: "Control",
         needs: Permission::AuditView,
         kind: Kind::Control,
     },
     Entry {
         id: "tips",
-        title: "Tips, and who took them",
+        title: "Tips by staff",
+        description: "Tips grouped by the staff member who collected them.",
         group: "Control",
         needs: Permission::ReportsView,
         kind: Kind::Tips,
     },
     Entry {
         id: "handover",
-        title: "Shift handovers — every drawer counted",
+        title: "Shift handovers",
+        description: "Drawer counts and differences recorded at shift handover.",
         group: "Control",
         needs: Permission::DayClose,
         kind: Kind::Handover,
     },
     Entry {
         id: "kitchen_station",
-        title: "Kitchen speed, by station",
+        title: "Kitchen time by station",
+        description: "Time from sending an order to the kitchen to marking it ready, grouped by station.",
         group: "Kitchen",
         needs: Permission::ReportsView,
         kind: Kind::KitchenSpeed(SpeedBy::Station),
     },
     Entry {
         id: "kitchen_hour",
-        title: "Kitchen speed, by hour",
+        title: "Kitchen time by hour",
+        description: "Time from sending an order to the kitchen to marking it ready, grouped by hour.",
         group: "Kitchen",
         needs: Permission::ReportsView,
         kind: Kind::KitchenSpeed(SpeedBy::Hour),
@@ -258,42 +279,48 @@ pub const CATALOGUE: &[Entry] = &[
     // Nine reports and not one `.tsx` file changed.
     Entry {
         id: "buying_supplier",
-        title: "What you bought, by supplier",
+        title: "Purchases by supplier",
+        description: "Purchase quantities and amounts grouped by supplier.",
         group: "Buying",
         needs: Permission::PurchasesManage,
         kind: Kind::Buying(BuyingBy::Supplier),
     },
     Entry {
         id: "buying_material",
-        title: "What you bought, by material",
+        title: "Purchases by material",
+        description: "Purchase quantities and amounts grouped by material.",
         group: "Buying",
         needs: Permission::InventoryView,
         kind: Kind::Buying(BuyingBy::Material),
     },
     Entry {
         id: "price_trend",
-        title: "Price trend — what is going up",
+        title: "Purchase price trends",
+        description: "Material purchase prices compared with their recent average.",
         group: "Buying",
         needs: Permission::InventoryView,
         kind: Kind::PriceTrend,
     },
     Entry {
         id: "supplier_outstanding",
-        title: "Who you owe",
+        title: "Supplier balances",
+        description: "Outstanding supplier balances and overdue amounts.",
         group: "Buying",
         needs: Permission::PurchasesManage,
         kind: Kind::SupplierOutstanding,
     },
     Entry {
         id: "stock_value",
-        title: "Stock on hand, at cost",
+        title: "Stock value",
+        description: "Current stock quantities valued at their recorded cost.",
         group: "Stock",
         needs: Permission::InventoryView,
         kind: Kind::StockValuation,
     },
     Entry {
         id: "count_variance",
-        title: "Stock counts — what keeps going missing",
+        title: "Stock count differences",
+        description: "Differences between recorded stock and physical counts.",
         group: "Stock",
         needs: Permission::InventoryView,
         kind: Kind::CountVariance,
@@ -301,7 +328,8 @@ pub const CATALOGUE: &[Entry] = &[
     // The one that makes the word "profit" mean something.
     Entry {
         id: "profit",
-        title: "Profit — sales, food cost and running costs",
+        title: "Profit summary",
+        description: "Sales less recorded food costs and operating expenses. Read the notes for cost assumptions.",
         group: "Money",
         needs: Permission::ReportsView,
         kind: Kind::Profit,
@@ -364,6 +392,7 @@ pub(crate) fn choices(today: BusinessDay) -> Vec<PeriodChoiceView> {
 pub struct ReportEntryView {
     pub id: String,
     pub title: String,
+    pub description: String,
     pub group: String,
 }
 
@@ -410,14 +439,16 @@ pub(crate) fn column(header: &str, numeric: bool) -> ReportColumn {
 pub(crate) fn period_words(period: Period) -> String {
     let days = period.days();
     if days == 1 {
-        return period.from.to_string();
+        return words::date(period.from);
     }
-    format!("{} to {} · {days} days", period.from, period.to)
+    format!("{} to {} · {days} days", words::date(period.from), words::date(period.to))
 }
 
 /// The comparison sentence, built in Rust (§6).
 fn compare(now: Money, before: Money, previous: Period) -> CompareView {
-    let direction = if now > before {
+    let direction = if before.is_zero() {
+        "none"
+    } else if now > before {
         "up"
     } else if now < before {
         "down"
@@ -444,9 +475,9 @@ fn compare(now: Money, before: Money, previous: Period) -> CompareView {
     };
     let summary = match (direction, percent) {
         (_, None) if before.is_zero() && now.is_zero() => {
-            format!("Nothing {span} either.")
+            "No sales in either period".to_owned()
         }
-        (_, None) => format!("Nothing at all {span}."),
+        (_, None) => "No sales in the previous period".to_owned(),
         ("same", _) => format!("Exactly the same as {span}."),
         (dir, Some(p)) => format!(
             "{} {}% on {span} ({}).",
@@ -527,7 +558,12 @@ fn build(
                         qty = qty.add(each).unwrap_or(qty);
                     }
                     bills += b.bills;
-                    let mut row = vec![b.label.clone(), b.bills.to_string()];
+                    let label = if by == SalesBy::Day {
+                        b.label.parse::<BusinessDay>().map(words::date).unwrap_or_else(|_| b.label.clone())
+                    } else {
+                        b.label.clone()
+                    };
+                    let mut row = vec![label, b.bills.to_string()];
                     if wants_qty {
                         row.push(b.qty.map(|q| q.to_string()).unwrap_or_default());
                     }
@@ -543,6 +579,9 @@ fn build(
             if wants_qty || by == SalesBy::PaymentMode {
                 bills = reports.sold_count(OUTLET, period)?;
                 notes.push("A bill can appear in more than one row; the total counts each bill once.".to_owned());
+            }
+            if by == SalesBy::Day && bills > 0 {
+                notes.push(format!("Average bill: {}", Money::from_paise(gross.paise().saturating_div(bills)).to_indian_string()));
             }
             // Every column that has figures in it gets a total.
             let mut totals = vec!["Total".to_owned(), bills.to_string()];
@@ -693,7 +732,7 @@ fn build(
                 .iter()
                 .map(|row| {
                     vec![
-                        row.business_day.to_string(),
+                        words::date(row.business_day),
                         control_words(&row.kind).to_owned(),
                         row.reference.clone(),
                         row.who.clone(),
@@ -724,7 +763,7 @@ fn build(
                 .iter()
                 .map(|row| {
                     vec![
-                        row.day.to_string(),
+                        words::date(row.day),
                         row.till.clone(),
                         row.shift_no.to_string(),
                         row.closed_by.clone(),
@@ -824,7 +863,7 @@ fn build(
             notes.push(format!(
                 "These sold in the {} days before {} and not since.",
                 period.previous().days(),
-                period.from
+                words::date(period.from)
             ));
             let rows = items
                 .iter()
@@ -1173,7 +1212,7 @@ fn build(
                         row.counts.to_string(),
                         format!("{} {}", row.variance_qty, row.unit),
                         row.variance_value.to_plain_string(),
-                        row.last_counted.to_string(),
+                        words::date(row.last_counted),
                     ]
                 })
                 .collect();
@@ -1443,6 +1482,7 @@ pub fn list_on(app: &App) -> UiResult<ReportListView> {
             .map(|entry| ReportEntryView {
                 id: entry.id.to_owned(),
                 title: entry.title.to_owned(),
+                description: entry.description.to_owned(),
                 group: entry.group.to_owned(),
             })
             .collect(),
@@ -1469,32 +1509,78 @@ pub fn csv_of(report: &ReportView) -> String {
 // The dashboard — the period's figures in tiles and charts, and the list of things that need
 // somebody.
 
-/// The first thing an owner sees, and the reason it is first.
+/// Recorded sales, payment allocation and expected drawer cash for a business period.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardView {
-    /// "Today, so far", "Yesterday", "1 September to 9 September · 9 days".
-    pub title: String,
     /// The period the figures are for, as the date boxes show it.
     pub from: String,
     pub to: String,
-    pub stats: Vec<StatView>,
+    pub summary: DashboardSummaryView,
     pub compare: Option<CompareView>,
     pub charts: Vec<ChartView>,
     /// Things that need a person.
     pub attention: Vec<AttentionView>,
-    pub quiet: String,
+}
+
+/// A connected sales breakdown, separate from the physical drawer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardSummaryView {
+    pub sales: String,
+    pub bills: String,
+    pub payments: Vec<DashboardAmountView>,
+    pub payment_note: String,
+    pub secondary: Vec<DashboardAmountView>,
+    pub details: Vec<DashboardAmountView>,
+    pub drawer: Option<DashboardDrawerView>,
+    pub drawer_unavailable: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "../../ui/src/ipc/generated/")]
 #[serde(rename_all = "camelCase")]
-pub struct StatView {
+pub struct DashboardAmountView {
+    pub id: String,
     pub label: String,
-    /// Already formatted, always. Even the counts.
     pub value: String,
     pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardDrawerView {
+    pub expected: String,
+    pub rows: Vec<DashboardAmountView>,
+}
+
+fn dashboard_amount(id: &str, label: &str, amount: Money, note: &str) -> DashboardAmountView {
+    DashboardAmountView {
+        id: id.to_owned(), label: label.to_owned(),
+        value: amount.to_indian_string(), note: note.to_owned(),
+    }
+}
+
+fn dashboard_drawer(position: mb_db::repo::money::CashPosition) -> DashboardDrawerView {
+    let rows = [
+        ("opening", "Opening cash", position.opening_float),
+        ("receipts", "Cash payments", position.cash_sales),
+        ("credit", "Credit collections", position.credit_collected),
+        ("added", "Cash added", position.top_ups),
+        ("refunds", "Cash refunds", position.cash_refunds.neg()),
+        ("expenses", "Cash expenses", position.cash_expenses.neg()),
+        ("withdrawals", "Cash withdrawn", position.payouts.neg()),
+        ("bank", "Bank deposits", position.bank_drops.neg()),
+        ("suppliers", "Supplier payments", position.suppliers_paid.neg()),
+        ("riders", "Cash with riders", position.with_riders.neg()),
+    ].into_iter().filter(|(id, _, amount)| *id == "opening" || !amount.is_zero())
+        .map(|(id, label, amount)| dashboard_amount(id, label, amount, if id == "receipts" {
+            "Includes tips and payments on voided bills; cash refunds are listed separately."
+        } else { "" })).collect();
+    DashboardDrawerView { expected: position.expected.to_indian_string(), rows }
 }
 
 /// One chart on the dashboard. The screen draws shapes; every number in it was computed here.
@@ -1540,13 +1626,17 @@ pub struct AttentionView {
     pub title: String,
     /// A whole sentence saying what to do about it.
     pub detail: String,
+    pub target: String,
+    pub action: String,
 }
 
-fn needs_you(tone: &str, title: &str, detail: String) -> AttentionView {
+fn needs_you(tone: &str, title: &str, detail: String, target: &str, action: &str) -> AttentionView {
     AttentionView {
         tone: tone.to_owned(),
         title: title.to_owned(),
         detail,
+        target: target.to_owned(),
+        action: action.to_owned(),
     }
 }
 
@@ -1614,7 +1704,7 @@ fn columns(id: &str, title: &str, steps: Vec<(String, Money, i64)>) -> ChartView
             .into_iter()
             .map(|(label, amount, bills)| PointView {
                 label,
-                value: amount.to_plain_string(),
+                value: amount.to_indian_string(),
                 note: if bills > 0 {
                     words::count(bills, "bill", "bills")
                 } else {
@@ -1643,7 +1733,7 @@ fn ranking(
         .take(RANKED)
         .map(|b| PointView {
             label: b.label.clone(),
-            value: b.gross.to_plain_string(),
+            value: b.gross.to_indian_string(),
             note: note_of(b),
             share: permille(b.gross.paise(), most),
             hue: 0,
@@ -1656,7 +1746,7 @@ fn ranking(
             .fold(0_i64, |acc, b| acc.saturating_add(b.gross.paise()));
         points.push(PointView {
             label: "Other".to_owned(),
-            value: Money::from_paise(rest).to_plain_string(),
+            value: Money::from_paise(rest).to_indian_string(),
             note: words::count(
                 i64::try_from(buckets.len() - RANKED).unwrap_or(i64::MAX),
                 "more",
@@ -1699,32 +1789,13 @@ fn donut(id: &str, title: &str, buckets: Vec<mb_db::repo::reports::Bucket>) -> C
             .filter(|b| !b.gross.is_zero())
             .map(|b| PointView {
                 label: b.label.clone(),
-                value: b.gross.to_plain_string(),
+                value: b.gross.to_indian_string(),
                 note: words::count(b.bills, "bill", "bills"),
                 share: permille(b.gross.paise().saturating_abs(), scale),
                 hue: hue_of(&b.key),
             })
             .collect(),
     }
-}
-
-/// The dashboard's own name for the period.
-fn dashboard_title(period: Period, today: BusinessDay) -> String {
-    if period.days() == 1 {
-        if period.from == today {
-            return "Today, so far".to_owned();
-        }
-        if period.from == today.previous() {
-            return "Yesterday".to_owned();
-        }
-        return words::day_with_weekday(period.from, today);
-    }
-    format!(
-        "{} to {} · {} days",
-        words::day(period.from, today),
-        words::day(period.to, today),
-        period.days()
-    )
 }
 
 /// The period's figures, and everything that is waiting for a person. No period means today.
@@ -1739,13 +1810,14 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
     let one_day = period.days() == 1;
 
     // The figures, summed day by day from the same rows the day close freezes.
-    let (bills, net, voids, voided_bills, cash, electronic, spent, position, has_archived) =
+    let (bills, net, voids, voided_bills, spent, position, has_archived, collected) =
         app.with_shop(|shop| {
             shop.db
                 .read_transaction(|tx| {
                     let repos = mb_db::Repos::new(tx);
-                    let (mut bills, mut net, mut voids, mut voided, mut cash, mut upi, mut spent) =
-                        (0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64, 0_i64);
+                    let (mut bills, mut net, mut voids, mut voided, mut spent) =
+                        (0_i64, 0_i64, 0_i64, 0_i64, 0_i64);
+                    let mut collected = Money::ZERO;
                     let mut day = period.from;
                     while day <= period.to {
                         let totals = repos.corrections().day_totals(OUTLET, day)?;
@@ -1754,9 +1826,9 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
                         net = net.saturating_add(totals.net.paise());
                         voids = voids.saturating_add(totals.voids.paise());
                         voided = voided.saturating_add(totals.voided_bills);
-                        cash = cash.saturating_add(figures.cash.paise());
-                        upi = upi.saturating_add(figures.upi_and_card.paise());
                         spent = spent.saturating_add(figures.expenses.paise());
+                        collected = collected.add(figures.credit_collected)
+                            .map_err(|e| mb_db::DbError::invariant(e.to_string()))?;
                         day = day.next();
                     }
                     let archived = repos.wire().cloud_days(OUTLET, period)?;
@@ -1775,11 +1847,10 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
                         Money::from_paise(net),
                         Money::from_paise(voids),
                         voided,
-                        Money::from_paise(cash),
-                        Money::from_paise(upi),
                         Money::from_paise(spent),
                         position,
                         !archived.is_empty(),
+                        collected,
                     ))
                 })
                 .map_err(|e| words::from_db(&e))
@@ -1798,7 +1869,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
     let mut attention = Vec::new();
     if has_archived {
         attention.push(needs_you("info", "Archived days in this period",
-            "Takings and average bill include saved daily totals. Detailed charts cover bills stored on this counter; drawer, spending, void amounts and margin are unavailable for the full period.".to_owned()));
+            "Sales include archived totals; breakdowns cover locally stored bills only.".to_owned(), "reports/sales_day", "View daily totals"));
     }
 
     // Paper that did not come out.
@@ -1813,12 +1884,12 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
     if parked > 0 {
         attention.push(needs_you(
             "danger",
-            "Something did not print",
+            "Printing failed",
             format!(
-                "{} gave up after retrying. Open the print queue from the bar \
-                 at the top and either try again or dismiss them.",
+                "{} waiting to print.",
                 words::count(i64::try_from(parked).unwrap_or(i64::MAX), "job", "jobs")
             ),
+            "print-queue", "Open print queue",
         ));
     }
 
@@ -1839,7 +1910,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
             "warn",
             "Bills back on the counter",
             format!(
-                "{} taken back and not billed again: {}.",
+                "{} awaiting rebilling: {}.",
                 words::count(
                     i64::try_from(unfinished.len()).unwrap_or(i64::MAX),
                     "bill",
@@ -1847,6 +1918,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
                 ),
                 unfinished.join(", ")
             ),
+            "reports/bills", "View bills",
         ));
     }
     if waiting > 0 && who.must(Permission::BillRevertApprove).is_ok() {
@@ -1854,9 +1926,10 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
             "warn",
             "Edited bills",
             format!(
-                "{} waiting for your approval, under Bills.",
+                "{} awaiting approval.",
                 words::count(waiting, "edit", "edits")
             ),
+            "reports/bills", "Review bills",
         ));
     }
 
@@ -1869,6 +1942,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
             &backup.tone,
             "Backup",
             format!("Last backup: {}.", backup.last),
+            "backup", "Open backup",
         ));
     }
 
@@ -1889,9 +1963,9 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
         if !old.is_empty() {
             attention.push(needs_you(
                 "warn",
-                "Somebody has owed you for over a month",
+                "Credit overdue",
                 format!(
-                    "{}, the oldest {}. Open Credit to see who.",
+                    "{} overdue by more than 30 days; oldest {}.",
                     words::count(
                         i64::try_from(old.len()).unwrap_or(i64::MAX),
                         "customer",
@@ -1899,6 +1973,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
                     ),
                     old.iter().map(|c| c.oldest.as_str()).max().unwrap_or("—")
                 ),
+                "credit", "View credit",
             ));
         }
     }
@@ -1910,14 +1985,14 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
             "info",
             "Regular payments are due",
             format!(
-                "{} waiting — rent, salary, the internet bill. Nothing posts \
-                 itself; open Spends to confirm them.",
+                "{} awaiting confirmation.",
                 words::count(
                     i64::try_from(spends.due.len()).unwrap_or(i64::MAX),
                     "reminder",
                     "reminders"
                 )
             ),
+            "expenses", "View expenses",
         ));
     }
 
@@ -1926,7 +2001,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
         && let Ok(buying) = crate::buying::buying_on(app, None)
     {
         for line in buying.attention {
-            attention.push(needs_you("warn", "Buying", line));
+            attention.push(needs_you("warn", "Buying", line, "buying", "View buying"));
         }
     }
 
@@ -1944,7 +2019,7 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
 
     // The comparison against the period before, and every chart, through the same grouped
     // report the screen would run.
-    let (compare_view, charts) = app.with_shop(|shop| {
+    let (mut compare_view, charts, payments, tips) = app.with_shop(|shop| {
         shop.db
             .read_transaction(|tx| {
                 let reports = mb_db::Repos::new(tx).reports();
@@ -2014,10 +2089,17 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
                     charts.push(columns("trend", "Sales by day", steps));
                     charts.push(by_hour("hours")?);
                 }
+                let mut payments = reports.sales_by(OUTLET, period, SalesBy::PaymentMode)?;
+                for bucket in &mut payments {
+                    if let Some(name) = bucket.key.strip_prefix("other:") {
+                        bucket.label = name.to_owned();
+                    }
+                    if bucket.key == "credit" { bucket.label = "On credit".to_owned(); }
+                }
                 charts.push(donut(
                     "payment",
                     "Payment modes",
-                    reports.sales_by(OUTLET, period, SalesBy::PaymentMode)?,
+                    payments.clone(),
                 ));
                 charts.push(donut(
                     "types",
@@ -2045,81 +2127,70 @@ pub fn dashboard_on(app: &App, period: Option<PeriodArg>) -> UiResult<DashboardV
                     reports.sales_by(OUTLET, period, SalesBy::Cashier)?,
                     |b| words::count(b.bills, "bill", "bills"),
                 ));
-                Ok((compare_view, charts))
+                Ok((compare_view, charts, payments, reports.sales_tips(OUTLET, period)?))
             })
             .map_err(|e| words::from_db(&e))
     })?;
 
-    let mut stats = vec![
-        StatView {
-            label: "Net sales".to_owned(),
-            value: net.to_plain_string(),
-            note: format!("All payment methods · {}", words::count(bills, "bill", "bills")),
-        },
-        StatView {
-            label: "Average bill".to_owned(),
-            value: average.to_plain_string(),
-            note: if bills > 0 {
-                String::new()
-            } else {
-                "Nothing sold.".to_owned()
-            },
-        },
-    ];
-    stats.push(match position {
-        Some(position) => StatView {
-            label: "Expected cash in drawer".to_owned(),
-            value: position.expected.to_plain_string(),
-            note: "Cash only, before counting. All tills.".to_owned(),
-        },
-        None => StatView {
-            label: "Cash received".to_owned(),
-            value: cash.to_plain_string(),
-            note: format!("Period receipts, not a drawer balance. {} by UPI and card", electronic.to_plain_string()),
-        },
-    });
-    stats.push(StatView {
-        label: "Spent".to_owned(),
-        value: spent.to_plain_string(),
-        note: String::new(),
-    });
-    stats.push(StatView {
-        label: "Voided".to_owned(),
-        value: voids.to_plain_string(),
-        note: words::count(voided_bills, "bill", "bills"),
-    });
-    stats.push(StatView {
-        label: "Gross margin".to_owned(),
-        value: match margin {
-            Some(profit) => profit.gross_margin.to_plain_string(),
-            None => "—".to_owned(),
-        },
-        note: match margin.and_then(|p| p.margin_bp().map(|bp| (p, bp))) {
-            Some((_, bp)) => format!("{} of what you sold", margin_words(bp)),
-            None => "Add recipes to your dishes and this fills in.".to_owned(),
-        },
+    // Compare the same recorded sales as the headline; wording belongs beside that figure.
+    let previous_label = if period.days() == 1 && period.from == today { "yesterday" } else { "previous period" };
+    compare_view.summary = if compare_view.before == "0.00" {
+        String::new()
+    } else {
+        let before = Money::parse(&compare_view.before).map_err(|e| words::UiError::new("report.money", e.to_string()))?;
+        let change = net.paise().saturating_sub(before.paise()).saturating_mul(100)
+            .saturating_div(before.paise().abs().max(1));
+        format!("{}{}% vs {previous_label}", if change > 0 { "+" } else { "" }, change)
+    };
+
+    let mut breakdown: Vec<_> = payments.iter().filter(|b| !b.gross.is_zero()).map(|b|
+        dashboard_amount(&b.key, &b.label, b.gross, if b.key == "credit" {
+            "Billed on credit, not money received. Repayments are tracked separately."
+        } else { "" })).collect();
+    if !tips.is_zero() {
+        breakdown.push(dashboard_amount("tips", "Less tips", tips.neg(), "Tips are included in payments, not sales."));
+    }
+    let allocated = payments.iter().fold(0_i64, |total, p| total.saturating_add(p.gross.paise()));
+    let difference = net.paise().saturating_sub(allocated).saturating_add(tips.paise());
+    if difference != 0 && !has_archived {
+        breakdown.push(dashboard_amount("unallocated", "Unallocated sales", Money::from_paise(difference),
+            "Sales without a matching recorded payment allocation. Review the bills."));
+    }
+    let mut secondary = vec![dashboard_amount("expenses", "Expenses", spent, "All recorded expense payment modes.")];
+    secondary.push(DashboardAmountView { id: "voids".to_owned(), label: "Voided bills".to_owned(),
+        value: voided_bills.to_string(), note: voids.to_indian_string() });
+    if !collected.is_zero() {
+        secondary.push(dashboard_amount("collections", "Credit collected", collected,
+            "Repayments against customer credit; not additional sales."));
+    }
+    let mut details = vec![dashboard_amount("average", "Average bill", average, "Sales divided by non-voided bills.")];
+    details.push(match margin {
+        Some(profit) => dashboard_amount("margin", "Gross margin", profit.gross_margin, "Sales excluding tax, less recorded food costs; before operating expenses."),
+        None => DashboardAmountView { id: "margin".to_owned(), label: "Gross margin".to_owned(),
+            value: "—".to_owned(), note: "Recipe costs not set up.".to_owned() },
     });
     if has_archived {
-        for stat in &mut stats[2..] {
-            stat.value = "—".to_owned();
-            stat.note = "Detailed bills unavailable for archived days.".to_owned();
-        }
+        breakdown.clear();
+        for amount in &mut secondary { amount.value = "—".to_owned(); amount.note = "Archived details unavailable.".to_owned(); }
+        if let Some(margin) = details.get_mut(1) { margin.value = "—".to_owned(); margin.note = "Archived details unavailable.".to_owned(); }
     }
+    let summary = DashboardSummaryView {
+        sales: net.to_indian_string(), bills: words::count(bills, "bill", "bills"), payments: breakdown,
+        payment_note: if has_archived { "Payment breakdown unavailable for archived days." }
+            else if payments.iter().any(|b| b.gross.is_negative()) { "Returns deducted from their original payment modes." }
+            else { "" }.to_owned(),
+        secondary, details,
+        drawer: if has_archived { None } else { position.map(dashboard_drawer) },
+        drawer_unavailable: if has_archived { "Drawer details unavailable for archived days." }
+            else if !one_day { "Choose one day to check drawer cash." } else { "" }.to_owned(),
+    };
 
     Ok(DashboardView {
-        title: dashboard_title(period, today),
         from: period.from.to_string(),
         to: period.to.to_string(),
-        stats,
+        summary,
         compare: Some(compare_view),
         charts,
-        quiet: if attention.is_empty() {
-            "Nothing needs you. The backup is current, everything printed, and \
-             yesterday is closed."
-                .to_owned()
-        } else {
-            String::new()
-        },
         attention,
     })
 }
@@ -2355,13 +2426,14 @@ mod tests {
         let returned = donut("types", "Order types", vec![bucket("parcel", -5000)]);
         assert_eq!(returned.kind, "bars");
         assert_eq!(returned.points.len(), 1, "return-only periods must not look empty");
-        assert_eq!(returned.points[0].value, "-50.00");
+        assert_eq!(returned.points[0].value, Money::from_paise(-5000).to_indian_string());
         assert_eq!(returned.points[0].share, 1000);
         assert!(returned.note.contains("negative"));
 
         let mixed = donut("payment", "Payment modes", vec![bucket("cash", 5000), bucket("card", -5000)]);
         assert_eq!(mixed.kind, "bars");
-        assert_eq!(mixed.points.iter().map(|p| p.value.as_str()).collect::<Vec<_>>(), vec!["50.00", "-50.00"]);
+        assert_eq!(mixed.points.iter().map(|p| p.value.clone()).collect::<Vec<_>>(),
+            vec![Money::from_paise(5000).to_indian_string(), Money::from_paise(-5000).to_indian_string()]);
         assert!(mixed.points.iter().all(|p| p.share == 1000), "opposite amounts cannot cancel the chart's scale");
 
         let sales = donut("payment", "Payment modes", vec![bucket("cash", 7500), bucket("card", 2500)]);
@@ -2377,6 +2449,7 @@ mod tests {
             assert!(seen.insert(entry.id), "{} is listed twice", entry.id);
             assert!(find(entry.id).is_some());
             assert!(!entry.title.is_empty());
+            assert!(!entry.description.is_empty());
             assert!(
                 entry.title.chars().next().is_some_and(char::is_uppercase),
                 "{}'s title should read like a sentence",
@@ -2420,7 +2493,7 @@ mod tests {
         assert!(up.summary.contains("31 days"), "{}", up.summary);
         // And it names the period, so a person can check what it compared against rather than
         // trusting the percentage.
-        assert!(up.period.contains("2026-07-01"), "{}", up.period);
+        assert!(up.period.contains("01-07-2026"), "{}", up.period);
 
         let down = compare(
             Money::from_paise(90_000),
@@ -2434,7 +2507,7 @@ mod tests {
         // worse than saying what happened.
         let fresh = compare(Money::from_paise(5_000), Money::ZERO, previous);
         assert!(
-            fresh.summary.contains("Nothing at all"),
+            fresh.summary.contains("No sales in the previous period"),
             "{}",
             fresh.summary
         );
@@ -2445,7 +2518,12 @@ mod tests {
     fn one_day_is_not_one_days() {
         let yesterday = Period::one_day(BusinessDay::from_ymd(2026, 8, 8));
         let fresh = compare(Money::from_paise(12_600), Money::ZERO, yesterday);
-        assert_eq!(fresh.summary, "Nothing at all the day before.");
+        assert_eq!(fresh.summary, "No sales in the previous period");
+        assert_eq!(fresh.direction, "none");
+        assert_eq!(fresh.period, "08-08-2026");
+        let empty = compare(Money::ZERO, Money::ZERO, yesterday);
+        assert_eq!(empty.summary, "No sales in either period");
+        assert_eq!(empty.direction, "none");
 
         let up = compare(
             Money::from_paise(10_800),

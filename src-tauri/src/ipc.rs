@@ -369,30 +369,132 @@ pub fn dismiss_all_print_jobs(app: tauri::State<'_, App>) -> UiResult<u32> {
 /// The queue's vocabulary, turned into words.
 pub fn to_view(status: &mb_print::queue::JobStatus) -> PrintJobView {
     use mb_print::queue::{JobKind as K, JobState as S};
+    let what = match status.kind {
+        K::Bill => "Bill",
+        K::Kitchen => "Kitchen ticket",
+        K::Label => "Label",
+        K::Test => "Test print",
+        K::Drawer => "Cash drawer",
+        K::DayClose => "Closing slip",
+        K::Delivery => "Delivery slip",
+        K::Report => "Report",
+    };
+    let reason = status.reason.as_deref().map(str::trim).and_then(|reason| {
+        if reason.eq_ignore_ascii_case(what) {
+            None
+        } else {
+            let prefix = format!("{what} ");
+            Some(
+                if reason
+                    .get(..prefix.len())
+                    .is_some_and(|start| start.eq_ignore_ascii_case(&prefix))
+                {
+                    reason[prefix.len()..]
+                        .trim_start_matches([' ', '—', '-', ':'])
+                        .to_owned()
+                } else {
+                    reason.to_owned()
+                },
+            )
+            .filter(|reason| !reason.is_empty())
+        }
+    });
+    let needs_attention = matches!(status.state, S::Parked);
     PrintJobView {
         id: status.id.clone(),
         printer: status.printer_name.clone(),
-        what: match status.kind {
-            K::Bill => "Bill",
-            K::Kitchen => "Kitchen ticket",
-            K::Label => "Label",
-            K::Test => "Test print",
-            K::Drawer => "Cash drawer",
-            K::DayClose => "Closing slip",
-            K::Delivery => "Delivery slip",
-            K::Report => "Report",
-        }
-        .to_owned(),
+        what: what.to_owned(),
         state: match status.state {
-            S::Pending => "Waiting".to_owned(),
+            S::Pending => "Queued".to_owned(),
             S::Printing => "Printing".to_owned(),
-            S::Failed => format!("Did not print — trying again ({})", status.attempts),
-            // The one a person has to act on, and it says so in words.
-            S::Parked => "NOT PRINTED — needs you".to_owned(),
+            S::Failed => format!("Retrying (attempt {})", status.attempts),
+            S::Parked => "Failed".to_owned(),
         },
-        needs_attention: matches!(status.state, S::Parked),
-        reason: status.reason.clone(),
+        needs_attention,
+        reason,
         last_error: status.last_error.clone(),
+        error_summary: needs_attention.then(|| {
+            // Persisted errors predate this presentation. Recognise the queue's deadline
+            // message centrally; never infer whether paper physically came out.
+            if status
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.starts_with("the printer did not finish within "))
+            {
+                "Printer timed out. Check the printer connection."
+            } else {
+                "Printing failed. Check the printer."
+            }
+            .to_owned()
+        }),
+    }
+}
+
+#[cfg(test)]
+mod print_queue_view_tests {
+    use super::to_view;
+    use mb_print::queue::{JobKind, JobState, JobStatus};
+
+    fn job(state: JobState) -> JobStatus {
+        JobStatus {
+            id: "job-1".into(), printer_id: "printer-1".into(), printer_name: "Counter".into(),
+            kind: JobKind::Bill, state, attempts: 2, reason: Some("bill BILL//0123".into()),
+            last_error: Some("the printer did not finish within 90 seconds, so its job was cancelled. Check the printer, then press Try again".into()),
+            engine_used: None,
+        }
+    }
+
+    #[test]
+    fn current_state_and_previous_failure_stay_distinct() {
+        for (state, label) in [
+            (JobState::Pending, "Queued"),
+            (JobState::Printing, "Printing"),
+            (JobState::Failed, "Retrying (attempt 2)"),
+        ] {
+            let source = job(state);
+            let view = to_view(&source);
+            assert_eq!(view.state, label);
+            assert!(!view.needs_attention);
+            assert!(view.error_summary.is_none());
+            assert_eq!(view.last_error, source.last_error);
+        }
+        let source = job(JobState::Parked);
+        let view = to_view(&source);
+        assert_eq!(view.state, "Failed");
+        assert!(view.needs_attention);
+        assert_eq!(
+            view.error_summary.as_deref(),
+            Some("Printer timed out. Check the printer connection.")
+        );
+        assert_eq!(view.last_error, source.last_error);
+    }
+
+    #[test]
+    fn titles_remove_only_the_redundant_document_prefix() {
+        let mut source = job(JobState::Parked);
+        assert_eq!(to_view(&source).reason.as_deref(), Some("BILL//0123"));
+        source.kind = JobKind::Kitchen;
+        for (reason, expected) in [
+            ("kitchen ticket", None),
+            ("table 3", Some("table 3")),
+            ("Kitchen ticket — table 3", Some("table 3")),
+            ("ಕನ್ನಡ", Some("ಕನ್ನಡ")),
+        ] {
+            source.reason = Some(reason.into());
+            assert_eq!(to_view(&source).reason.as_deref(), expected);
+        }
+    }
+
+    #[test]
+    fn other_errors_keep_their_diagnostics_without_claiming_a_timeout() {
+        let mut source = job(JobState::Parked);
+        source.last_error = Some("Windows spooler error 123".into());
+        let view = to_view(&source);
+        assert_eq!(
+            view.error_summary.as_deref(),
+            Some("Printing failed. Check the printer.")
+        );
+        assert_eq!(view.last_error, source.last_error);
     }
 }
 

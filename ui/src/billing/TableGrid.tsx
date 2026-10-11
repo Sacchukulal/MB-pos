@@ -248,7 +248,7 @@ export function Tile({
             {asked || table.kitchenMinutes === null || table.kitchenMinutes === table.minutes ? null : (
               <span
                 className="mb-tile__food"
-                title="Since the kitchen was last told"
+                title="Time since last kitchen ticket"
                 aria-label={`Kitchen ${formatMinutes(table.kitchenMinutes)}`}
               >
                 <Icon name="flame" size="sm" />
@@ -258,8 +258,8 @@ export function Tile({
             {table.orderId && !table.kitchenTold ? (
               <span
                 className="mb-tile__kitchen"
-                title="The kitchen has not been told"
-                aria-label="The kitchen has not been told"
+                title="Not sent to kitchen"
+                aria-label="Not sent to kitchen"
               />
             ) : null}
             {/* A waiter asked, from a phone, for this table to be settled: the desk has it. */}
@@ -270,7 +270,7 @@ export function Tile({
               </span>
             ) : table.billAsked ? (
               /* A waiter asked for this table's bill from a phone; it printed. */
-              <span className="mb-tile__bill" title="The bill was asked for from a phone">
+              <span className="mb-tile__bill" title="Bill requested from a phone">
                 <Icon name="file" size="sm" />
                 Bill
               </span>

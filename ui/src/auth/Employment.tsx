@@ -165,7 +165,7 @@ export function Attendance({ staffId }: { staffId?: string }) {
 
       {view && view.missed.length > 0 ? (
         <Panel
-          title="Nobody clocked out of these"
+          title="Missing clock-outs"
           note="Their hours cannot be worked out until somebody says when they left."
         >
           <Table
@@ -178,7 +178,7 @@ export function Attendance({ staffId }: { staffId?: string }) {
 
       {view && view.shifts.length === 0 ? (
         <EmptyState
-          title="Nobody worked on these days"
+          title="No attendance records"
           hint="Clocking in is the same PIN as signing in — there is no second thing to learn."
         />
       ) : (
@@ -322,7 +322,7 @@ export function Leave({ staffId }: { staffId?: string }) {
       </Toolbar>
 
       {/* The balance is a ledger, and the screen says so. */}
-      <Panel title="What is left" flush>
+      <Panel title="Leave balances" flush>
         <Table
           rows={[...(view?.balances ?? [])]}
           columns={[
@@ -350,7 +350,7 @@ export function Leave({ staffId }: { staffId?: string }) {
       </Panel>
 
       {view && view.pending.length > 0 ? (
-        <Panel title="Waiting on you" note="Nobody is away until you say so.">
+        <Panel title="Pending approval" note="Nobody is away until you say so.">
           <Stack gap="field">
             {view.pending.map((r) => (
               <div key={r.id} className="mb-leave__pending">
@@ -369,7 +369,7 @@ export function Leave({ staffId }: { staffId?: string }) {
         </Panel>
       ) : null}
 
-      <Panel title="Asked for" flush>
+      <Panel title="Leave requests" flush>
         <Table
           rows={[...(view?.requests ?? [])]}
           columns={[
@@ -543,7 +543,7 @@ function AskForLeave({
     >
       <Stack gap="field">
         <Select
-          label="What kind"
+          label="Leave type"
           value={type}
           onChange={(e) => setType(e.target.value)}
           options={view.balances.map((b) => ({
@@ -556,7 +556,7 @@ function AskForLeave({
           <Input label="To" value={to} onChange={(e) => setTo(e.target.value)} />
         </Row>
         <Input
-          label="How many half-days"
+          label="Half-days"
           hint="2 is a full day, 1 is half a day. Days are counted in halves so they always add up."
           value={halves}
           onChange={(e) => setHalves(e.target.value.replace(/[^0-9]/g, ''))}
@@ -601,7 +601,7 @@ export function Salary({ people }: { people: readonly EmployeeView[] }) {
         }
       >
         <Select
-          label="Who"
+          label="Staff member"
           value={who}
           onChange={(e) => setWho(e.target.value)}
           options={people.map((p) => ({ value: p.id, label: p.name }))}
@@ -609,7 +609,7 @@ export function Salary({ people }: { people: readonly EmployeeView[] }) {
       </Toolbar>
 
       {/* The whole history, oldest first. */}
-      <Panel title="What they are paid" note="A raise adds a row. Nothing is ever overwritten." flush>
+      <Panel title="Salary history" note="A raise adds a row. Nothing is ever overwritten." flush>
         <Table
           rows={[...(view?.structures ?? [])]}
           columns={[
@@ -767,7 +767,7 @@ function SetSalary({
             { value: 'hourly', label: 'Hour worked' },
           ]}
         />
-        <MoneyInput label="How much" value={amount} onChange={setAmount} />
+        <MoneyInput label="Amount" value={amount} onChange={setAmount} />
       </Stack>
     </Modal>
   );
@@ -820,7 +820,7 @@ function GiveAdvance({
         <p className="mb-muted">
           This comes out of the drawer today and off the next payroll run.
         </p>
-        <MoneyInput label="How much" value={amount} onChange={setAmount} />
+        <MoneyInput label="Amount" value={amount} onChange={setAmount} />
         <Input
           label="Over how many runs"
           hint="1 is all of it next month."
@@ -885,7 +885,7 @@ export function Payroll() {
       </Toolbar>
 
       {cost ? (
-        <Panel title="What your people cost">
+        <Panel title="Payroll costs">
           <Row gap="group">
             <Stack gap="inline">
               <span className="mb-muted">Wages</span>
@@ -1254,13 +1254,13 @@ function AdjustLeave({
           not a leave request and nobody has to approve it.
         </p>
         <Select
-          label="Who"
+          label="Staff member"
           value={who}
           onChange={(e) => setWho(e.target.value)}
           options={people.map((p) => ({ value: p.id, label: p.name }))}
         />
         <Select
-          label="Which leave"
+          label="Leave type"
           value={leaveTypeId}
           onChange={(e) => setLeaveTypeId(e.target.value)}
           options={view.balances.map((b) => ({
@@ -1269,16 +1269,16 @@ function AdjustLeave({
           }))}
         />
         <Select
-          label="Which way"
+          label="Adjustment"
           value={accrual ? 'grant' : 'deduct'}
           onChange={(e) => setAccrual(e.target.value === 'grant')}
           options={[
-            { value: 'grant', label: 'Give them more' },
-            { value: 'deduct', label: 'Take some back' },
+            { value: 'grant', label: 'Add leave' },
+            { value: 'deduct', label: 'Deduct leave' },
           ]}
         />
         <Input
-          label="How many half-days"
+          label="Half-days"
           hint="Two halves is one day. The ledger counts in halves, so half a day off is one."
           value={halves}
           inputMode="numeric"
@@ -1327,7 +1327,7 @@ function SetRoster({
   return (
     <Modal
       open
-      title="Who is in, and when"
+      title="Shift schedule"
       onClose={onClose}
       actions={
         <>
@@ -1357,12 +1357,12 @@ function SetRoster({
           behind this box.
         </p>
         <Select
-          label="Who"
+          label="Staff member"
           value={staffId}
           onChange={(e) => setStaffId(e.target.value)}
           options={people.map((p) => ({ value: p.id, label: p.name }))}
         />
-        <Input label="Which day" value={day} onChange={(e) => setDay(e.target.value)} />
+        <Input label="Date" value={day} onChange={(e) => setDay(e.target.value)} />
         {view.patterns.length === 0 ? (
           <p className="mb-muted">
             This shop has no shifts set up yet, so the only thing that can be
@@ -1370,7 +1370,7 @@ function SetRoster({
           </p>
         ) : null}
         <Select
-          label="Which shift"
+          label="Shift"
           value={patternId}
           onChange={(e) => setPatternId(e.target.value)}
           options={[

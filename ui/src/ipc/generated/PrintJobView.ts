@@ -9,10 +9,14 @@ export type PrintJobView = { id: string, printer: string,
  */
 what: string, 
 /**
- * "Waiting", "Printing", "Failed — will try again", "Not printed".
+ * Queued, Printing, Retrying or Failed.
  */
 state: string, 
 /**
  * True only for a parked job: the one the cashier has to see.
  */
-needsAttention: boolean, reason: string | null, lastError: string | null, };
+needsAttention: boolean, reason: string | null, lastError: string | null, 
+/**
+ * Short current failure; raw diagnostics remain in last_error.
+ */
+errorSummary: string | null, };

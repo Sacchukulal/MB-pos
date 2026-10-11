@@ -192,12 +192,12 @@ export function Logo() {
     }
   };
 
-  if (!view) return <Spinner label="Looking for your logo" />;
+  if (!view) return <Spinner label="Loading logo" />;
 
   return (
     <Card className="mb-logo">
       <SectionHeader
-        title="Your logo"
+        title="Logo"
         note="A picture at the top of every bill. Choose where it goes, and how wide, with the two settings above."
       />
 
@@ -253,7 +253,7 @@ export function Logo() {
             </div>
             <div className="mb-stack">
               <Select
-                label="How much of the picture to print"
+                label="Print threshold"
                 value={darkness}
                 onChange={(event) => setDarkness(event.currentTarget.value)}
                 options={DARKNESS.map((d) => ({ value: d.value, label: d.label }))}

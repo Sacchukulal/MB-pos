@@ -17,6 +17,7 @@ import { cx } from './cx';
 import { Button } from './controls';
 import { InfoTip } from './InfoTip';
 import { Icon, type IconName } from './Icon';
+import { useFocusScope } from './focus';
 
 export interface ModalProps {
   open: boolean;
@@ -77,14 +78,7 @@ export function Modal({
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose, onEnter]);
 
-  // Focus moves into the dialog ONCE, when it opens.
-  useEffect(() => {
-    if (!open) return;
-    const first = panel.current?.querySelector<HTMLElement>(
-      'input:not([type="hidden"]), select, textarea',
-    );
-    (first ?? panel.current)?.focus();
-  }, [open]);
+  useFocusScope(panel, open && shown !== 'gone');
 
   if (shown === 'gone') return null;
 
@@ -371,6 +365,8 @@ export function RowMenu({
   pressed,
   up,
   className,
+  disabled = false,
+  keyboardNavigation = false,
 }: {
   /** What the row is, for the screen reader — "More for Masala Dosa". */
   label?: string;
@@ -386,10 +382,15 @@ export function RowMenu({
   /** Open the sheet above the button rather than below it. */
   up?: boolean;
   className?: string;
+  disabled?: boolean;
+  /** Move focus into an action menu and support arrows, Home/End and Escape return. */
+  keyboardNavigation?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLSpanElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
+  useFocusScope(sheet, open && keyboardNavigation, () => sheet.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)'));
+  useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
   /** Where the button is when the sheet opens, and which way the sheet goes from it. */
   const [place, setPlace] = useState<{ x: number; y: number; up: boolean } | null>(null);
   /** Where the button is right now, and which way the sheet should go from it. */
@@ -448,6 +449,7 @@ export function RowMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-pressed={pressed}
+        disabled={disabled}
         onClick={toggle}
         icon={text === undefined ? <Icon name={icon} size="sm" /> : undefined}
       >
@@ -467,6 +469,18 @@ export function RowMenu({
             ref={sheet}
             className={cx('mb-sheet mb-rowmenu__sheet', place?.up && 'mb-rowmenu__sheet--up')}
             role="menu"
+            aria-label={label}
+            tabIndex={keyboardNavigation ? -1 : undefined}
+            onKeyDown={keyboardNavigation ? (event) => {
+              if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+              const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')];
+              if (!items.length) return;
+              event.preventDefault();
+              const index = items.indexOf(document.activeElement as HTMLElement);
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 :
+                (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+              items[next]?.focus();
+            } : undefined}
             onClick={() => setOpen(false)}
           >
             {children}
