@@ -23,7 +23,6 @@ const order = (id: string, arrivalKey = 'food-v1'): TableView => ({
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  document.documentElement.style.setProperty('--arrival-duration', '3000ms');
 });
 afterEach(() => {
   cleanup();
@@ -31,7 +30,11 @@ afterEach(() => {
   document.documentElement.removeAttribute('style');
 });
 
-describe('order arrival lifetime', () => {
+describe.each(['3000ms', '3s'])('order arrival lifetime (%s)', (duration) => {
+  beforeEach(() => {
+    document.documentElement.style.setProperty('--arrival-duration', duration);
+  });
+
   it('restarts a same-total item update and leaves the second pulse for its full duration', () => {
     const { result, rerender } = renderHook(({ floor }) => useArrivals(floor, { sound: true }), {
       initialProps: { floor: [order('1')] },

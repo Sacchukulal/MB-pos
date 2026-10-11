@@ -18,15 +18,18 @@ export function useDevicePixelRatio(): number {
   return ratio;
 }
 
-/**
- * How long something new is drawn attention to, in milliseconds — asked of the theme, never
- * decided here. One beat times the number of beats: the bell's ring, and a card that just
- * arrived. A counter with motion turned off has the beat set to zero there, so this comes
- * back zero and nothing beats at all.
- */
+/** CSS times keep their units: a production build may shorten 3000ms to 3s. */
+export function cssTimeMs(value: string): number {
+  const time = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(ms|s)$/i.exec(value.trim());
+  if (!time) return 0;
+  const milliseconds = Number(time[1]) * (time[2]?.toLowerCase() === 's' ? 1000 : 1);
+  return Number.isFinite(milliseconds) && milliseconds >= 0 ? milliseconds : 0;
+}
+
+/** The bell's full animation lifetime in milliseconds, including reduced-motion tokens. */
 export function beatsFor(): number {
   const theme = getComputedStyle(document.documentElement);
-  const beat = Number.parseFloat(theme.getPropertyValue('--motion-beat'));
+  const beat = cssTimeMs(theme.getPropertyValue('--motion-beat'));
   const beats = Number.parseFloat(theme.getPropertyValue('--beats'));
   return Number.isFinite(beat) && Number.isFinite(beats) ? beat * beats : 0;
 }

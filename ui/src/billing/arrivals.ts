@@ -1,7 +1,7 @@
 /** One shared arrival tracker for Billing, Processing and the Floor plan. */
 import { useEffect, useRef, useState } from 'react';
 
-import { beep } from '../kit';
+import { beep, cssTimeMs } from '../kit';
 import type { TableView } from '../ipc/generated/TableView';
 
 /** Each new generation restarts only the passive highlight, never the card's controls. */
@@ -15,10 +15,10 @@ function shape(tile: TableView): string {
 
 /** The duration remains readable when motion is disabled: the cue then stays still. */
 function arrivalDuration(): number {
-  const duration = Number.parseFloat(
+  const duration = cssTimeMs(
     getComputedStyle(document.documentElement).getPropertyValue('--arrival-duration'),
   );
-  return Number.isFinite(duration) && duration > 0 ? duration : 3000;
+  return duration > 0 ? duration : 3000;
 }
 
 export function useArrivals(
