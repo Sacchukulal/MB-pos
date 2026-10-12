@@ -135,7 +135,7 @@ fn correcting_somebody_elses_hours_is_recorded_and_your_own_is_refused() {
     let entry = history
         .entries
         .iter()
-        .find(|r| r.what.contains("hours"))
+        .find(|r| r.what == "Corrected attendance times")
         .expect("an audit row for the correction");
     assert!(
         entry.before.is_some(),

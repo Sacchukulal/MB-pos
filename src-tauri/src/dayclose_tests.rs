@@ -519,7 +519,7 @@ fn a_closed_day_refuses_a_void_until_somebody_opens_it_again() {
     assert!(
         actions
             .iter()
-            .any(|a| a.contains("Opened a closed day again")),
+            .any(|a| a.contains("Reopened the day")),
         "the reopen is not in the history: {actions:?}"
     );
     assert!(actions.iter().any(|a| a.contains("Void")), "{actions:?}");

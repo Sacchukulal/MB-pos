@@ -430,7 +430,7 @@ fn t17_every_buying_command_leaves_an_audit_row_a_person_can_read() {
     assert!(rows.iter().all(|r| r.staff_id.is_some()));
     assert_eq!(
         mb_auth::audit::action::words("purchase.cancelled"),
-        "Cancelled a delivery"
+        "Cancelled a purchase"
     );
 }
 
