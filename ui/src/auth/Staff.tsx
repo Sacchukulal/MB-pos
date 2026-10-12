@@ -178,7 +178,7 @@ function People() {
     <>
       <div className="mb-row mb-row--end">
         <Button variant="primary" onClick={() => setEditing(blankPerson(freshId('staff')))}>
-          Add somebody
+          Add staff
         </Button>
       </div>
 
@@ -267,11 +267,11 @@ function PersonCard({
         <Fact label="Mobile">{person.phone === '' ? '—' : `+91 ${person.phone}`}</Fact>
         <Fact label="Designation">{person.designation || '—'}</Fact>
         <Fact label="Department">{person.department || '—'}</Fact>
-        <Fact label="Working">{WORKING_WORDS[person.employmentType] ?? person.employmentType}</Fact>
+        <Fact label="Employment type">{WORKING_WORDS[person.employmentType] ?? person.employmentType}</Fact>
         <Fact label="Joined">{person.joined || '—'}</Fact>
-        <Fact label="Where they live">{person.address || '—'}</Fact>
-        <Fact label="In an emergency">{emergency}</Fact>
-        <Fact label="ID they gave you">{person.idProof || '—'}</Fact>
+        <Fact label="Address">{person.address || '—'}</Fact>
+        <Fact label="Emergency contact">{emergency}</Fact>
+        <Fact label="ID proof">{person.idProof || '—'}</Fact>
         {person.salarySays !== '' ? <Fact label="Salary">{person.salarySays}</Fact> : null}
       </Facts>
     </Modal>
@@ -327,7 +327,7 @@ function EditPerson({
   return (
     <Modal
       open
-      title={isNew ? 'Add somebody' : person.name}
+      title={isNew ? 'Add staff' : person.name}
       onClose={onClose}
       wide
       actions={
@@ -431,13 +431,13 @@ function EditPerson({
             onChange={(e) => set('department', e.target.value)}
           />
           <Select
-            label="Working"
+            label="Employment type"
             value={edit.employmentType}
             onChange={(e) => set('employmentType', e.target.value)}
             options={Object.entries(WORKING_WORDS).map(([value, label]) => ({ value, label }))}
           />
           <Input
-            label="Where they live"
+            label="Address"
             value={edit.address}
             onChange={(e) => set('address', e.target.value)}
           />
@@ -447,12 +447,12 @@ function EditPerson({
             onChange={(e) => set('emergencyName', e.target.value)}
           />
           <PhoneInput
-            label="On this number"
+            label="Emergency phone"
             value={edit.emergencyPhone}
             onChange={(phone) => set('emergencyPhone', phone)}
           />
           <Input
-            label="ID they gave you"
+            label="ID proof"
             hint="Aadhaar number, licence number — whatever you keep on file."
             value={edit.idProof}
             onChange={(e) => set('idProof', e.target.value)}
@@ -462,4 +462,3 @@ function EditPerson({
     </Modal>
   );
 }
-

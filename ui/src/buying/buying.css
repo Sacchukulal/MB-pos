@@ -109,7 +109,17 @@
  */
 .mb-buying__lines select,
 .mb-buying__lines input {
-  min-width: 0;
+  min-width: var(--field-xs);
+  width: var(--field-xs);
+}
+
+.mb-buying__lines td:first-child select {
+  min-width: var(--field-sm);
+  width: var(--field-md);
+}
+
+.mb-buying__form > .mb-row {
+  align-items: flex-end;
 }
 
 .mb-buying__totals,

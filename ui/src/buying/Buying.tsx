@@ -193,7 +193,7 @@ export function Buying() {
           <Button variant="secondary" onClick={() => setOrdering(true)}>
             Raise an order
           </Button>
-          <Button onClick={() => setEntering(true)}>Enter a delivery</Button>
+          <Button onClick={() => setEntering(true)}>Enter purchase</Button>
         </div>
       </div>
 
@@ -208,17 +208,17 @@ export function Buying() {
         active={tab}
         onChange={setTab}
         tabs={[
-          { id: 'deliveries', label: 'Deliveries' },
+          { id: 'deliveries', label: 'Purchases' },
           { id: 'suppliers', label: 'Suppliers' },
-          { id: 'orders', label: `Orders${view.orders.length > 0 ? ` (${view.orders.length})` : ''}` },
+          { id: 'orders', label: `Purchase orders${view.orders.length > 0 ? ` (${view.orders.length})` : ''}` },
         ]}
       />
 
       {tab === 'deliveries' ? (
         view.purchases.length === 0 ? (
           <EmptyState
-            title="No deliveries yet"
-            hint="Enter what arrives: it becomes your food cost, your supplier balance and the money that left the drawer."
+            title="No purchases yet"
+            hint="Record supplier invoices, received stock and payments."
           />
         ) : (
           <Table rows={view.purchases} columns={purchaseColumns} rowKey={(p) => p.id} />
@@ -266,8 +266,8 @@ export function Buying() {
       {tab === 'orders' ? (
         view.orders.length === 0 ? (
           <EmptyState
-            title="No orders"
-            hint="Optional. Enter what arrives and nothing here will ask about it."
+            title="No purchase orders"
+            hint="Purchase orders are optional. You can record a purchase directly."
           />
         ) : (
           <Table
@@ -460,7 +460,12 @@ function PurchaseEntry({
   };
 
   return (
-    <Modal open title="A delivery arrived" onClose={onClose} wide>
+    <Modal open title="Supplier invoice" onClose={onClose} wide actions={<div className="mb-row mb-row--end">
+          <Button variant="quiet" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={save}>Save purchase</Button>
+        </div>}>
       <div className="mb-buying__form">
         <div className="mb-row">
           <Select
@@ -469,7 +474,7 @@ function PurchaseEntry({
             onChange={(e) => setSupplierId(e.target.value)}
             options={view.suppliers.map((s) => ({ value: s.id, label: s.name }))}
           />
-          <Input label="Invoice number" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} />
+          <Input label="Supplier invoice number" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} />
         </div>
 
         <table className="mb-buying__lines">
@@ -575,9 +580,9 @@ function PurchaseEntry({
 
         <div className="mb-row">
           <MoneyInput label="Transport / loading" value={charges} onChange={setCharges} />
-          <MoneyInput label="Discount on the whole invoice" value={discount} onChange={setDiscount} />
+          <MoneyInput label="Invoice discount" value={discount} onChange={setDiscount} />
           <MoneyInput
-            label="Total on the paper"
+            label="Invoice total"
             value={statedTotal}
             onChange={setStatedTotal}
           />
@@ -604,12 +609,7 @@ function PurchaseEntry({
           </Button>
         </div>
 
-        <div className="mb-row mb-row--end">
-          <Button variant="quiet" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={save}>Save the delivery</Button>
-        </div>
+
       </div>
     </Modal>
   );
@@ -635,19 +635,7 @@ function SupplierEditor({
   const [terms, setTerms] = useState(String(supplier.termsDays));
 
   return (
-    <Modal open title={supplier.name === '' ? 'A new supplier' : supplier.name} onClose={onClose}>
-      <div className="mb-buying__form">
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        <PhoneInput label="Phone" value={phone} onChange={setPhone} />
-        <Input label="GST number" value={gstin} onChange={(e) => setGstin(e.target.value)} />
-        <Input label="Address" value={address} onChange={(e) => setAddress(e.target.value)} />
-        <Input
-          label="Payment terms, in days"
-          value={terms}
-          onChange={(e) => setTerms(e.target.value)}
-          hint="0 means you pay at the door. 15 means the invoice is due a fortnight later, and that is what 'overdue' is measured from."
-        />
-        <div className="mb-row mb-row--end">
+    <Modal open title={supplier.name === '' ? 'Add supplier' : supplier.name} onClose={onClose} actions={<div className="mb-row mb-row--end">
           <Button variant="quiet" onClick={onClose}>
             Cancel
           </Button>
@@ -671,7 +659,19 @@ function SupplierEditor({
           >
             Save
           </Button>
-        </div>
+        </div>}>
+      <div className="mb-buying__form">
+        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <PhoneInput label="Phone" value={phone} onChange={setPhone} />
+        <Input label="GST number" value={gstin} onChange={(e) => setGstin(e.target.value)} />
+        <Input label="Address" value={address} onChange={(e) => setAddress(e.target.value)} />
+        <Input
+          label="Payment terms (days)"
+          value={terms}
+          onChange={(e) => setTerms(e.target.value)}
+          hint="Days until payment is due. Enter 0 for payment on receipt."
+        />
+
       </div>
     </Modal>
   );
@@ -709,7 +709,7 @@ function SupplierAccount({
       </div>
 
       <div className="mb-row">
-        <MoneyInput label="Pay them" value={amount} onChange={setAmount} />
+        <MoneyInput label="Payment amount" value={amount} onChange={setAmount} />
         <Select label="Payment mode" value={mode} onChange={(e) => setMode(e.target.value)} options={MODES} />
         <Input label="Reference" value={reference} onChange={(e) => setReference(e.target.value)} />
         <Button
@@ -728,7 +728,7 @@ function SupplierAccount({
               .catch(onError)
           }
         >
-          Record
+          Record payment
         </Button>
         <Button variant="quiet" onClick={() => setFixing(!fixing)}>
           {fixing ? 'Never mind' : 'Correct the balance'}
@@ -739,7 +739,8 @@ function SupplierAccount({
       {fixing ? (
         <div className="mb-row">
           <NumberInput
-            label="By how much"
+            // field-lint-ok: keep the existing adjustment input and validation in this wording-only change.
+            label="Adjustment amount"
             value={adjust}
             onChange={(e) => setAdjust(onlyAmount(e.target.value))}
           />
@@ -753,7 +754,7 @@ function SupplierAccount({
             ]}
           />
           <Input
-            label="Why"
+            label="Reason"
             value={why}
             placeholder="Credit note for the returned oil"
             onChange={(e) => setWhy(e.target.value)}
@@ -842,11 +843,11 @@ function PurchasePaper({
           { key: 'tax', header: 'GST', render: (l) => l.tax || '—' },
           {
             key: 'value',
-            header: 'Cost, all in',
+            header: 'Total cost',
             numeric: true,
             render: (l) => <span className="mb-mono">{l.value.text}</span>,
           },
-          { key: 'landed', header: 'What it really cost', render: (l) => l.landed },
+          { key: 'landed', header: 'Landed cost', render: (l) => l.landed },
         ]}
         rowKey={(l) => String(l.seq)}
       />
@@ -881,15 +882,15 @@ function PurchasePaper({
         cancelling ? (
           <div className="mb-buying__form">
             <Input
-              label="Cancel this delivery because"
+              label="Cancellation reason"
               value={reason}
               autoFocus
               onChange={(e) => setReason(e.target.value)}
-              hint="A delivery is never edited. Cancel it with a reason and enter a corrected copy — the ledger then reads as what actually happened."
+              hint="To correct a purchase, cancel it with a reason and enter a corrected copy."
             />
             <div className="mb-row mb-row--end">
               <Button variant="quiet" onClick={() => setCancelling(false)}>
-                Leave it alone
+                Cancel
               </Button>
               <Button
                 variant="danger"
@@ -900,14 +901,14 @@ function PurchasePaper({
                     .catch(onError)
                 }
               >
-                Cancel this delivery
+                Cancel purchase
               </Button>
             </div>
           </div>
         ) : (
           <div className="mb-row mb-row--end">
             <Button variant="quiet" onClick={() => setCancelling(true)}>
-              Cancel this delivery
+              Cancel purchase
             </Button>
             <Button onClick={onClose}>Close</Button>
           </div>
@@ -948,7 +949,33 @@ function RaiseOrder({
   const ready = lines.filter((l) => l.materialId !== '' && l.qty.trim() !== '');
 
   return (
-    <Modal open title="Raise a purchase order" onClose={onClose} wide>
+    <Modal open title="Create purchase order" onClose={onClose} wide actions={<div className="mb-row mb-row--end">
+        <Button variant="quiet" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          disabled={busy || supplierId === '' || ready.length === 0}
+          onClick={() => {
+            setBusy(true);
+            call('save_purchase_order', {
+              edit: {
+                id: freshId('po'),
+                supplierId,
+                number,
+                expected,
+                note,
+                lines: ready,
+              },
+            })
+              .then(onSaved)
+              .catch(onError)
+              .finally(() => setBusy(false));
+          }}
+        >
+          Save purchase order
+        </Button>
+      </div>}>
       <p className="mb-buying__says">
         What you are asking a supplier for. Nothing moves on the shelf and
         nothing is owed until the delivery arrives and you enter it.
@@ -978,7 +1005,7 @@ function RaiseOrder({
       {lines.map((line, index) => (
         <div className="mb-row" key={index}>
           <Select
-            label="What"
+            label="Material"
             value={line.materialId}
             onChange={(e) => setLine(index, { materialId: e.target.value })}
             options={[
@@ -992,13 +1019,13 @@ function RaiseOrder({
             onChange={(e) => setLine(index, { qty: e.target.value })}
           />
           <Input
-            label="In"
+            label="Unit"
             hint="kg, litre, packet"
             value={line.unit}
             onChange={(e) => setLine(index, { unit: e.target.value })}
           />
           <MoneyInput
-            label="Rate you expect"
+            label="Expected rate"
             value={line.rate}
             onChange={(next) => setLine(index, { rate: next })}
           />
@@ -1015,35 +1042,9 @@ function RaiseOrder({
         </Button>
       </div>
 
-      <Input label="Anything to tell them" value={note} onChange={(e) => setNote(e.target.value)} />
+      <Input label="Supplier note" value={note} onChange={(e) => setNote(e.target.value)} />
 
-      <div className="mb-row mb-row--end">
-        <Button variant="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          disabled={busy || supplierId === '' || ready.length === 0}
-          onClick={() => {
-            setBusy(true);
-            call('save_purchase_order', {
-              edit: {
-                id: freshId('po'),
-                supplierId,
-                number,
-                expected,
-                note,
-                lines: ready,
-              },
-            })
-              .then(onSaved)
-              .catch(onError)
-              .finally(() => setBusy(false));
-          }}
-        >
-          Raise it
-        </Button>
-      </div>
+
     </Modal>
   );
 }

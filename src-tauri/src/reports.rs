@@ -1242,18 +1242,18 @@ fn build(
                     profit.shrinkage.neg().to_plain_string(),
                 ],
                 vec![
-                    "Gross margin".to_owned(),
+                    "Gross margin — before expenses".to_owned(),
                     profit.gross_margin.to_plain_string(),
                 ],
                 vec![
                     "less running costs".to_owned(),
                     profit.running_costs.neg().to_plain_string(),
                 ],
-                vec!["What is left".to_owned(), profit.left.to_plain_string()],
+                vec!["After expenses".to_owned(), profit.left.to_plain_string()],
             ];
             if let Some(bp) = profit.margin_bp() {
                 rows.push(vec![
-                    "Gross margin as a share of sales".to_owned(),
+                    "Gross margin (% of sales) — before expenses".to_owned(),
                     margin_words(bp),
                 ]);
             }

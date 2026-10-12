@@ -9,6 +9,7 @@ import {
   EmptyState,
   Fact,
   Facts,
+  Icon,
   Modal,
   Money,
   MoneyInput,
@@ -242,38 +243,59 @@ export function Bills({ onGoTo, initialOrderId, periods = [] }: {
   const actionsFor = (bill: BillRowView, size: 'sm' | 'md') => {
     if (!view || bill.state === 'cancelled') return null;
     const paid = bill.state === 'settled' && !bill.returned;
-    return (
+    const inRow = size === 'sm';
+    const correctionActions = (
       <>
         {paid && view.canRevert && !bill.dayClosed ? (
           <Button
+            role={inRow ? 'menuitem' : undefined}
             size={size}
-            variant={size === 'md' ? 'primary' : 'secondary'}
+            variant={inRow ? 'quiet' : 'primary'}
             onClick={() => setPending({ kind: 'revert', bill })}
           >
             {bill.correctionOpen ? 'Resume changes' : 'Edit / return items'}
           </Button>
         ) : null}
         {paid && view.canVoid ? (
-          <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'return', bill })}>
+          <Button role={inRow ? 'menuitem' : undefined} size={size} variant="quiet" onClick={() => setPending({ kind: 'return', bill })}>
             Return whole bill
           </Button>
         ) : null}
         {!paid && view.canVoid ? (
-          <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'refund', bill })}>Return money</Button>
+          <Button role={inRow ? 'menuitem' : undefined} size={size} variant="quiet" onClick={() => setPending({ kind: 'refund', bill })}>Return money</Button>
         ) : null}
+      </>
+    );
+    return (
+      <>
+        {!inRow ? correctionActions : null}
         {view.canReprint ? (
-          <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'reprint', bill })}>
-            Reprint
-          </Button>
+          inRow ? (
+            <span className="mb-tip">
+              <Button size={size} variant="quiet" iconOnly className="mb-bills__reprint"
+                title="Reprint bill" aria-label="Reprint bill" icon={<Icon name="printer" size="sm" />}
+                onClick={() => setPending({ kind: 'reprint', bill })} />
+              <span className="mb-tip__bubble" role="tooltip">Reprint bill</span>
+            </span>
+          ) : (
+            <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'reprint', bill })}>
+              Reprint
+            </Button>
+          )
         ) : null}
-        <RowMenu label={`More for bill ${bill.number}`} size={size}>
-          <Button size="sm" variant="quiet" onClick={() => invoice(bill)}>
+        <RowMenu label={`${inRow ? 'Actions' : 'More'} for bill ${bill.number}`} size={size}
+          text={inRow ? 'Actions' : undefined} icon={inRow ? 'chevron-down' : 'more'} keyboardNavigation>
+          {inRow ? correctionActions : null}
+          <Button role="menuitem" size="sm" variant="quiet" onClick={() => invoice(bill)}>
             Invoice PDF
           </Button>
           {paid && view.canVoid && !bill.dayClosed ? (
-            <Button size="sm" variant="danger" onClick={() => setPending({ kind: 'void', bill })}>
-              Void without returning money
-            </Button>
+            <>
+              <div role="separator" className="mb-bills__action-divider" />
+              <Button role="menuitem" size="sm" variant="danger" onClick={() => setPending({ kind: 'void', bill })}>
+                Cancel bill (no refund)
+              </Button>
+            </>
           ) : null}
         </RowMenu>
       </>
@@ -329,7 +351,7 @@ export function Bills({ onGoTo, initialOrderId, periods = [] }: {
       header: '',
       render: (b) => (
         // The buttons act on the bill; only the rest of the row opens it.
-        <div className="mb-row mb-row--gap-inline" onClick={(event) => event.stopPropagation()}>
+        <div className="mb-row mb-bills__actions" onClick={(event) => event.stopPropagation()}>
           {actionsFor(b, 'sm')}
         </div>
       ),
@@ -691,14 +713,14 @@ function Correction({
   const kind: ReasonKind = pending.kind === 'reprint' ? 'reprint' : 'void';
   const what = {
     revert: `Edit bill ${bill.number} — ${bill.total.text}`,
-    void: `Void bill ${bill.number} — ${bill.total.text}`,
+    void: `Cancel bill ${bill.number} — ${bill.total.text}`,
     return: `Return bill ${bill.number}`,
     reprint: `Reprint bill ${bill.number}`,
     refund: `Return money on bill ${bill.number}`,
   }[pending.kind];
   const confirmLabel = {
     revert: 'Edit bill',
-    void: 'Void the bill',
+    void: 'Cancel bill (no refund)',
     return: 'Confirm return',
     reprint: 'Print another copy',
     refund: 'Record the money going back',
@@ -730,7 +752,7 @@ function Correction({
           approverStaffId: approver?.id ?? null,
           approverPin: approver?.pin ?? null,
         });
-        await onDone(`Bill ${bill.number} is voided.`);
+        await onDone(`Bill ${bill.number} cancelled without a refund.`);
       } else if (pending.kind === 'reprint') {
         const said = await call('reprint_bill', { orderId: bill.orderId, reason });
         await onDone(said);
@@ -757,12 +779,13 @@ function Correction({
 
   return (
     <ReasonDialog
+      wide={returnsMoney}
       kind={kind}
       what={what}
       description={pending.kind === 'revert'
         ? 'Change the items on the billing screen, then Save changes. The bill keeps its number.'
-        : pending.kind === 'void' ? 'This cancels the sale without recording any money returned. Use Return whole bill if you are paying the customer back.'
-        : returnsMoney ? 'Record the money actually returned through each original payment method. Card and UPI returns must also be completed through your payment provider. Prepared food will not be added back to stock.' : undefined}
+        : pending.kind === 'void' ? 'This cancels the bill without recording a refund. Use Return whole bill if you are paying the customer back.'
+        : returnsMoney ? 'Enter refunds by original payment method. This records the refund; send Card/UPI refunds through your provider separately. Prepared food is not returned to stock.' : undefined}
       confirmLabel={confirmLabel}
       needsApproval={needsApproval}
       approvers={approvers}

@@ -93,7 +93,7 @@ export function Attendance({ staffId }: { staffId?: string }) {
     },
     {
       key: 'verdict',
-      header: 'How it went',
+      header: 'Status',
       render: (s) => (
         <Row gap="inline">
           <Badge
@@ -237,7 +237,7 @@ function FixHours({
       actions={
         <>
           <Button variant="quiet" onClick={onClose}>
-            Leave it
+            Cancel
           </Button>
           <Button
             variant="primary"
@@ -268,8 +268,8 @@ function FixHours({
           />
         </Row>
         <Input
-          label="Why"
-          hint="Required. A correction nobody can explain looks the same as a mistake."
+          label="Reason"
+          hint="Required. Recorded with this attendance correction."
           value={reason}
           onChange={(e) => setReason(e.target.value)}
         />
@@ -376,11 +376,11 @@ export function Leave({ staffId }: { staffId?: string }) {
             { key: 'type', header: 'Leave', render: (r) => r.leaveType },
             { key: 'from', header: 'From', render: (r) => r.from },
             { key: 'to', header: 'To', render: (r) => r.to },
-            { key: 'days', header: 'How long', render: (r) => r.daysSays },
-            { key: 'reason', header: 'Why', render: (r) => r.reason },
+            { key: 'days', header: 'Duration', render: (r) => r.daysSays },
+            { key: 'reason', header: 'Reason', render: (r) => r.reason },
             {
               key: 'state',
-              header: 'What happened',
+              header: 'Status',
               render: (r) => (
                 <Badge
                   tone={
@@ -445,7 +445,7 @@ function Decide({
     return (
       <Row gap="inline">
         <Input
-          label="Why not"
+          label="Rejection reason"
           value={note}
           onChange={(e) => setNote(e.target.value)}
         />
@@ -557,11 +557,11 @@ function AskForLeave({
         </Row>
         <Input
           label="Half-days"
-          hint="2 is a full day, 1 is half a day. Days are counted in halves so they always add up."
+          hint="Enter half-day units: 2 half-days = 1 day; 1 = half a day."
           value={halves}
           onChange={(e) => setHalves(e.target.value.replace(/[^0-9]/g, ''))}
         />
-        <Input label="Why" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <Input label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
       </Stack>
     </Modal>
   );
@@ -591,7 +591,7 @@ export function Salary({ people }: { people: readonly EmployeeView[] }) {
             <Row gap="inline">
               <Button variant="secondary" onClick={() => setAdvancing(true)}>
                 <Icon name="cash" size="sm" />
-                Give an advance
+                Record advance
               </Button>
               <Button variant="primary" onClick={() => setSetting(true)}>
                 Set the salary
@@ -660,7 +660,7 @@ export function Salary({ people }: { people: readonly EmployeeView[] }) {
               },
               {
                 key: 'recovered',
-                header: 'Come back',
+                header: 'Recovered',
                 numeric: true,
                 render: (a) => <Numeric>{a.recovered.text}</Numeric>,
               },
@@ -791,7 +791,7 @@ function GiveAdvance({
   return (
     <Modal
       open
-      title="Give an advance"
+      title="Record advance"
       onClose={onClose}
       actions={
         <>
@@ -811,7 +811,7 @@ function GiveAdvance({
                 .catch(onFailed)
             }
           >
-            Hand it over
+            Record advance
           </Button>
         </>
       }
@@ -822,12 +822,12 @@ function GiveAdvance({
         </p>
         <MoneyInput label="Amount" value={amount} onChange={setAmount} />
         <Input
-          label="Over how many runs"
-          hint="1 is all of it next month."
+          label="Repayment instalments (payroll runs)"
+          hint="Enter 1 to recover the full advance in the next payroll run."
           value={instalments}
           onChange={(e) => setInstalments(e.target.value.replace(/[^0-9]/g, ''))}
         />
-        <Input label="Why" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <Input label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
       </Stack>
     </Modal>
   );
@@ -873,7 +873,7 @@ export function Payroll() {
               }
             >
               <Icon name="refresh" size="sm" />
-              Work out this period
+              Calculate payroll
             </Button>
           ) : undefined
         }
@@ -911,7 +911,7 @@ export function Payroll() {
         {list && list.runs.length === 0 ? (
           <EmptyState
             title="No payroll yet"
-            hint="Pick a period and work it out. Nothing moves until you approve it."
+            hint="Choose a period and calculate payroll. Review it before approval."
           />
         ) : (
           <Table
@@ -928,7 +928,7 @@ export function Payroll() {
               },
               {
                 key: 'state',
-                header: 'Where it is',
+                header: 'Status',
                 render: (r) => (
                   <Badge
                     tone={
@@ -1037,7 +1037,7 @@ function RunSheet({
             },
             {
               key: 'net',
-              header: 'To hand over',
+              header: 'Net pay',
               numeric: true,
               render: (l) => (
                 <strong className="mb-numeric">
@@ -1114,7 +1114,7 @@ function RunSheet({
           reversing ? (
             <Row end gap="field">
               <Input
-                label="Why"
+                label="Reason"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
               />
@@ -1147,12 +1147,12 @@ function RunSheet({
                 actually handing over, and why.
               </p>
               <MoneyInput
-                label="To hand over"
+                label="Net pay"
                 value={fixing.net}
                 onChange={(net) => setFixing({ ...fixing, net })}
               />
               <Input
-                label="Why"
+                label="Reason"
                 hint="It is kept beside the figure, so this can be explained later."
                 value={fixing.note}
                 placeholder="Agreed a day's extra pay for the festival"
@@ -1160,7 +1160,7 @@ function RunSheet({
               />
               <Row end gap="field">
                 <Button variant="quiet" onClick={() => setFixing(null)}>
-                  Leave it
+                  Cancel
                 </Button>
                 <Button
                   variant="primary"
@@ -1279,13 +1279,13 @@ function AdjustLeave({
         />
         <Input
           label="Half-days"
-          hint="Two halves is one day. The ledger counts in halves, so half a day off is one."
+          hint="Enter half-day units: 2 half-days = 1 day; 1 = half a day."
           value={halves}
           inputMode="numeric"
           onChange={(e) => setHalves(e.target.value.replace(/[^0-9]/g, ''))}
         />
         <Input
-          label="Why"
+          label="Reason"
           hint="It goes in the ledger beside the number, so this can be explained later."
           value={reason}
           placeholder="Yearly allowance for 2026"
@@ -1381,7 +1381,7 @@ function SetRoster({
           ]}
         />
         <Input
-          label="Anything to note"
+          label="Note"
           value={note}
           placeholder="Covering for Ravi"
           onChange={(e) => setNote(e.target.value)}

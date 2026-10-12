@@ -30,6 +30,12 @@
   color: var(--text-faint);
 }
 
+.mb-expenses__breakdown {
+  display: block;
+  white-space: pre-line;
+  line-height: var(--line-normal);
+}
+
 /* A reminder is a prompt, never a posting. */
 .mb-expenses__due {
   background: var(--warn-soft);

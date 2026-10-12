@@ -1870,7 +1870,7 @@ pub const CATALOG: &[Entry] = &[
         order_type_from,
         billing.locked_order_type
     ),
-    number!("billing.idle_lock_minutes", Billing, Row, "Lock the counter after",
+    number!("billing.idle_lock_minutes", Billing, Row, "Auto-lock delay",
         "Minutes of nobody touching it. 0 never locks by itself.",
         ["lock", "idle", "timeout", "screen"], 0..=240 "minutes", u32,
         billing.idle_lock_minutes),
@@ -2096,18 +2096,18 @@ pub const CATALOG: &[Entry] = &[
         },
     },
     // The things a counter is plugged into.
-    number!("devices.scan_average_gap_ms", Devices, Row, "A scan types faster than (average)",
+    number!("devices.scan_average_gap_ms", Devices, Row, "Average scanner key interval",
         "How quickly characters have to arrive, on average, to be a barcode \
          scanner rather than a person. Lower is safer: a fast typist read as a \
          scan loses what they typed.",
         ["scanner", "barcode", "scan", "speed", "gap"],
         1..=200 "ms between keys", u32, devices.scan_average_gap_ms),
-    number!("devices.scan_single_gap_ms", Devices, Row, "A scan never pauses longer than",
+    number!("devices.scan_single_gap_ms", Devices, Row, "Maximum scanner key interval",
         "One pause longer than this ends the burst, whatever the average — so \
          somebody typing, thinking, and typing again is never read as one scan.",
         ["scanner", "barcode", "pause", "gap"],
         1..=1000 "ms", u32, devices.scan_single_gap_ms),
-    number!("devices.scan_min_length", Devices, Row, "A barcode is at least this long",
+    number!("devices.scan_min_length", Devices, Row, "Minimum barcode length",
         "Anything shorter is somebody searching the menu. The shortest real \
          barcode in a shop is 8 characters.",
         ["scanner", "barcode", "length", "short"],
@@ -2125,20 +2125,20 @@ pub const CATALOG: &[Entry] = &[
         Free,
         devices.label_prefix
     ),
-    number!("devices.label_item_from", Devices, Row, "The item code starts at digit",
+    number!("devices.label_item_from", Devices, Row, "Item code start position",
         "Counting from zero. Your scale's manual, or the dealer, will say.",
         ["scale", "label", "item", "position"],
         0..=12 "", u32, devices.label_item_from),
-    number!("devices.label_item_len", Devices, Row, "The item code is this many digits",
-        "How long the item code inside the label is.",
+    number!("devices.label_item_len", Devices, Row, "Item code length",
+        "",
         ["scale", "label", "item", "length"],
         1..=12 "digits", u32, devices.label_item_len),
-    number!("devices.label_value_from", Devices, Row, "The weight or price starts at digit",
+    number!("devices.label_value_from", Devices, Row, "Weight or price start position",
         "Counting from zero.",
         ["scale", "label", "weight", "price", "position"],
         0..=12 "", u32, devices.label_value_from),
-    number!("devices.label_value_len", Devices, Row, "The weight or price is this many digits",
-        "How long the number inside the label is.",
+    number!("devices.label_value_len", Devices, Row, "Weight or price length",
+        "",
         ["scale", "label", "weight", "price", "length"],
         1..=12 "digits", u32, devices.label_value_len),
     pick_text!(
@@ -2153,7 +2153,7 @@ pub const CATALOG: &[Entry] = &[
         LABEL_VALUES,
         devices.label_value_is
     ),
-    number!("devices.label_value_decimals", Devices, Row, "With this many decimal places",
+    number!("devices.label_value_decimals", Devices, Row, "Decimal places",
         "450 grams printed as 00450 with 3 decimal places is 0.450 kg. ₹12.50 \
          printed as 01250 with 2 is twelve rupees fifty.",
         ["scale", "label", "decimal", "weight", "price"],
@@ -2170,7 +2170,7 @@ pub const CATALOG: &[Entry] = &[
         Free,
         devices.scale_port
     ),
-    number!("devices.scale_baud", Devices, Row, "The scale runs at this speed",
+    number!("devices.scale_baud", Devices, Row, "Scale baud rate",
         "The scale's baud rate. 9600 is right for nearly every counter scale \
          sold in India.",
         ["scale", "baud", "speed", "serial"],

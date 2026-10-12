@@ -122,7 +122,7 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     { key: 'buyFrom', header: 'Buy from', render: (m) => m.buyFrom || '—' },
     {
       key: 'onHand',
-      header: 'On the shelf',
+      header: 'In stock',
       numeric: true,
       render: (m) => (
         <span className={m.isNegative ? 'mb-stock__negative' : 'mb-mono'}>{m.onHand}</span>
@@ -141,7 +141,7 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
     { key: 'cost', header: 'Costs', render: (m) => m.cost || '—' },
     {
       key: 'value',
-      header: 'Worth',
+      header: 'Stock value',
       numeric: true,
       render: (m) => <span className="mb-mono">{m.value.text}</span>,
     },
@@ -224,12 +224,12 @@ export function Stock({ onGoTo }: { onGoTo?: (screen: string) => void }) {
         active={tab}
         onChange={setTab}
         tabs={[
-          { id: 'shelf', label: 'On the shelf' },
-          { id: 'dishes', label: 'What each dish costs' },
+          { id: 'shelf', label: 'In stock' },
+          { id: 'dishes', label: 'Recipe costs' },
           { id: 'buy', label: 'What to buy' },
           { id: 'moves', label: 'Movements' },
-          { id: 'problems', label: `Needs a look${view.problems.length > 0 ? ` (${view.problems.length})` : ''}` },
-          { id: 'variance', label: 'What went missing' },
+          { id: 'problems', label: `Stock alerts${view.problems.length > 0 ? ` (${view.problems.length})` : ''}` },
+          { id: 'variance', label: 'Stock differences' },
           // The count sheet opens to whoever may read the book, count, or approve a count.
           ...(may('inventory.view') || may('stock.count') || may('stock.adjust')
             ? [{ id: 'count', label: 'Count' }]
@@ -342,7 +342,7 @@ function Dishes({
     },
     {
       key: 'cost',
-      header: 'The recipe says',
+      header: 'Recipe cost',
       numeric: true,
       // A dish nobody has costed is not a dish that costs nothing, so the two cases must not
       // look the same.
@@ -351,7 +351,7 @@ function Dishes({
     },
     {
       key: 'typed',
-      header: 'You had it down as',
+      header: 'Entered cost',
       numeric: true,
       render: (d) => (d.typedCost ? <span className="mb-mono">{d.typedCost.text}</span> : '—'),
     },
@@ -431,7 +431,7 @@ function Movements({ rows }: { rows: StockMovementView[] }) {
     { key: 'material', header: 'Material', render: (m) => m.material },
     {
       key: 'kind',
-      header: 'What happened',
+      header: 'Movement',
       render: (m) => (
         <div className="mb-stock__name">
           <span>{m.kind}</span>
@@ -442,7 +442,7 @@ function Movements({ rows }: { rows: StockMovementView[] }) {
     },
     {
       key: 'qty',
-      header: 'How much',
+      header: 'Quantity',
       numeric: true,
       render: (m) => (
         <span className={m.takesOut ? 'mb-stock__negative' : 'mb-mono'}>{m.qty}</span>
@@ -450,11 +450,11 @@ function Movements({ rows }: { rows: StockMovementView[] }) {
     },
     {
       key: 'value',
-      header: 'Worth',
+      header: 'Stock value',
       numeric: true,
       render: (m) => <span className="mb-mono">{m.value.text}</span>,
     },
-    { key: 'why', header: 'Why', render: (m) => m.reason || m.note || '—' },
+    { key: 'why', header: 'Reason', render: (m) => m.reason || m.note || '—' },
   ];
   return <Table rows={rows} columns={columns} rowKey={(m) => m.id} />;
 }
@@ -742,7 +742,7 @@ function MoveForm({
         ) : null}
         {wasting ? (
           <Select
-            label="Why"
+            label="Reason"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             options={reasons.map((r) => ({ value: r.id, label: r.text }))}
@@ -827,7 +827,7 @@ export function RecipeEditor({
     <Modal
       open
       onClose={onClose}
-      title={`What ${recipe.owner} is made of`}
+      title={`Recipe — ${recipe.owner}`}
       wide
       actions={
         <div className="mb-row mb-row--end">

@@ -103,7 +103,7 @@ export function Count() {
   const columns: Column<CountLineView>[] = [
     { key: 'material', header: 'Material', render: (l) => l.material },
     { key: 'counted', header: 'Counted', render: (l) => l.counted },
-    { key: 'book', header: 'Book said', render: (l) => l.book },
+    { key: 'book', header: 'Recorded stock', render: (l) => l.book },
     {
       key: 'variance',
       header: 'Difference',
@@ -115,17 +115,17 @@ export function Count() {
     },
     {
       key: 'value',
-      header: 'Worth',
+      header: 'Difference value',
       numeric: true,
       render: (l) => <span className="mb-mono">{l.varianceValue.text}</span>,
     },
     {
       key: 'why',
-      header: 'Why',
+      header: 'Reason',
       render: (l) =>
         l.needsReason && open ? (
           <Button size="sm" variant="quiet" onClick={() => setExplaining(l)}>
-            Say why
+            Add reason
           </Button>
         ) : (
           <span>{l.note ?? (l.reasonId ? 'explained' : '—')}</span>
@@ -167,7 +167,7 @@ export function Count() {
             call('count_sheet', { location: view.location }).then(setSheet).catch(report)
           }
         >
-          Print a count sheet
+          Print count sheet
         </Button>
         {open ? <Badge tone="neutral">{view.state}</Badge> : null}
         {open ? null : (
@@ -176,7 +176,7 @@ export function Count() {
               call('open_stock_count', { location: '' }).then(setView).catch(report)
             }
           >
-            {view.id === null ? 'Start counting' : 'Start a new count'}
+            {view.id === null ? 'Start count' : 'Start a new count'}
           </Button>
         )}
         {/* A sealed count says so, and the only thing offered is a NEW one. */}
@@ -184,7 +184,7 @@ export function Count() {
         {view.maySetRule ? (
           <div className="mb-row mb-count__rule">
             <MoneyInput
-              label="Ask why when a line is out by more than"
+              label="Reason required above difference (₹)"
               value={ruleAbove}
               onChange={setRuleAbove}
               onKeyDown={(e) => {
@@ -205,7 +205,7 @@ export function Count() {
       {view.id === null ? (
         <EmptyState
           title="No active stock count"
-          hint="Print the sheet, count the store, type it in here."
+          hint="Start a count, enter quantities, review differences and approve."
         />
       ) : (
         <>
@@ -245,7 +245,7 @@ export function Count() {
                   : [{ value: '', label: '—' }]
               }
             />
-            <Button onClick={write}>Write it down</Button>
+            <Button onClick={write}>Save count line</Button>
           </div>
           ) : null}
 
@@ -280,11 +280,11 @@ export function Count() {
                     : undefined
                 }
               >
-                Give up on this count
+                Abandon count
               </Button>
               {view.mayApprove ? (
                 <Button onClick={() => setApproving(true)} disabled={view.lines.length === 0}>
-                  Approve
+                  Approve count
                 </Button>
               ) : null}
             </div>
@@ -307,7 +307,7 @@ export function Count() {
             { key: 'materials', header: 'Materials', numeric: true, render: (h) => String(h.materials) },
             {
               key: 'value',
-              header: 'Out by',
+              header: 'Difference value',
               numeric: true,
               render: (h) => <span className="mb-mono">{h.value.text}</span>,
             },
@@ -317,15 +317,15 @@ export function Count() {
       ) : null}
 
       {sheet !== null ? (
-        <Modal open title="Count sheet" onClose={() => setSheet(null)} wide>
-          {/* No book quantity on it, on purpose. */}
-          <pre className="mb-count__sheet">{sheet}</pre>
-          <div className="mb-row mb-row--end">
+        <Modal open title="Count sheet" onClose={() => setSheet(null)} wide actions={<div className="mb-row mb-row--end">
             <Button variant="quiet" onClick={() => navigator.clipboard.writeText(sheet)}>
               Copy
             </Button>
             <Button onClick={() => window.print()}>Print</Button>
-          </div>
+          </div>}>
+          {/* No book quantity on it, on purpose. */}
+          <pre className="mb-count__sheet">{sheet}</pre>
+
         </Modal>
       ) : null}
 
@@ -334,7 +334,7 @@ export function Count() {
           open
           title="Approve this count?"
           body={`${view.effect} It cannot be changed afterwards, and every adjustment says who approved it.`}
-          confirmLabel="Approve"
+          confirmLabel="Approve count"
           onConfirm={() => {
             call('approve_stock_count', { id: view.id as string })
               .then((fresh) => {
@@ -387,22 +387,9 @@ function Explain({
   const [note, setNote] = useState('');
 
   return (
-    <Modal open title={`${line.material} is ${line.variance}`} onClose={onClose}>
-      <div className="mb-buying__form">
-        <p className="mb-count__says">
-          That is {line.varianceValue.text}. Saying why is what turns a number into something
-          somebody can fix.
-        </p>
-        <Select
-          label="Why"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          options={reasons.map((r) => ({ value: r.id, label: r.text }))}
-        />
-        <Input label="Anything else" value={note} onChange={(e) => setNote(e.target.value)} />
-        <div className="mb-row mb-row--end">
+    <Modal open title={`${line.material} is ${line.variance}`} onClose={onClose} actions={<div className="mb-row mb-row--end">
           <Button variant="quiet" onClick={onClose}>
-            Not now
+            Cancel
           </Button>
           <Button
             onClick={() =>
@@ -418,7 +405,19 @@ function Explain({
           >
             Save
           </Button>
-        </div>
+        </div>}>
+      <div className="mb-buying__form">
+        <p className="mb-count__says">
+          Difference value: {line.varianceValue.text}. Record the reason for this difference.
+        </p>
+        <Select
+          label="Reason"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          options={reasons.map((r) => ({ value: r.id, label: r.text }))}
+        />
+        <Input label="Additional note" value={note} onChange={(e) => setNote(e.target.value)} />
+
       </div>
     </Modal>
   );

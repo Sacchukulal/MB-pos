@@ -262,13 +262,13 @@ describe('split bill', () => {
     );
 
     // Only the free, active table is offered; the busy one and the hidden one are not.
-    const where = await screen.findByLabelText('New bill goes to');
+    const where = await screen.findByLabelText('New bill location');
     const offered = Array.from((where as HTMLSelectElement).options).map((o) => o.textContent);
     expect(offered).toEqual(['This table (4)', 'Table 7']);
 
-    const split = screen.getByRole('button', { name: 'Split' });
+    const split = screen.getByRole('button', { name: 'Split bill' });
     expect(split).toBeDisabled();
-    fireEvent.change(screen.getAllByLabelText('Move')[0]!, { target: { value: '1' } });
+    fireEvent.change(screen.getAllByLabelText('Quantity to move')[0]!, { target: { value: '1' } });
     expect(split).toBeEnabled();
     fireEvent.click(split);
 
@@ -287,10 +287,10 @@ describe('split bill', () => {
     render(
       <SplitBill cart={cart()} onClose={vi.fn()} onSplit={onSplit} onFailed={vi.fn()} />,
     );
-    const where = await screen.findByLabelText('New bill goes to');
+    const where = await screen.findByLabelText('New bill location');
     fireEvent.change(where, { target: { value: 't7' } });
-    fireEvent.change(screen.getAllByLabelText('Move')[1]!, { target: { value: '1' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Split' }));
+    fireEvent.change(screen.getAllByLabelText('Quantity to move')[1]!, { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Split bill' }));
 
     await waitFor(() => expect(onSplit).toHaveBeenCalled());
     expect(call).toHaveBeenCalledWith('split_order', {

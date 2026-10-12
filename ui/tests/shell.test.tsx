@@ -138,7 +138,7 @@ function show() {
 
 it('does not mount the screen behind the lock', async () => {
   show();
-  await screen.findByText('Who is at the counter?');
+  await screen.findByText('Select your name');
   // Not one command that needs a session has been sent.
   expect(call).not.toHaveBeenCalledWith('menu_items');
   expect(screen.queryByRole('button', { name: 'Magic Bill dashboard' })).toBeNull();
@@ -172,7 +172,7 @@ it('does not offer the dashboard logo to a cashier without reports permission', 
 /** A shop with thirty people has thirty names on the lock screen, and the card still fits. */
 it('scrolls the names inside the card rather than running off the window', async () => {
   const { container } = show();
-  await screen.findByText('Who is at the counter?');
+  await screen.findByText('Select your name');
   for (const part of ['.mb-lock__people', '.mb-lock__pad']) {
     expect(container.querySelector(part)?.classList.contains('mb-scroll'), part).toBe(true);
   }
@@ -181,7 +181,7 @@ it('scrolls the names inside the card rather than running off the window', async
 /* Given longer than the default five seconds, and not because it is slow. */
 it('mounts the screen with a session behind it, so its data arrives', { timeout: 20_000 }, async () => {
   show();
-  await screen.findByText('Who is at the counter?');
+  await screen.findByText('Select your name');
 
   // Somebody signs in for real: pick the person and tap the four digits; the fourth signs in.
   fireEvent.click(await screen.findByRole('button', { name: /Meena/ }));
@@ -205,7 +205,7 @@ it('mounts the screen with a session behind it, so its data arrives', { timeout:
 it('shows a person with no screens an honest empty page instead of Billing', { timeout: 20_000 }, async () => {
   held = [];
   show();
-  await screen.findByText('Who is at the counter?');
+  await screen.findByText('Select your name');
   fireEvent.click(await screen.findByRole('button', { name: /Meena/ }));
   for (const digit of ['4', '8', '2', '9']) {
     fireEvent.click(await screen.findByRole('button', { name: digit }));

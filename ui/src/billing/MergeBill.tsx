@@ -76,7 +76,7 @@ export function MergeBill({ cart, orders, onClose, onMerged, onFailed }: {
   const others = mergeCandidates(available ?? [], cart.orderId)
     .filter((candidate) => orders.some((order) => order.orderId === candidate.orderId));
   const destination = cart.table ? `Table ${cart.table}` : cart.orderType;
-  return <Modal open title="Merge bill" onClose={onClose}>
+  return <Modal open title="Merge bill" onClose={onClose} actions={<div className="mb-row mb-row--end"><Button variant="quiet" onClick={onClose}>Close</Button></div>}>
     {!ready ? <Notice tone="warn">Choose a non-empty, unbilled processing order. Print the kitchen ticket first, or save the bill when kitchen tickets are off.</Notice>
       : picked?.orderId && cart.orderId ? <MergeConfirmation
           fromOrder={picked.orderId} intoOrder={cart.orderId} onBack={() => setPicked(null)}
@@ -95,6 +95,6 @@ export function MergeBill({ cart, orders, onClose, onMerged, onFailed }: {
             </li>)}
           </ul>}
       </>}
-    <div className="mb-row mb-row--end"><Button variant="quiet" onClick={onClose}>Close</Button></div>
+
   </Modal>;
 }

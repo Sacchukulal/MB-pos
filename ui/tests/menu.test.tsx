@@ -183,7 +183,7 @@ describe('a combo (scope 6.3)', () => {
     fireEvent.click(await screen.findByText('Add a combo'));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Thali' } });
     fireEvent.change(screen.getByLabelText('Combo price'), { target: { value: '199' } });
-    fireEvent.click(screen.getByText('Add something'));
+    fireEvent.click(screen.getByText('Add item'));
     fireEvent.change(screen.getByLabelText('Item'), { target: { value: 'itm_dosa' } });
     fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '0.5' } });
     fireEvent.click(screen.getByText('Save'));

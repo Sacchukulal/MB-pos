@@ -24,6 +24,8 @@ export interface ReasonDialogProps {
   approvers?: readonly { id: string; name: string }[];
   children?: ReactNode;
   disabled?: boolean;
+  /** Wider presentation for bill returns; other callers keep their existing width. */
+  wide?: boolean;
   onCancel: () => void;
   onConfirm: (reason: string, approver?: { id: string; pin: string }) => void | Promise<void>;
 }
@@ -39,6 +41,7 @@ export function ReasonDialog({
   onConfirm,
   children,
   disabled = false,
+  wide = false,
 }: ReasonDialogProps) {
   const [choices, setChoices] = useState<readonly ReasonView[]>([]);
   const [chosen, setChosen] = useState<string>('');
@@ -84,7 +87,18 @@ export function ReasonDialog({
   };
 
   return (
-    <Modal open title={what} onClose={() => { if (!inFlight.current) onCancel(); }}>
+    <Modal open title={what} wide={wide} onClose={() => { if (!inFlight.current) onCancel(); }}
+      actions={
+        <>
+          <Button variant="quiet" disabled={busy} onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="danger" disabled={busy || disabled} onClick={() => void confirm()}>
+            {busy ? 'Saving…' : confirmLabel}
+          </Button>
+        </>
+      }
+    >
       {description ? <p className="mb-muted">{description}</p> : null}
       {children}
       <div className="mb-reasons">
@@ -103,8 +117,8 @@ export function ReasonDialog({
       </div>
 
       <Input
-        label="Anything to add"
-        hint="Optional, and it goes in the history with your name."
+        label="Additional note"
+        hint="Optional. Recorded in history with your name."
         value={note}
         onChange={(event) => setNote(event.target.value)}
       />
@@ -120,14 +134,6 @@ export function ReasonDialog({
         </p>
       ) : null}
 
-      <div className="mb-row mb-row--end">
-        <Button variant="quiet" disabled={busy} onClick={onCancel}>
-          Leave it
-        </Button>
-        <Button variant="danger" disabled={busy || disabled} onClick={() => void confirm()}>
-          {busy ? 'Saving…' : confirmLabel}
-        </Button>
-      </div>
     </Modal>
   );
 }

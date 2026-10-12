@@ -1366,7 +1366,7 @@ input.mb-cartline__qty {
  */
 .mb-split__line {
   display: grid;
-  grid-template-columns: 1fr auto var(--space-8);
+  grid-template-columns: minmax(0, 1fr) auto var(--field-md);
   gap: var(--space-3);
   align-items: end;
 }

@@ -194,7 +194,7 @@ function People({
 
   return (
     <div className="mb-lock__people-column">
-      <h1 className="mb-lock__title">Who is at the counter?</h1>
+      <h1 className="mb-lock__title">Select your name</h1>
       {people.length > 6 ? (
         <Input
           label="Name"
@@ -232,7 +232,7 @@ function People({
           ))
         )}
       </Scroller>
-      <p className="mb-lock__hint">Up and down pick a name. The fourth digit signs you in.</p>
+      <p className="mb-lock__hint">Use ↑ and ↓ to select a name. Enter your {PIN_DIGITS}-digit PIN to sign in.</p>
     </div>
   );
 }
@@ -342,7 +342,7 @@ function Reset({
   return (
     <>
       <h1 className="mb-lock__title">
-        {step === 'pin' ? 'A new PIN' : 'The same PIN again'}
+        {step === 'pin' ? 'New PIN' : 'Confirm new PIN'}
       </h1>
       {/* mb-layout-allow: the lock screen IS this sentence — there is nothing else on it to ask from */}
       <p className="mb-muted">

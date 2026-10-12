@@ -204,6 +204,26 @@
   min-height: 0;
 }
 
+/* The outer sheet owns scrolling for all columns together. */
+.mb-bills__sheet .mb-table__wrap {
+  overflow: visible;
+}
+
+.mb-bills__actions {
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.mb-bills__reprint {
+  anchor-name: --mb-tip;
+}
+
+.mb-bills__action-divider {
+  border-top: var(--border-width) solid var(--border);
+  margin: var(--space-2) 0;
+}
+
 /*
  * The line under a bill number or a state: what it replaced, why it was voided. An order id in
  * it is one unbroken word, and a cell that cannot break it grows until the buttons at the end

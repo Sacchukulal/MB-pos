@@ -204,7 +204,7 @@ describe('the stock screen', () => {
 
   it('shows a problem as the whole sentence Rust wrote', async () => {
     draw();
-    fireEvent.click(await screen.findByText(/Needs a look/));
+    fireEvent.click(await screen.findByText(/Stock alerts/));
     // The row carries its own fix, and this file composes nothing.
     expect(
       screen.getByText(/Tea has no recipe, so selling it takes nothing off the shelf/),
@@ -260,7 +260,7 @@ describe('the stock screen', () => {
 
   it('D119 — a dish shows both cost figures and the gap between them', async () => {
     draw();
-    fireEvent.click(await screen.findByText('What each dish costs'));
+    fireEvent.click(await screen.findByText('Recipe costs'));
     expect(screen.getByText('28.20')).toBeInTheDocument();
     // Twice: Tea sells for ₹20 and the dosa was down as costing ₹20.
     expect(screen.getAllByText('20.00')).toHaveLength(2);

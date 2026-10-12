@@ -98,7 +98,7 @@ export function Kitchen() {
         <PageHeader title="Kitchen" />
         <EmptyState
           title="The kitchen screen is off"
-          hint="With it on, every kitchen ticket also appears here, and the kitchen presses Done when the food goes out."
+          hint="Shows KOTs for the kitchen to mark complete when food is ready."
           action={
             <Button
               variant="primary"
@@ -153,7 +153,7 @@ export function Kitchen() {
               act(call('kitchen_recall', { id: view.lastCleared?.id ?? '' }))
             }
           >
-            Bring back {view.lastCleared.what}
+            Recall {view.lastCleared.what}
           </button>
         )}
       </header>
@@ -182,7 +182,7 @@ export function Kitchen() {
       )}
 
       {view.tickets.length === 0 ? (
-        <p className="mb-kds__empty">Nothing waiting. The kitchen is clear.</p>
+        <p className="mb-kds__empty">No pending kitchen tickets.</p>
       ) : (
         <Scroller className="mb-kds__grid">
           {view.tickets.map((ticket, index) => (
@@ -260,11 +260,11 @@ function Card({
         {ticket.isCancelled ? (
           // A cancellation cannot be dismissed, only acknowledged.
           <Button variant="danger" wide onClick={onAcknowledge}>
-            Got it — cancelled
+            Acknowledge cancellation
           </Button>
         ) : (
           <Button variant="primary" wide onClick={onBump}>
-            Done
+            Complete ticket
             {shortcut ? <kbd className="mb-kbd">{shortcut}</kbd> : null}
           </Button>
         )}

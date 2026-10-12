@@ -226,12 +226,12 @@ export function Days() {
                 )
               }
             >
-              Close
+              Close day
             </Button>
           ) : null}
           {view.mayAct && row.isLocked ? (
             <Button size="sm" variant="quiet" onClick={() => setReopening(row.day)}>
-              Open again
+              Reopen day
             </Button>
           ) : null}
           {row.state === 'holiday' && view.mayAct ? (
@@ -259,7 +259,7 @@ export function Days() {
   /** Whether anything at all has been typed into the grid — Rust's copy, not the local one. */
   const anyCounted = drawer !== null && drawer.denominations.some((row) => row.count > 0);
 
-  /** Close today, with the count on the screen if there is one. */
+  /** Close day, with the count on the screen if there is one. */
   const closeToday = (print: boolean) => {
     setConfirmingClose(false);
     act(
@@ -293,11 +293,11 @@ export function Days() {
         </Button>
         {/* Asked about first: this is the press that stops the counter taking money. */}
         <Button variant="primary" onClick={() => setConfirmingClose(true)}>
-          Close today
+          Close day
         </Button>
       </>
     ) : (
-      <Button onClick={() => setReopening(view.today)}>Open today again</Button>
+      <Button onClick={() => setReopening(view.today)}>Reopen day</Button>
     )
   ) : null;
 
@@ -316,8 +316,8 @@ export function Days() {
 
         {drawer ? (
           <Panel
-            title="Count the drawer"
-            note="Optional. What is in the drawer under this till: it goes with the day when you press Close today, or on its own at a shift handover."
+            title="Cash count"
+            note="Save a cash count without closing the day, or include it when you close the day."
             actions={drawer.countedSays ? <span className="mb-muted">{drawer.countedSays}</span> : null}
           >
             {drawer.tillsSay ? <p className="mb-muted">{drawer.tillsSay}</p> : null}
@@ -336,7 +336,7 @@ export function Days() {
                   </div>
                 ))}
                 <div className="mb-dayclose__line mb-dayclose__line--strong">
-                  <span>Should be in the drawer</span>
+                  <span>Expected cash in drawer</span>
                   <Money value={drawer.expected} />
                 </div>
               </div>
@@ -408,7 +408,7 @@ export function Days() {
 
             {drawer.needsReason ? (
               <Input
-                label="Why is the drawer out?"
+                label="Reason for cash difference"
                 hint={drawer.reasonSays}
                 value={reason}
                 maxLength={200}
@@ -418,9 +418,9 @@ export function Days() {
 
             {drawer.mayCount ? (
               <Row end>
-                {/* Quiet, because the press that finishes the night is Close today above. */}
+                {/* Quiet, because the press that finishes the night is Close day above. */}
                 <Button variant="quiet" onClick={() => setConfirming(true)}>
-                  Write the count on its own
+                  Save cash count
                 </Button>
               </Row>
             ) : null}
@@ -489,7 +489,7 @@ export function Days() {
         {rules ? (
           <Panel
             className="mb-settings__form"
-            title="Rules"
+            title="Day closing"
             note={master?.help ? master.help : undefined}
             /* The switch belongs to the panel's name: off, the head IS the panel. */
             beside={
@@ -541,14 +541,14 @@ export function Days() {
       {confirmingClose ? (
         <ConfirmDialog
           open
-          title="Close today?"
+          title="Close day?"
           body={
             anyCounted && drawer
               ? `The drawer count on this screen goes with it. ${drawer.varianceSays} No more bills, expenses or payments can be put into today until somebody opens it again, and opening it is recorded against your name.`
               : 'No drawer count has been typed, and one is not needed. No more bills, expenses or payments can be put into today until somebody opens it again, and opening it is recorded against your name.'
           }
-          confirmLabel={anyCounted ? 'Close it and print the slip' : 'Close the day'}
-          otherLabel={anyCounted ? 'Close it without printing' : undefined}
+          confirmLabel={anyCounted ? 'Close day and print' : 'Close day'}
+          otherLabel={anyCounted ? 'Close day without printing' : undefined}
           onConfirm={() => closeToday(anyCounted)}
           onOther={anyCounted ? () => closeToday(false) : undefined}
           onCancel={() => setConfirmingClose(false)}
@@ -558,10 +558,10 @@ export function Days() {
       {confirming && drawer ? (
         <ConfirmDialog
           open
-          title="Write the count?"
-          body={drawer.varianceSays}
-          confirmLabel="Write it and print the slip"
-          otherLabel="Write it without printing"
+          title="Save cash count?"
+          body={`${drawer.varianceSays} Saving this count does not close the day.`}
+          confirmLabel="Save count and print"
+          otherLabel="Save count without printing"
           onConfirm={() => writeCount(true)}
           onOther={() => writeCount(false)}
           onCancel={() => setConfirming(false)}
@@ -571,7 +571,7 @@ export function Days() {
       {/* A Modal and not a ConfirmDialog: this one asks for something. */}
       <Modal
         open={reopening !== null}
-        title="Open this day again?"
+        title="Reopen this day?"
         note="A bill from a closed day cannot change. Opening the day again is recorded against your name, with the reason you give here."
         onClose={() => setReopening(null)}
         actions={
@@ -586,12 +586,12 @@ export function Days() {
                 setWhy('');
               }}
             >
-              Open it
+              Reopen day
             </Button>
           </>
         }
       >
-        <Input label="Why?" value={why} maxLength={200} onChange={(event) => setWhy(event.target.value)} />
+        <Input label="Reason" value={why} maxLength={200} onChange={(event) => setWhy(event.target.value)} />
       </Modal>
     </Scroller>
   );

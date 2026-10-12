@@ -396,7 +396,7 @@ it('asks for the PIN rule Rust actually holds', async () => {
   wire({ hasShop: true, hasDetails: true });
   render(<FirstRun onDone={vi.fn()} />);
 
-  const pin = await screen.findByLabelText('A PIN, 4 digits');
+  const pin = await screen.findByLabelText('PIN (4 digits)');
   fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Meena' } });
   fireEvent.change(pin, { target: { value: '123' } });
   fireEvent.change(screen.getByLabelText('Confirm PIN'), { target: { value: '123' } });
@@ -423,7 +423,7 @@ it('gives the PIN to the owner row that already exists, signs in with it and ope
 
   const who = (await screen.findByLabelText('Your name')) as HTMLInputElement;
   expect(who.value).toBe('Meena');
-  fireEvent.change(screen.getByLabelText('A PIN, 4 digits'), { target: { value: '4829' } });
+  fireEvent.change(screen.getByLabelText('PIN (4 digits)'), { target: { value: '4829' } });
   fireEvent.change(screen.getByLabelText('Confirm PIN'), { target: { value: '4829' } });
   fireEvent.click(screen.getByRole('button', { name: 'Start billing' }));
 

@@ -71,7 +71,7 @@ export function Roles() {
 
 /** One line under the role's name. */
 function describe(role: RoleView, offered: ReadonlySet<string>): string {
-  if (role.isOwner) return 'Everything, always';
+  if (role.isOwner) return 'All permissions';
   const held = role.permissions.filter((code) => offered.has(code)).length;
   const allowed = `${held} of ${offered.size} allowed`;
   // A cap of nothing is "no discounts", not "up to 0%".
@@ -80,7 +80,7 @@ function describe(role: RoleView, offered: ReadonlySet<string>): string {
     role.maxDiscountPercent,
     role.maxDiscount ? `₹${role.maxDiscount.text}` : null,
   ].filter((cap): cap is string => typeof cap === 'string' && cap !== '');
-  return caps.length === 0 ? allowed : `${allowed} · discounts up to ${caps.join(' or ')}`;
+  return caps.length === 0 ? allowed : `${allowed} · discount limits: ${caps.join(' / ')}`;
 }
 
 function EditRole({
@@ -137,7 +137,7 @@ function EditRole({
     <Modal
       open
       title={role.name}
-      note="Tick a section to allow all of it, or one box at a time. The i beside a box says what it really allows."
+      note="Select individual permissions or a whole section. Help explains any additional effects."
       onClose={onClose}
       wide
       actions={
@@ -154,15 +154,15 @@ function EditRole({
       <div className="mb-roles__caps">
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} />
         <Input
-          label="Biggest discount, per cent"
-          hint="Leave it empty for no limit. Anything over the limit is refused, and a reason is asked for near it."
+          label="Percentage discount limit (%)"
+          hint="Blank means no limit. Percentage discounts must also stay within the rupee limit."
           value={percent}
           inputMode="decimal"
           onChange={(e) => setPercent(e.target.value.replace(/[^0-9.]/g, ''))}
         />
         <MoneyInput
-          label="Biggest discount, rupees"
-          hint="Leave it empty for no limit. A percentage of a big bill is capped by this too."
+          label="Discount amount limit (₹)"
+          hint="Blank means no limit. Applies to fixed-amount discounts and the value of percentage discounts."
           value={rupees}
           onChange={setRupees}
         />

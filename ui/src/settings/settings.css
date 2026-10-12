@@ -483,3 +483,9 @@
   gap: var(--gap-inline);
   overflow-wrap: anywhere;
 }
+.mb-settings__unit {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}

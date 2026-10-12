@@ -47,16 +47,20 @@ export function Composition({
   useEffect(load, [load]);
 
   return (
-    <Modal open title={`${row.name} — sizes and choices`} onClose={onClose} wide>
+    <Modal open title={`${row.name} — sizes and choices`} onClose={onClose} wide actions={<div className="mb-row mb-row--end">
+        <Button variant="primary" onClick={onClose}>
+          Close
+        </Button>
+      </div>}>
       <SectionHeader
         title="Sizes"
-        note="Each size carries its own price. A half plate is a different thing to cook, not a discount off the full one."
+        note="Set a separate price for each size."
       />
 
       {made === null || made.variants.length === 0 ? (
         <EmptyState
           title="One size"
-          hint="Most things are sold one way. Add a size only if you charge differently for it."
+          hint="Add sizes when this item has different sizes and prices."
         />
       ) : (
         <ul className="mb-comp__list">
@@ -90,14 +94,14 @@ export function Composition({
       </div>
 
       <SectionHeader
-        title="Choices this item offers"
-        note="Groups are shared across the menu. Tick the ones this item should ask about at the counter."
+        title="Item choices"
+        note="Select the shared choice groups offered with this item."
       />
 
       {made === null || made.groups.length === 0 ? (
         <EmptyState
           title="No groups yet"
-          hint="Make a group of choices below the menu — Spice level, Add-ons — and it becomes tickable here."
+          hint="Create a group in the Choices tab, then select it here."
         />
       ) : (
         <ul className="mb-comp__list">
@@ -125,11 +129,7 @@ export function Composition({
         </ul>
       )}
 
-      <div className="mb-row mb-row--end">
-        <Button variant="primary" onClick={onClose}>
-          Done
-        </Button>
-      </div>
+
 
       {size ? (
         <EditSize
@@ -165,21 +165,7 @@ function EditSize({
   const [active, setActive] = useState(variant.isActive);
 
   return (
-    <Modal open title={variant.name === '' ? 'Add a size' : variant.name} onClose={onClose}>
-      <Input
-        label="Name"
-        hint="Half, Full, 500g, Large."
-        value={name}
-        autoFocus
-        onChange={(event) => setName(event.target.value)}
-      />
-      <MoneyInput label="Price" value={price} onChange={setPrice} />
-      <Checkbox
-        label="On the menu"
-        checked={active}
-        onChange={(event) => setActive(event.target.checked)}
-      />
-      <div className="mb-row mb-row--end">
+    <Modal open title={variant.name === '' ? 'Add a size' : variant.name} onClose={onClose} actions={<div className="mb-row mb-row--end">
         <Button variant="quiet" onClick={onClose}>
           Cancel
         </Button>
@@ -199,7 +185,21 @@ function EditSize({
         >
           Save
         </Button>
-      </div>
+      </div>}>
+      <Input
+        label="Name"
+        hint="Half, Full, 500g, Large."
+        value={name}
+        autoFocus
+        onChange={(event) => setName(event.target.value)}
+      />
+      <MoneyInput label="Price" value={price} onChange={setPrice} />
+      <Checkbox
+        label="On the menu"
+        checked={active}
+        onChange={(event) => setActive(event.target.checked)}
+      />
+
     </Modal>
   );
 }
@@ -218,7 +218,7 @@ export function ModifierGroups({ onFailed }: { onFailed: (cause: unknown) => voi
     <section className="mb-menu__classes">
       <SectionHeader
         title="Choices"
-        note="Made once, offered on as many items as you like — open an item's sizes and choices to tick it on."
+        note="Create shared choice groups, then assign them in an item’s sizes and choices."
         action={
           <Button
             size="sm"
@@ -326,7 +326,23 @@ function EditGroup({
   };
 
   return (
-    <Modal open title={group.name === '' ? 'Choice group' : group.name} onClose={onClose} wide>
+    <Modal open title={group.name === '' ? 'Choice group' : group.name} onClose={onClose} wide actions={<div className="mb-row mb-row--end">
+        <Button variant="quiet" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          onClick={() => {
+            call('save_modifier_group', {
+              group: { id: group.id, name, ...shaped(), modifiers: [...choices] },
+            })
+              .then(onSaved)
+              .catch(onFailed);
+          }}
+        >
+          Save
+        </Button>
+      </div>}>
       <Input
         label="Name"
         hint="Spice level, Add-ons — what the counter is being asked."
@@ -339,10 +355,10 @@ function EditGroup({
         value={shape}
         onChange={(event) => setShape(event.target.value)}
         options={[
-          { value: 'one', label: 'Exactly one' },
-          { value: 'atMostOne', label: 'One at most' },
-          { value: 'any', label: 'Any number' },
-          { value: 'atLeastOne', label: 'At least one' },
+          { value: 'one', label: 'Exactly one (required)' },
+          { value: 'atMostOne', label: 'At most one (optional)' },
+          { value: 'any', label: 'Any number (optional)' },
+          { value: 'atLeastOne', label: 'At least one (required)' },
         ]}
       />
 
@@ -387,23 +403,7 @@ function EditGroup({
         </Button>
       </div>
 
-      <div className="mb-row mb-row--end">
-        <Button variant="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          onClick={() => {
-            call('save_modifier_group', {
-              group: { id: group.id, name, ...shaped(), modifiers: [...choices] },
-            })
-              .then(onSaved)
-              .catch(onFailed);
-          }}
-        >
-          Save
-        </Button>
-      </div>
+
     </Modal>
   );
 }
@@ -426,7 +426,7 @@ export function Combos({
     { key: 'name', header: 'Combo', render: (c) => c.name },
     {
       key: 'parts',
-      header: "What's in it",
+      header: 'Contents',
       // The share and the rate on every part, because a combo across two rates is the whole
       // reason apportioning exists.
       render: (c) => (
@@ -485,10 +485,11 @@ export function Combos({
         }
       />
 
+      <p className="mb-muted">Sell selected items together at one price.</p>
       {combos.length === 0 ? (
         <EmptyState
           title="No combos yet"
-          hint="A thali, a meal deal, a happy-hour pair — anything you sell at one price that is really two things."
+          hint="Add a combo and choose its items and quantities."
         />
       ) : (
         <Table rows={[...combos]} columns={columns} rowKey={(c) => c.id} />
@@ -535,7 +536,23 @@ function EditCombo({
   };
 
   return (
-    <Modal open title={combo.name === '' ? 'A combo' : combo.name} onClose={onClose} wide>
+    <Modal open title={combo.name === '' ? 'Add combo' : combo.name} onClose={onClose} wide actions={<div className="mb-row mb-row--end">
+        <Button variant="quiet" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          onClick={() => {
+            call('save_combo', {
+              combo: { id: combo.id, name, price, isActive: active, parts: [...parts] },
+            })
+              .then(onSaved)
+              .catch(onFailed);
+          }}
+        >
+          Save
+        </Button>
+      </div>}>
       <Input
         label="Name"
         hint="What it is called on the bill — Thali, Meal for two."
@@ -545,7 +562,7 @@ function EditCombo({
       />
       <MoneyInput
         label="Combo price"
-        hint="What the customer pays for the lot."
+        hint="Total price for the combo."
         value={price}
         onChange={setPrice}
       />
@@ -578,7 +595,7 @@ function EditCombo({
       ))}
       <div className="mb-row mb-row--end">
         <Button size="sm" onClick={() => setParts((was) => [...was, ['', '1']])}>
-          Add something
+          Add item
         </Button>
       </div>
 
@@ -587,23 +604,7 @@ function EditCombo({
         checked={active}
         onChange={(event) => setActive(event.target.checked)}
       />
-      <div className="mb-row mb-row--end">
-        <Button variant="quiet" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          onClick={() => {
-            call('save_combo', {
-              combo: { id: combo.id, name, price, isActive: active, parts: [...parts] },
-            })
-              .then(onSaved)
-              .catch(onFailed);
-          }}
-        >
-          Save
-        </Button>
-      </div>
+
     </Modal>
   );
 }

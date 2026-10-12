@@ -153,7 +153,7 @@ describe('the account (scope 5.3)', () => {
     expect([...how.options].map((o) => o.value)).toEqual(['cash', 'card', 'upi']);
 
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '500' } });
-    fireEvent.click(screen.getByText('Take it'));
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
 
     const sent = call.mock.calls.find((c) => c[0] === 'record_repayment');
     expect(sent?.[1]).toEqual({

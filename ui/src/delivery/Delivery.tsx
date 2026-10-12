@@ -33,9 +33,9 @@ import './delivery.css';
 
 /** The step a row offers next, and the words on the button. */
 const NEXT: Record<string, { state: string; label: string } | undefined> = {
-  pending: { state: 'assigned', label: 'Give to a rider' },
-  assigned: { state: 'out', label: 'Send it out' },
-  out: { state: 'delivered', label: 'It arrived' },
+  pending: { state: 'assigned', label: 'Assign rider' },
+  assigned: { state: 'out', label: 'Dispatch' },
+  out: { state: 'delivered', label: 'Mark delivered' },
 };
 
 const TONES: Record<string, BadgeTone> = {
@@ -105,7 +105,7 @@ export function Delivery() {
     },
     {
       key: 'where',
-      header: 'Where',
+      header: 'Address',
       render: (r) => (
         <Stack gap="inline">
           <span className="mb-delivery__address">{r.address || 'No address typed'}</span>
@@ -115,7 +115,7 @@ export function Delivery() {
     },
     {
       key: 'state',
-      header: 'Where it is',
+      header: 'Status',
       render: (r) => (
         <Stack gap="inline">
           <Badge tone={TONES[r.state] ?? 'neutral'}>{r.stateSays}</Badge>
@@ -197,10 +197,10 @@ export function Delivery() {
     { key: 'name', header: 'Rider', render: (r) => <strong>{r.name}</strong> },
     { key: 'out', header: 'On the road', numeric: true, render: (r) => r.out },
     { key: 'done', header: 'Delivered', numeric: true, render: (r) => r.delivered },
-    { key: 'failed', header: 'Did not arrive', numeric: true, render: (r) => r.failed },
+    { key: 'failed', header: 'Failed', numeric: true, render: (r) => r.failed },
     {
       key: 'collected',
-      header: 'Cash taken',
+      header: 'Cash collected',
       numeric: true,
       render: (r) => <span className="mb-mono">{r.collected.text}</span>,
     },
@@ -212,7 +212,7 @@ export function Delivery() {
     },
     {
       key: 'carrying',
-      header: 'Carrying',
+      header: 'Cash with rider',
       numeric: true,
       render: (r) => (
         <span className={r.carrying.paise > 0 ? 'mb-delivery__carrying' : 'mb-mono'}>
@@ -235,7 +235,7 @@ export function Delivery() {
               setAmount(r.carrying.text);
             }}
           >
-            Take the cash
+            Record cash received
           </Button>
         ) : null,
     },
@@ -247,7 +247,7 @@ export function Delivery() {
       <PageHeader
         title="Delivery"
         count={view.deliveries.length}
-        subtitle={`${view.day} · ${view.says}`}
+        subtitle={`${view.day} · ${view.deliveries.length === 0 ? 'No deliveries today' : view.says}`}
       />
 
       <Sections>
@@ -268,7 +268,7 @@ export function Delivery() {
 
         <Panel
           title="Riders"
-          note="What each of them collected, and what is still in their pocket."
+          note="Cash collected, returned and still held by each rider."
           flush
           actions={
             <Button variant="secondary" onClick={() => setChoosingRiders(true)}>
@@ -280,7 +280,7 @@ export function Delivery() {
             <EmptyState
               title="No active riders"
               /* The old words sent people to a screen that could not do it. */
-              hint="Say who rides — the button above — and then give them an order."
+              hint="Choose delivery riders using the button above."
             />
           ) : (
             <Table rows={[...view.riders]} columns={riderColumns} rowKey={(r) => r.id} />
@@ -300,17 +300,9 @@ export function Delivery() {
       {/* A failure has to say why. */}
       <Modal
         open={failing !== null}
-        title="Why did it not arrive?"
+        title="Record failed delivery"
         onClose={() => setFailing(null)}
-      >
-        <Stack>
-          <Input
-            label="Failure reason"
-            value={why}
-            autoFocus
-            onChange={(e) => setWhy(e.target.value)}
-          />
-          <Row end>
+       actions={<Row end>
             <Button variant="quiet" onClick={() => setFailing(null)}>
               Cancel
             </Button>
@@ -320,9 +312,17 @@ export function Delivery() {
                 if (failing) move(failing, 'failed', undefined, why);
               }}
             >
-              Record it
+              Record failure
             </Button>
-          </Row>
+          </Row>}>
+        <Stack>
+          <Input
+            label="Failure reason"
+            value={why}
+            autoFocus
+            onChange={(e) => setWhy(e.target.value)}
+          />
+
         </Stack>
       </Modal>
 
@@ -330,15 +330,7 @@ export function Delivery() {
         open={handback !== null}
         title={handback ? `Cash from ${handback.name}` : 'Cash from the rider'}
         onClose={() => setHandback(null)}
-      >
-        <Stack>
-          <MoneyInput
-            label="Cash received"
-            value={amount}
-            autoFocus
-            onChange={setAmount}
-          />
-          <Row end>
+       actions={<Row end>
             <Button variant="quiet" onClick={() => setHandback(null)}>
               Cancel
             </Button>
@@ -355,14 +347,22 @@ export function Delivery() {
                   .then((fresh) => {
                     setView(fresh);
                     setHandback(null);
-                    toast.show('ok', 'Taken.');
+                    toast.show('ok', 'Cash received recorded.');
                   })
                   .catch(report);
               }}
             >
-              Take it
+              Record cash received
             </Button>
-          </Row>
+          </Row>}>
+        <Stack>
+          <MoneyInput
+            label="Cash received"
+            value={amount}
+            autoFocus
+            onChange={setAmount}
+          />
+
         </Stack>
       </Modal>
     </Page>
@@ -391,7 +391,11 @@ function WhoRides({
   const isRider = (id: string) => view.riders.some((r) => r.id === id);
 
   return (
-    <Modal open title="Delivery riders" onClose={onClose}>
+    <Modal open title="Delivery riders" onClose={onClose} actions={<div className="mb-row mb-row--end">
+        <Button variant="primary" onClick={onClose}>
+          Close
+        </Button>
+      </div>}>
       <Stack>
         <p className="mb-muted">
           Anybody ticked here can be given a delivery, and the cash they collect
@@ -416,11 +420,7 @@ function WhoRides({
             />
           ))}
       </Stack>
-      <div className="mb-row mb-row--end">
-        <Button variant="primary" onClick={onClose}>
-          Done
-        </Button>
-      </div>
+
     </Modal>
   );
 }

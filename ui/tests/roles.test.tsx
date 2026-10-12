@@ -86,8 +86,8 @@ it('lists what each role may do, and locks the owner', async () => {
   show();
   await screen.findByText('Cashier');
   // Counted against the boxes on offer, and the caps read as words.
-  expect(screen.getByText('1 of 5 allowed · discounts up to 10% or ₹200.00')).toBeTruthy();
-  expect(screen.getByText('Everything, always')).toBeTruthy();
+  expect(screen.getByText('1 of 5 allowed · discount limits: 10% / ₹200.00')).toBeTruthy();
+  expect(screen.getByText('All permissions')).toBeTruthy();
   expect(screen.getByText('Cannot be changed')).toBeTruthy();
   // One Edit button: the cashier's.
   expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
@@ -125,7 +125,7 @@ it('ticks a whole section at once, and one box at a time', async () => {
   expect(within(reports).getByText('2 of 3')).toBeTruthy();
 
   // The rupee cap is editable beside the percentage.
-  fireEvent.change(within(dialog).getByLabelText('Biggest discount, rupees'), {
+  fireEvent.change(within(dialog).getByLabelText('Discount amount limit (₹)'), {
     target: { value: '500' },
   });
 

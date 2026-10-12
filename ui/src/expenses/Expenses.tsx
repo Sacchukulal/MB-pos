@@ -84,12 +84,12 @@ export function Expenses() {
   if (!view) return <div className="mb-expenses" />;
 
   const columns: Column<ExpenseRowView>[] = [
-    { key: 'what', header: 'What', render: (r) => r.description },
+    { key: 'what', header: 'Description', render: (r) => r.description },
     { key: 'category', header: 'Category', render: (r) => r.category },
     { key: 'paidTo', header: 'Paid to', render: (r) => r.paidTo ?? '—' },
     {
       key: 'mode',
-      header: 'How',
+      header: 'Payment mode',
       render: (r) =>
         r.modeTag === 'cash' ? <Badge tone="warn">Cash</Badge> : <Badge tone="neutral">{r.mode}</Badge>,
     },
@@ -134,7 +134,7 @@ export function Expenses() {
         actions={
           <Button variant="secondary" onClick={() => setDrawer(true)}>
             <Icon name="cash" size="sm" />
-            Move cash
+            Cash movements
           </Button>
         }
       />
@@ -178,7 +178,7 @@ export function Expenses() {
           options={MODES}
         />
         <Button variant="primary" onClick={quickAdd}>
-          Record it
+          Save expense
         </Button>
         {/*
           Beside the box that uses them, and this is a bug fixed by looking: it was first put in
@@ -196,11 +196,11 @@ export function Expenses() {
       */}
       <div className="mb-expenses__cash">
         <span>
-          In the drawer{' '}
+          Expected cash in drawer{' '}
           <strong className="mb-mono">{view.cash.expected.text}</strong>
         </span>
         {/* The arithmetic is asked for, not printed. */}
-        <InfoTip label="How the drawer figure is made">{view.cash.says}</InfoTip>
+        <InfoTip label="Cash drawer breakdown"><span className="mb-expenses__breakdown">{view.cash.says}</span></InfoTip>
       </div>
 
       {view.due.length > 0 ? (
@@ -220,7 +220,7 @@ export function Expenses() {
                     .catch(report);
                 }}
               >
-                Record it
+                Save expense
               </Button>
             </span>
           ))}
@@ -230,7 +230,7 @@ export function Expenses() {
       {view.rows.length === 0 ? (
         <EmptyState
           title="No expenses today"
-          hint="Record what goes out as it goes out — that is what makes the profit figure true."
+          hint="Record expenses here to include them in the profit report."
         />
       ) : (
         <>
@@ -270,10 +270,10 @@ export function Expenses() {
 
       {view.movements.length > 0 ? (
         <div className="mb-expenses__movements">
-          <strong>The drawer today</strong>
+          <strong>Cash movements today</strong>
           {view.movements.map((m) => (
             <span key={m.id}>
-              {m.kind} {m.takesOut ? '−' : '+'}
+              {m.kind} · {m.takesOut ? 'Cash out −' : 'Cash in +'}
               <span className="mb-mono">{m.amount.text}</span> — {m.reason}
             </span>
           ))}
@@ -332,29 +332,10 @@ function MoveCash({
   return (
     <Modal
       open
-      title="Move cash"
+      title="Cash movement"
       note="The float you started with, a top-up from the owner, a payout, or money taken to the bank. A purchase is not one of these — record that as an expense and the drawer follows it."
       onClose={onClose}
-    >
-      <Select
-        label="What happened"
-        value={kind}
-        onChange={(e) => setKind(e.target.value)}
-        options={[
-          { value: 'float', label: 'Opening float' },
-          { value: 'top_up', label: 'Top-up into the drawer' },
-          { value: 'payout', label: 'Payout from the drawer' },
-          { value: 'bank_drop', label: 'Taken to the bank' },
-        ]}
-      />
-      <MoneyInput label="Amount" value={amount} onChange={setAmount} />
-      <Input
-        label="Why"
-        hint="Money leaving a drawer without a reason is how a shortfall becomes an argument."
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-      />
-      <div className="mb-row mb-row--end">
+     actions={<div className="mb-row mb-row--end">
         <Button variant="quiet" onClick={onClose}>
           Cancel
         </Button>
@@ -366,9 +347,28 @@ function MoveCash({
               .catch(onFailed);
           }}
         >
-          Record it
+          Record cash movement
         </Button>
-      </div>
+      </div>}>
+      <Select
+        label="Movement type"
+        value={kind}
+        onChange={(e) => setKind(e.target.value)}
+        options={[
+          { value: 'float', label: 'Opening float (cash in)' },
+          { value: 'top_up', label: 'Top-up (cash in)' },
+          { value: 'payout', label: 'Payout (cash out)' },
+          { value: 'bank_drop', label: 'Bank deposit (cash out)' },
+        ]}
+      />
+      <MoneyInput label="Amount" value={amount} onChange={setAmount} />
+      <Input
+        label="Reason"
+        hint="Enter the reason for this cash movement."
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+
     </Modal>
   );
 }
@@ -397,38 +397,7 @@ function EditExpense({
   const [recurring, setRecurring] = useState(false);
 
   return (
-    <Modal open title={row.description} onClose={onClose} wide>
-      <Input label="Description" value={what} autoFocus onChange={(e) => setWhat(e.target.value)} />
-      <MoneyInput label="Amount" value={amount} onChange={setAmount} />
-      <Select
-        label="Category"
-        value={category}
-        onChange={(e) => setCategory(e.target.value)}
-        options={[
-          { value: '', label: 'No category' },
-          ...view.allCategories.map((c) => ({ value: c.id ?? '', label: c.name })),
-        ]}
-      />
-      <Select label="Payment mode" value={mode} onChange={(e) => setMode(e.target.value)} options={MODES} />
-      <Input label="Paid to" value={paidTo} onChange={(e) => setPaidTo(e.target.value)} />
-      <Input
-        label="Their bill number"
-        value={reference}
-        onChange={(e) => setReference(e.target.value)}
-      />
-      <Input
-        label="GST %"
-        hint="The tax INSIDE what you paid — 1,180 at 18% contains 180 you can claim. Blank for none."
-        value={gst}
-        onChange={(e) => setGst(e.target.value)}
-      />
-      <Input label="Note" value={note} onChange={(e) => setNote(e.target.value)} />
-      <Checkbox
-        label="This happens every month — remind me"
-        checked={recurring}
-        onChange={(e) => setRecurring(e.target.checked)}
-      />
-      <div className="mb-row mb-row--end">
+    <Modal open title={row.description} onClose={onClose} wide actions={<div className="mb-row mb-row--end">
         <Button variant="quiet" onClick={onClose}>
           Cancel
         </Button>
@@ -465,9 +434,40 @@ function EditExpense({
               .catch(onFailed);
           }}
         >
-          Save
+          Save expense
         </Button>
-      </div>
+      </div>}>
+      <Input label="Description" value={what} autoFocus onChange={(e) => setWhat(e.target.value)} />
+      <MoneyInput label="Amount" value={amount} onChange={setAmount} />
+      <Select
+        label="Category"
+        value={category}
+        onChange={(e) => setCategory(e.target.value)}
+        options={[
+          { value: '', label: 'No category' },
+          ...view.allCategories.map((c) => ({ value: c.id ?? '', label: c.name })),
+        ]}
+      />
+      <Select label="Payment mode" value={mode} onChange={(e) => setMode(e.target.value)} options={MODES} />
+      <Input label="Paid to" value={paidTo} onChange={(e) => setPaidTo(e.target.value)} />
+      <Input
+        label="Receipt or invoice number"
+        value={reference}
+        onChange={(e) => setReference(e.target.value)}
+      />
+      <Input
+        label="GST %"
+        hint="The tax INSIDE what you paid — 1,180 at 18% contains 180 you can claim. Blank for none."
+        value={gst}
+        onChange={(e) => setGst(e.target.value)}
+      />
+      <Input label="Note" value={note} onChange={(e) => setNote(e.target.value)} />
+      <Checkbox
+        label="Remind me every month"
+        checked={recurring}
+        onChange={(e) => setRecurring(e.target.checked)}
+      />
+
     </Modal>
   );
 }
@@ -505,11 +505,15 @@ function SpendCategories({
       title="Expense categories"
       note="The headings your spending is sorted under, and what the totals at the bottom of the screen are grouped by."
       onClose={onClose}
-    >
+     actions={<div className="mb-row mb-row--end">
+        <Button variant="primary" onClick={onClose}>
+          Close
+        </Button>
+      </div>}>
 
       <div className="mb-row">
         <Input
-          label="Add a heading"
+          label="Add category"
           value={adding}
           autoFocus
           placeholder="Gas"
@@ -574,17 +578,13 @@ function SpendCategories({
                 disabled={busy}
                 onClick={() => void save(c.id ?? '', c.name, false)}
               >
-                Stop using it
+                Deactivate
               </Button>
             </div>
           ))}
       </div>
 
-      <div className="mb-row mb-row--end">
-        <Button variant="primary" onClick={onClose}>
-          Done
-        </Button>
-      </div>
+
     </Modal>
   );
 }

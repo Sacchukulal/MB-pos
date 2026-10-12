@@ -207,10 +207,26 @@ function Account({
   const toast = useToast();
 
   return (
-    <Modal open title={account.customer.name} onClose={onClose} wide>
+    <Modal open title={account.customer.name} onClose={onClose} wide actions={<div className="mb-row mb-row--end">
+        <Button
+          variant="quiet"
+          onClick={() => {
+            void navigator.clipboard.writeText(account.statement);
+            toast.show('ok', 'The statement is on the clipboard.');
+          }}
+        >
+          Copy statement
+        </Button>
+        <Button variant="quiet" onClick={() => setAdjusting(true)}>
+          Adjust amount owed
+        </Button>
+        <Button variant="primary" onClick={onClose}>
+          Close
+        </Button>
+      </div>}>
       <div className="mb-credit__ageing">
         <span>
-          Owes <strong className="mb-mono">{account.customer.balance.text}</strong>
+          Amount owed <strong className="mb-mono">{account.customer.balance.text}</strong>
         </span>
         <span>Oldest {account.ageing.oldest}</span>
         <span>Up to 30 days {account.ageing.current.text}</span>
@@ -220,12 +236,10 @@ function Account({
       </div>
 
       <SectionHeader
-        title="Record repayment"
+        title="Record payment"
         note={
           <>
-            In a real payment mode — cash, card or UPI. Money arriving is money
-            arriving, and it has to show in the day&rsquo;s takings as what it
-            was.
+            Record money received from this customer by Cash, Card or UPI.
           </>
         }
       />
@@ -264,7 +278,7 @@ function Account({
               .catch(onFailed);
           }}
         >
-          Take it
+          Record payment
         </Button>
       </div>
 
@@ -298,44 +312,15 @@ function Account({
         </table>
       )}
 
-      <div className="mb-row mb-row--end">
-        <Button
-          variant="quiet"
-          onClick={() => {
-            void navigator.clipboard.writeText(account.statement);
-            toast.show('ok', 'The statement is on the clipboard.');
-          }}
-        >
-          Copy the statement
-        </Button>
-        <Button variant="quiet" onClick={() => setAdjusting(true)}>
-          Adjust
-        </Button>
-        <Button variant="primary" onClick={onClose}>
-          Done
-        </Button>
-      </div>
+
 
       {adjusting ? (
         <Modal
           open
-          title="Adjust the account"
-          note="An opening balance from the notebook, or money written off. It needs a reason — this is the one place money can leave an account without anybody paying."
+          title="Adjust amount owed"
+          note="Use for an opening balance, correction or write-off. A reason is required."
           onClose={() => setAdjusting(false)}
-        >
-          <MoneyInput
-            label="Amount"
-            value={adjustment}
-            autoFocus
-            onChange={setAdjustment}
-          />
-          <Checkbox
-            label="Increase amount owed"
-            checked={increases}
-            onChange={(e) => setIncreases(e.target.checked)}
-          />
-          <Input label="Why" value={reason} onChange={(e) => setReason(e.target.value)} />
-          <div className="mb-row mb-row--end">
+         actions={<div className="mb-row mb-row--end">
             <Button variant="quiet" onClick={() => setAdjusting(false)}>
               Cancel
             </Button>
@@ -359,7 +344,21 @@ function Account({
             >
               Save
             </Button>
-          </div>
+          </div>}>
+          <p className="mb-muted">Increase or reduce what this customer owes without recording a payment.</p>
+          <MoneyInput
+            label="Amount"
+            value={adjustment}
+            autoFocus
+            onChange={setAdjustment}
+          />
+          <Checkbox
+            label="Increase amount owed"
+            checked={increases}
+            onChange={(e) => setIncreases(e.target.checked)}
+          />
+          <Input label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+
         </Modal>
       ) : null}
     </Modal>

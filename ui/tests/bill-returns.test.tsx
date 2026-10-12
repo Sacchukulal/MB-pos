@@ -34,6 +34,42 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it('opens the existing reprint confirmation directly without opening the bill or actions menu', async () => {
+  render(<ToastProvider><Bills /></ToastProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Reprint bill' }));
+  await screen.findByLabelText('Customer request');
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(call.mock.calls.some(([name]) => name === 'bill_detail' || name === 'reprint_bill')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Print another copy' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('reprint_bill', { orderId: 'sale', reason: 'Customer request' }));
+});
+
+it('keeps cancellation without refund on the existing reason and void command', async () => {
+  render(<ToastProvider><Bills /></ToastProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Actions for bill A/7' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Cancel bill (no refund)' }));
+  await screen.findByLabelText('Customer request');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel bill (no refund)' })).toBeEnabled());
+  expect(screen.getByText(/This cancels the bill without recording a refund/)).toBeTruthy();
+  expect(call.mock.calls.some(([name]) => name === 'void_bill' || name === 'bill_detail')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel bill (no refund)' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('void_bill', {
+    orderId: 'sale', reason: 'Customer request', approverStaffId: null, approverPin: null,
+  }));
+  expect(call.mock.calls.some(([name]) => ['void_and_return_bill', 'return_closed_bill', 'return_bill_money'].includes(name))).toBe(false);
+});
+
+it('keeps restricted actions hidden when the menu opens', async () => {
+  const implementation = call.getMockImplementation()!;
+  const view = await implementation('bills');
+  view.canRevert = false; view.canVoid = false; view.canReprint = false;
+  call.mockImplementation((command: string, args: unknown) => command === 'bills' ? Promise.resolve(view) : implementation(command, args));
+  render(<ToastProvider><Bills /></ToastProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Actions for bill A/7' }));
+  expect(screen.queryByRole('button', { name: 'Reprint bill' })).toBeNull();
+  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Invoice PDF']);
+});
+
 it.each([false, true])('checks whole-return permission before opening the correction route (allowed: %s)', async (canVoid) => {
   const implementation = call.getMockImplementation()!;
   const view = await implementation('bills');
@@ -62,7 +98,8 @@ it.each([false, true])('checks whole-return permission before opening the correc
 
 async function show(action: string) {
   render(<ToastProvider><Bills /></ToastProvider>);
-  fireEvent.click(await screen.findByRole('button', { name: action }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Actions for bill A/7' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: action }));
   await screen.findByLabelText('Return by upi');
   await screen.findByLabelText('Customer request');
 }

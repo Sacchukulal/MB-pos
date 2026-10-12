@@ -584,7 +584,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 onChange={setPhone}
               />
               <Input
-                label="GSTIN (leave blank if you do not have one)"
+                label="GSTIN (optional)"
                 value={gstin}
                 onChange={(e) => setGstin(e.target.value)}
               />
@@ -618,7 +618,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
                 onChange={(e) => setPerson(e.target.value)}
               />
               <Input
-                label={`A PIN, ${PIN_DIGITS} digits`}
+                label={`PIN (${PIN_DIGITS} digits)`}
                 maxLength={PIN_DIGITS}
                 value={pin}
                 type="password"

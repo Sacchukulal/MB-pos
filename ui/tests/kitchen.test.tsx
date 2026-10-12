@@ -142,7 +142,7 @@ describe('the kitchen display', () => {
       expect(call).toHaveBeenCalledWith('kitchen_bump', { id: 'second' });
     });
 
-    const [firstDone] = screen.getAllByRole('button', { name: /Done/ });
+    const [firstDone] = screen.getAllByRole('button', { name: /Complete ticket/ });
     if (!firstDone) throw new Error('no card to clear');
     fireEvent.click(firstDone);
     await waitFor(() => {
@@ -156,9 +156,9 @@ describe('the kitchen display', () => {
     show();
 
     expect(await screen.findByText('CANCELLED')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Done/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Complete ticket/ })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /Got it/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Acknowledge cancellation/ }));
     await waitFor(() => {
       expect(call).toHaveBeenCalledWith('kitchen_acknowledge', { id: 'kds_1' });
     });
@@ -194,7 +194,7 @@ describe('the kitchen display', () => {
     serve(view({ lastCleared: { id: 'kds_9', what: 'Table 5 #12' } }));
     show();
 
-    const back = await screen.findByRole('button', { name: /Bring back Table 5 #12/ });
+    const back = await screen.findByRole('button', { name: /Recall Table 5 #12/ });
     fireEvent.click(back);
     await waitFor(() => {
       expect(call).toHaveBeenCalledWith('kitchen_recall', { id: 'kds_9' });
@@ -206,7 +206,7 @@ describe('the kitchen display', () => {
     show();
 
     await screen.findByText('Table 5');
-    expect(screen.queryByRole('button', { name: /Bring back/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Recall/ })).toBeNull();
   });
 
   /** 5, and the shops that do not use courses never see any of it. */
@@ -249,7 +249,7 @@ describe('the kitchen display', () => {
     serve(view({ tickets: [], headline: 'Nothing waiting.' }));
     show();
 
-    expect(await screen.findByText(/Nothing waiting. The kitchen is clear./)).toBeTruthy();
+    expect(await screen.findByText(/No pending kitchen tickets./)).toBeTruthy();
   });
 
   it('runs one clock for the whole screen, however many cards', async () => {

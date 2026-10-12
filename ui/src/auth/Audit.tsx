@@ -52,9 +52,9 @@ export function Audit() {
 
   const columns: Column<AuditEntryView>[] = [
     { key: 'when', header: 'When', nowrap: true, render: (e) => e.when },
-    { key: 'who', header: 'Who', render: (e) => e.who },
-    { key: 'what', header: 'What', render: (e) => e.what },
-    { key: 'about', header: 'Which one', render: (e) => e.about ?? '—' },
+    { key: 'who', header: 'Staff member', render: (e) => e.who },
+    { key: 'what', header: 'Action', render: (e) => e.what },
+    { key: 'about', header: 'Record', render: (e) => e.about ?? '—' },
     {
       key: 'change',
       header: 'Change',
@@ -75,6 +75,7 @@ export function Audit() {
     <Page className="mb-screen">
       <PageHeader
         title="History"
+        subtitle="Recorded staff activity"
       />
 
       {view?.tampered ? (
@@ -90,7 +91,7 @@ export function Audit() {
           value={who}
           onChange={(e) => setWho(e.target.value)}
           options={[
-            { value: '', label: 'Everybody' },
+            { value: '', label: 'All staff' },
             ...people.map((p) => ({ value: p.id, label: p.name })),
           ]}
         />
@@ -99,7 +100,7 @@ export function Audit() {
           value={what}
           onChange={(e) => setWhat(e.target.value)}
           options={[
-            { value: '', label: 'Everything' },
+            { value: '', label: 'All actions' },
             ...(view?.actions ?? []).map(([code, words]) => ({
               value: code,
               label: words,
@@ -114,7 +115,7 @@ export function Audit() {
             { value: '0', label: 'Today' },
             { value: '7', label: 'This week' },
             { value: '30', label: 'This month' },
-            { value: '', label: 'Everything there is' },
+            { value: '', label: 'All time' },
           ]}
         />
         <Button variant="quiet" onClick={() => void load()}>
@@ -125,7 +126,7 @@ export function Audit() {
       {view && view.entries.length === 0 ? (
         <EmptyState
           title="No activity recorded"
-          hint="Signing in, voiding a bill, changing a price and closing the day all land here."
+          hint="Sign-ins, bill changes, price changes and day closing appear here."
         />
       ) : (
         <Table

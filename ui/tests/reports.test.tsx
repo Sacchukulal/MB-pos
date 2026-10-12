@@ -506,16 +506,17 @@ it('preserves an open edit dialog and its typed reason across a valid licence re
     return answer(command);
   });
   open();
-  fireEvent.click(await screen.findByRole('button', { name: 'Edit / return items' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Actions for bill A/7' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Edit / return items' }));
   const dialog = await screen.findByRole('dialog', { name: /Edit bill A\/7/ });
-  fireEvent.change(screen.getByLabelText('Anything to add'), { target: { value: 'Keep this reason' } });
+  fireEvent.change(screen.getByLabelText('Additional note'), { target: { value: 'Keep this reason' } });
   let allow!: (value: ReportListView) => void;
   recheck = new Promise((resolve) => { allow = resolve; });
   fireEvent(window, new Event('focus'));
   expect(screen.queryByRole('dialog')).toBeNull();
   await act(async () => { allow(list); });
   expect(await screen.findByRole('dialog', { name: /Edit bill A\/7/ })).toBe(dialog);
-  expect(screen.getByLabelText('Anything to add')).toHaveValue('Keep this reason');
+  expect(screen.getByLabelText('Additional note')).toHaveValue('Keep this reason');
   expect(call.mock.calls.filter(([command]) => command === 'reasons')).toHaveLength(1);
 });
 
@@ -544,7 +545,7 @@ it('opens on Day open/close, and nothing else, for somebody who may not read rep
   expect(screen.queryByRole('button', { name: 'Dashboard' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Bills' })).toBeNull();
   expect(screen.queryByText('This part needs a licence')).toBeNull();
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Close today' })).toBeTruthy());
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Close day' })).toBeTruthy());
 });
 
 /** An alert about a closed day lands here directly. */
@@ -575,7 +576,7 @@ it('puts the days beside Bills, and opens them without asking for a report', asy
   await waitFor(() => expect(call).toHaveBeenCalledWith('days'));
   // Today's state is the subtitle, and its one press is right there.
   await waitFor(() => expect(screen.getByText('Today, Sunday 9 August')).toBeTruthy());
-  expect(screen.getByRole('button', { name: 'Close today' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Close day' })).toBeTruthy();
   // The old entry is gone with the old model.
   expect(screen.queryByRole('button', { name: 'Close the day' })).toBeNull();
 });

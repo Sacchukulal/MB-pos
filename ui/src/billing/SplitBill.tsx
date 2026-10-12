@@ -36,54 +36,7 @@ export function SplitBill({
   const destination = free.find((t) => t.id === toTable);
 
   return (
-    <Modal open title="Split bill" onClose={onClose} wide>
-      {cart.orderId === null ? (
-        <Notice tone="warn">
-          This order has not been sent to the kitchen or put on a table yet, so
-          there is nothing to move off it. Print the kitchen ticket first, or
-          open the table.
-        </Notice>
-      ) : (
-        <>
-          <Hint>
-            Type how many of each item move to the new bill. The kitchen is not
-            told again — the food is already cooking.
-          </Hint>
-
-          <ul className="mb-split__lines">
-            {cart.lines.map((line) => (
-              <li key={line.index} className="mb-split__line">
-                <span className="mb-split__name">{line.name}</span>
-                <Numeric>{line.qty}</Numeric>
-                <NumberInput
-                  label="Move"
-                  value={moving[line.index] ?? ''}
-                  placeholder="0"
-                  onChange={(event) =>
-                    setMoving({
-                      ...moving,
-                      [line.index]: onlyAmount(event.target.value),
-                    })
-                  }
-                />
-              </li>
-            ))}
-          </ul>
-
-          {/* Where the new bill sits: here, or on a free table. */}
-          {free.length > 0 ? (
-            <Select
-              label="New bill goes to"
-              value={toTable}
-              onChange={(event) => setToTable(event.target.value)}
-              options={[
-                { value: '', label: cart.table ? `This table (${cart.table})` : 'Stays here' },
-                ...free.map((t) => ({ value: t.id, label: t.printed })),
-              ]}
-            />
-          ) : null}
-
-          <div className="mb-row mb-row--end">
+    <Modal open title="Split bill" onClose={onClose} wide actions={cart.orderId !== null ? (<div className="mb-row mb-row--end">
             <Button variant="quiet" onClick={onClose}>
               Cancel
             </Button>
@@ -113,9 +66,55 @@ export function SplitBill({
                   .finally(() => setBusy(false));
               }}
             >
-              Split
+              Split bill
             </Button>
-          </div>
+          </div>) : undefined}>
+      {cart.orderId === null ? (
+        <Notice tone="warn">
+          This order has not been sent to the kitchen or put on a table yet, so
+          there is nothing to move off it. Print the kitchen ticket first, or
+          open the table.
+        </Notice>
+      ) : (
+        <>
+          <Hint>
+            Choose quantities to move from this order to a new bill. No new KOT is sent.
+          </Hint>
+
+          <ul className="mb-split__lines">
+            {cart.lines.map((line) => (
+              <li key={line.index} className="mb-split__line">
+                <span className="mb-split__name">{line.name}</span>
+                <Numeric>{line.qty}</Numeric>
+                <NumberInput
+                  label="Quantity to move"
+                  value={moving[line.index] ?? ''}
+                  placeholder="0"
+                  onChange={(event) =>
+                    setMoving({
+                      ...moving,
+                      [line.index]: onlyAmount(event.target.value),
+                    })
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+
+          {/* Where the new bill sits: here, or on a free table. */}
+          {free.length > 0 ? (
+            <Select
+              label="New bill location"
+              value={toTable}
+              onChange={(event) => setToTable(event.target.value)}
+              options={[
+                { value: '', label: cart.table ? `This table (${cart.table})` : 'Stays here' },
+                ...free.map((t) => ({ value: t.id, label: t.printed })),
+              ]}
+            />
+          ) : null}
+
+
         </>
       )}
     </Modal>

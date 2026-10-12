@@ -180,10 +180,10 @@ impl Permission {
     pub const fn label(self) -> &'static str {
         match self {
             Permission::BillCreate => "Take orders and settle bills",
-            Permission::BillDiscountLine => "Discount one line",
-            Permission::BillDiscountBill => "Discount the whole bill",
+            Permission::BillDiscountLine => "Apply item discounts",
+            Permission::BillDiscountBill => "Apply bill discounts",
             Permission::BillVoid => "Void a settled bill",
-            Permission::BillRevert => "Take a paid bill back",
+            Permission::BillRevert => "Edit / return paid bill items",
             Permission::BillRevertApprove => "Approve a corrected bill",
             Permission::BillReprint => "Reprint a bill",
             Permission::OrderCancel => "Cancel an open order",
@@ -192,7 +192,7 @@ impl Permission {
             Permission::MenuManage => "Edit the menu",
             Permission::TablesManage => "Arrange tables",
             Permission::CustomersManage => "Manage customers",
-            Permission::CreditCollect => "Take credit repayments",
+            Permission::CreditCollect => "Record customer credit payments",
             Permission::ExpensesManage => "Record expenses",
             Permission::ReportsView => "See reports",
             Permission::ReportsExport => "Export and share reports",
@@ -201,14 +201,14 @@ impl Permission {
             Permission::SettingsPrinter => "Printers",
             Permission::SettingsTax => "Tax and numbering",
             Permission::StaffManage => "Manage staff and roles",
-            Permission::AuditView => "Read the history",
+            Permission::AuditView => "View staff activity history",
             Permission::BackupRun => "Backups",
             Permission::DevicesPair => "Phones",
             Permission::LicenceManage => "Account and licence",
             Permission::InventoryView => "See stock",
             Permission::InventoryManage => "Edit materials and recipes",
             Permission::StockWaste => "Record wastage",
-            Permission::StockAdjust => "Adjust stock by hand",
+            Permission::StockAdjust => "Adjust stock and approve counts",
             Permission::SuppliersManage => "Manage suppliers",
             Permission::PurchasesManage => "Enter purchases",
             Permission::StockCount => "Count stock",
@@ -217,7 +217,7 @@ impl Permission {
             Permission::LeaveApprove => "Approve leave",
             Permission::SalaryView => "See salaries",
             Permission::SalaryManage => "Set salaries and run payroll",
-            Permission::DeliveryDispatch => "Send deliveries out",
+            Permission::DeliveryDispatch => "Dispatch and collect rider cash",
         }
     }
 
@@ -286,7 +286,7 @@ impl Permission {
             Permission::PurchasesManage => "Enter deliveries, returns, and purchase orders.",
             Permission::StockCount => {
                 "Walk the store and write down what is on the shelves. Approving the count needs \
-                 Adjust stock by hand."
+                 Adjust stock and approve counts."
             }
             Permission::AttendanceMark => "Mark somebody present or absent, and set the roster.",
             Permission::AttendanceCorrect => {

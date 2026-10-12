@@ -200,8 +200,8 @@ it('keeps the selected line token while a line discount dialog is open', async (
   fireEvent.click(screen.getByRole('button', { name: 'More for Masala Dosa' }));
   fireEvent.click(screen.getByRole('button', { name: 'Money off' }));
   await phoneChangedLine();
-  fireEvent.change(screen.getByLabelText('Per cent'), { target: { value: '10' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Take it off' }));
+  fireEvent.change(screen.getByLabelText('Discount (%)'), { target: { value: '10' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply discount' }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('cart_set_discount', {
     line: 0, kind: 'percent', value: '10', reason: null, expectedLine: 'original-line',
   }));
@@ -213,7 +213,7 @@ it('keeps the selected line token when clearing a discount after a phone update'
   fireEvent.click(screen.getByRole('button', { name: 'More for Masala Dosa' }));
   fireEvent.click(screen.getByRole('button', { name: 'Money off' }));
   await phoneChangedLine();
-  fireEvent.click(screen.getByRole('button', { name: 'Remove the discount' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove discount' }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('cart_clear_discount', {
     line: 0, expectedLine: 'original-line',
   }));

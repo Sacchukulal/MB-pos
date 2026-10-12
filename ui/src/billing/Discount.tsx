@@ -8,8 +8,8 @@ import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { CartView } from '../ipc/generated/CartView';
 
 const KINDS = [
-  { value: 'percent', label: 'A percentage' },
-  { value: 'amount', label: 'Rupees off' },
+  { value: 'percent', label: 'Percentage' },
+  { value: 'amount', label: 'Amount' },
 ];
 
 export function DiscountDialog({
@@ -78,14 +78,14 @@ export function DiscountDialog({
   return (
     <Modal
       open
-      title={line ? `Money off ${line.name}` : 'Money off this bill'}
+      title={line ? `Item discount — ${line.name}` : 'Bill discount'}
       onClose={onClose}
       actions={
         <>
           {/* Only when there is one to take off. */}
           {has ? (
             <Button variant="danger" disabled={busy} onClick={() => void clear()}>
-              Remove the discount
+              Remove discount
             </Button>
           ) : null}
           <Button variant="quiet" disabled={busy} onClick={onClose}>
@@ -96,7 +96,7 @@ export function DiscountDialog({
             disabled={busy || value.trim() === ''}
             onClick={() => void apply()}
           >
-            Take it off
+            Apply discount
           </Button>
         </>
       }
@@ -113,7 +113,7 @@ export function DiscountDialog({
       </p>
 
       <Select
-        label="How much"
+        label="Discount type"
         value={kind}
         options={KINDS}
         onChange={(event) => {
@@ -123,14 +123,14 @@ export function DiscountDialog({
       />
       {/* Money and a percentage are the same characters and not the same thing. */}
       <NumberInput
-        label={kind === 'percent' ? 'Per cent' : 'Rupees'}
+        label={kind === 'percent' ? 'Discount (%)' : 'Discount amount'}
         prefix={kind === 'percent' ? undefined : '₹'}
         hint={
           kind === 'percent'
-            ? 'Like 10, or 12.5. It comes off before tax, so the tax on the bill stays correct.'
+            ? 'Applied before tax. Enter a percentage, such as 10 or 12.5.'
             : line
-              ? 'Like 50, or 50.00. It comes off this line before tax.'
-              : 'Like 50, or 50.00. It is spread across the lines before tax.'
+              ? 'Deducted from this item before tax.'
+              : 'Spread across the bill items before tax.'
         }
         value={value}
         autoFocus
@@ -144,8 +144,8 @@ export function DiscountDialog({
         }}
       />
       <Input
-        label="Why (optional)"
-        hint="Some discounts need one — the shop decides how big, on the roles screen."
+        label="Reason"
+        hint="Add a reason if required by your role."
         value={reason}
         onChange={(event) => setReason(event.target.value)}
       />

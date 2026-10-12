@@ -326,6 +326,11 @@ export function Field({
       )}
     >
       {body}
+      {setting.control === 'number' && setting.unit !== '' ? (
+        <span className="mb-settings__unit">
+          {setting.unit}{setting.key === 'billing.service_charge_bp' ? ' · 500 = 5%' : ''}
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -125,8 +125,8 @@ describe('recording what goes out (scope 10.6)', () => {
     show();
     await screen.findByText('Mandi run');
 
-    // Two buttons say "Record it" — quick add and the reminder.
-    fireEvent.click(screen.getAllByText('Record it')[0] as HTMLElement);
+    // Two buttons say "Save expense" — quick add and the reminder.
+    fireEvent.click(screen.getAllByText('Save expense')[0] as HTMLElement);
     expect(call.mock.calls.some((c) => c[0] === 'save_expense')).toBe(false);
   });
 
@@ -153,10 +153,10 @@ describe('the drawer (scope 10.6)', () => {
   it('a purchase is not a cash movement, and the dialog says so', async () => {
     show();
     await screen.findByText('Mandi run');
-    fireEvent.click(screen.getByText('Move cash'));
+    fireEvent.click(screen.getByText('Cash movements'));
 
     expect(await screen.findByText(/A purchase is not one of these/)).toBeTruthy();
-    const kinds = screen.getByLabelText('What happened') as HTMLSelectElement;
+    const kinds = screen.getByLabelText('Movement type') as HTMLSelectElement;
     expect([...kinds.options].map((o) => o.value)).toEqual([
       'float',
       'top_up',
@@ -173,7 +173,7 @@ describe('reminders', () => {
     // It is a prompt, not a posting: nothing has been sent.
     expect(call.mock.calls.some((c) => c[0] === 'confirm_recurring_expense')).toBe(false);
 
-    fireEvent.click(screen.getAllByText('Record it')[1] ?? screen.getByText('Record it'));
+    fireEvent.click(screen.getAllByText('Save expense')[1] ?? screen.getByText('Save expense'));
     const sent = call.mock.calls.find((c) => c[0] === 'confirm_recurring_expense');
     expect(sent?.[1]).toEqual({ id: 'rec_rent' });
   });

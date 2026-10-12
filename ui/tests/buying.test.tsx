@@ -205,7 +205,7 @@ describe('the stock count (P26)', () => {
     // If this ever shows today's balance instead, approving has become a "set" and Monday's
     // delivery is being erased.
     expect(await screen.findByText('12 kg')).toBeTruthy();
-    expect(screen.getByText('Book said')).toBeTruthy();
+    expect(screen.getByText('Recorded stock')).toBeTruthy();
     expect(screen.getByText('2 kg short')).toBeTruthy();
     // A variance in kilos is one nobody reads; the rupees are the finding.
     expect(screen.getByText('−800.00')).toBeTruthy();
@@ -235,16 +235,16 @@ describe('the stock count (P26)', () => {
     draw(<Count />);
     expect(await screen.findByText(/cannot be changed/)).toBeTruthy();
     expect(screen.queryByText('Remove')).toBeNull();
-    expect(screen.queryByText('Say why')).toBeNull();
-    expect(screen.queryByText('Give up on this count')).toBeNull();
-    expect(screen.queryByText('Write it down')).toBeNull();
+    expect(screen.queryByText('Add reason')).toBeNull();
+    expect(screen.queryByText('Abandon count')).toBeNull();
+    expect(screen.queryByText('Save count line')).toBeNull();
     // And the one thing that IS offered is a new count.
     expect(screen.getByText('Start a new count')).toBeTruthy();
   });
 
   it('asks why a big difference happened, rather than silently accepting it', async () => {
     draw(<Count />);
-    fireEvent.click(await screen.findByText('Say why'));
+    fireEvent.click(await screen.findByText('Add reason'));
     expect(await screen.findByText('Paneer is 2 kg short')).toBeTruthy();
     expect(screen.getByText('Wastage nobody recorded')).toBeTruthy();
   });
