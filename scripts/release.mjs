@@ -45,7 +45,17 @@ function run(command, cwd = root) {
     cwd, encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024,
   });
 }
-const sh = (cmd, cwd = root) => { console.log(`\n$ ${cmd.join(' ')}`); const result = run(cmd, cwd); if (result) process.stdout.write(result); };
+const sh = (cmd, cwd = root) => {
+  console.log(`\n$ ${cmd.join(' ')}`);
+  try {
+    const result = run(cmd, cwd);
+    if (result) process.stdout.write(result);
+  } catch (error) {
+    if (error.stdout) process.stdout.write(error.stdout);
+    if (error.stderr) process.stderr.write(error.stderr);
+    process.exit(error.status || 1);
+  }
+};
 const out = (cmd) => run(cmd).trim();
 const die = (m) => { console.error(`\nrelease: ${m}`); process.exit(1); };
 

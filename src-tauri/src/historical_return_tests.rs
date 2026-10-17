@@ -124,6 +124,8 @@ fn historical_return_approval_uses_the_whole_bill_even_when_only_some_cash_is_pa
     app.with_shop(|shop| shop.db.transaction(|tx| Repos::new(tx).settings().set(OUTLET,
         crate::corrections::APPROVAL_KEY, &Money::from_paise(10000), crate::flows::now(), Some("staff_owner")))
         .map_err(|e| crate::words::from_db(&e))).expect("approval threshold");
+    crate::signin_tests::hire(&app, "return_manager", "Return manager", mb_auth::RolePreset::Manager, "3579");
+    crate::ipc::login_on(&app, "return_manager".to_owned(), "3579".to_owned()).expect("manager needs owner approval");
     assert!(crate::refunds::offer_on(&app, id.clone()).expect("offer").needs_approval);
     assert_eq!(send(&app, &id, &[("cash", 1000)], "threshold").expect_err("approval first").code, "void.needs_approval");
     crate::refunds::return_closed_bill_on(&app, id.clone(), amounts(&[("cash", 1000)]), "Returned meal".to_owned(),
