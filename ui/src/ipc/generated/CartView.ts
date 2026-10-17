@@ -69,7 +69,7 @@ kitchenTicketOff: boolean,
 /**
  * Enter on an empty search completes the bill directly, when enabled by the shop.
  */
-enterCompletesBill: boolean,
+enterCompletesBill: boolean, 
 /**
  * The billing screen shows the table grid; off, the orders being cooked take its room.
  */
