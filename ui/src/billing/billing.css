@@ -1138,6 +1138,7 @@ input.mb-cartline__qty {
   min-width: 0;
 }
 
+
 /* The box is one fixed width, so the row looks the same with or without an answer beside it. */
 .mb-payment__row .mb-field {
   flex: none;
@@ -1410,4 +1411,10 @@ input.mb-cartline__qty {
 /* Paid by: the segment sits first; Decline and Settle keep to the right. */
 .mb-settle__modes {
   margin-right: auto;
+}
+
+.mb-cartline__price-input {
+  width: 10ch;
+  text-align: right;
+  font-family: var(--font-num);
 }

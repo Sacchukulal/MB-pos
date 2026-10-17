@@ -556,6 +556,7 @@ macro_rules! commands {
             $crate::ipc::reload_current_order,
             $crate::ipc::cart_add,
             $crate::ipc::cart_set_qty,
+            $crate::ipc::cart_set_price,
             $crate::ipc::cart_remove,
             $crate::ipc::cart_clear,
             $crate::ipc::cart_set_order_type,
@@ -1188,6 +1189,37 @@ pub fn cart_cash_given(
         &handle,
         take_payment(&app, "Cash".to_owned(), given.paise(), None),
     )
+}
+
+/// Override only this bill's frozen unit price; menu authority prevents bypassing discount limits.
+pub fn cart_set_price_on(app: &App, index: usize, price: String, expected_line: Option<String>) -> UiResult<CartView> {
+    let _one_at_a_time = app.begin_action();
+    guard::require(app, Permission::BillCreate)?;
+    guard::require(app, Permission::MenuManage)?;
+    crate::correction_draft::require_edit_access(app)?;
+    refresh_for_line_edit(app, Some(index), expected_line.as_deref())?;
+    let price = mb_core::Money::parse(price.trim())
+        .map_err(|_| UiError::new("cart.price", "Enter a valid unit price."))?;
+    if price.is_negative() {
+        return Err(UiError::new("cart.price", "The price cannot be negative."));
+    }
+    app.with_cart_mut(|state| {
+        let mut lines = state.cart.lines().to_vec();
+        let line = lines.get_mut(index)
+            .ok_or_else(|| UiError::new("cart.line", "That line is no longer on the bill."))?;
+        line.snapshot.unit_price = price;
+        let mut proposed = state.clone();
+        proposed.cart = mb_core::Cart::from_lines(lines)
+            .map_err(|e| UiError::new("cart.price", e.to_string()))?;
+        let view = cart_view(&proposed, &app.shop_config())?;
+        *state = proposed;
+        Ok(view)
+    })
+}
+
+#[tauri::command]
+pub fn cart_set_price(app: tauri::State<'_, App>, handle: tauri::AppHandle, index: usize, price: String, expected_line: Option<String>) -> UiResult<CartView> {
+    shown(&handle, cart_set_price_on(&app, index, price, expected_line))
 }
 
 // Money off a bill.

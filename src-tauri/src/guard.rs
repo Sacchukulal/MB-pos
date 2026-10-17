@@ -63,6 +63,7 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("reload_current_order", Access::Needs(Permission::BillCreate)),
     ("cart_add", Access::Needs(Permission::BillCreate)),
     ("cart_set_qty", Access::Needs(Permission::BillCreate)),
+    ("cart_set_price", Access::Needs(Permission::MenuManage)),
     ("cart_remove", Access::Needs(Permission::BillCreate)),
     ("cart_clear", Access::Needs(Permission::BillCreate)),
     ("cart_set_order_type", Access::Needs(Permission::BillCreate)),

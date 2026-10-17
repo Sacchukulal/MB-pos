@@ -472,6 +472,20 @@ describe('the payment modes (2026-08-23, one row 2026-09-03)', () => {
     expect(screen.queryByRole('button', { name: /^UPI/ })).toBeNull();
   });
 
+  it('keeps corrected bill payments compact with an additional cash field', () => {
+    const corrected = {
+      ...cartWith({ change: 9000n, payments: 2 }),
+      isCorrection: true,
+      paid: money(69000n),
+    };
+    const view = render(row({ cart: corrected, cash: '45' }));
+    expect(screen.getByRole('textbox', { name: 'Additional cash' })).toHaveValue('45');
+    expect(screen.queryByText(/Previous payments are retained/)).toBeNull();
+    expect(screen.getByRole('status', { name: 'Return 90.00' })).toBeTruthy();
+    view.rerender(row({ cart: { ...corrected, paid: money(50000n), change: money(0n), balance: money(10000n) } }));
+    expect(screen.getByRole('status', { name: 'Still to pay 100.00' })).toBeTruthy();
+  });
+
   it('moves the light rather than taking money', () => {
     const onPick = vi.fn();
     render(row({ onPick }));

@@ -73,6 +73,37 @@ fn price_of(app: &App, id: &str) -> String {
 }
 
 #[test]
+fn bill_price_override_recalculates_without_changing_menu_and_rejects_stale_edits() {
+    let scratch = Scratch::new("bill_price_override");
+    let app = a_shop_with_a_menu(&scratch);
+    let before = crate::ipc::cart_add_on(&app, "itm_tea".into(), Some("2".into()), None).expect("add tea");
+    let changed = crate::ipc::cart_set_price_on(&app, 0, "15.50".into(), before.lines[0].edit_token.clone()).expect("override");
+    assert_eq!(changed.lines[0].unit_price.paise, 1550);
+    assert_eq!(changed.lines[0].gross.paise, 3100);
+    assert_ne!(changed.bill.grand_total, before.bill.grand_total);
+    assert_eq!(price_of(&app, "itm_tea"), "20.00");
+    assert!(crate::ipc::cart_set_price_on(&app, 0, "10".into(), before.lines[0].edit_token.clone()).is_err());
+    assert!(crate::ipc::cart_set_price_on(&app, 0, "-1".into(), changed.lines[0].edit_token.clone()).is_err());
+    let added = crate::ipc::cart_add_on(&app, "itm_tea".into(), Some("1".into()), None).expect("add at menu price");
+    assert_eq!(added.lines.len(), 2, "menu-priced additions do not merge into the override");
+    assert_eq!(added.lines[1].unit_price.paise, 2000);
+}
+
+#[test]
+fn new_menu_items_reject_normalised_duplicate_names() {
+    let scratch = Scratch::new("duplicate_menu_name");
+    let app = a_shop_with_a_menu(&scratch);
+    let edit = MenuEdit {
+        id: "itm_duplicate".into(), name: "  MASALA   dosa  ".into(), category_id: None,
+        price: "10".into(), tax_class_id: None, price_basis: None, hsn: None,
+        short_code: None, cost: None, is_open_price: false, is_available: true,
+        course: None, prep_minutes: None,
+    };
+    assert!(save_item_on(&app, edit).is_err());
+    assert_eq!(menu_rows_on(&app).expect("rows").len(), 3);
+}
+
+#[test]
 fn inline_item_edits_preserve_other_fields_and_refuse_deleted_items() {
     let scratch = Scratch::new("inline_menu");
     let app = a_shop_with_a_menu(&scratch);

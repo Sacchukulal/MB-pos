@@ -294,9 +294,9 @@ describe('a table name loads its order; anything else falls through', () => {
     expect(state.mode.kind).toBe('searching');
   });
 
-  it('falls through to item search when it does not', () => {
+  it('asks the screen to confirm quick-add when no table or suggestion matches', () => {
     const [, commands] = run(initial(), floor(table('6', true)), type('dosa'), press('Enter'));
-    expect(commands).toEqual([]);
+    expect(commands).toEqual([{ do: 'quick-add', text: 'dosa' }]);
   });
 
   it('matches a table EXACTLY, so "1" is not table 12', () => {

@@ -66,6 +66,7 @@ export type Event =
 /** What the screen must actually go and do. */
 export type Command =
   | { do: 'search'; text: string }
+  | { do: 'quick-add'; text: string }
   | { do: 'add-item'; itemId: string; qty: string }
   | { do: 'open-table'; tableId: string }
   | { do: 'open-order'; orderId: string }
@@ -180,7 +181,7 @@ export function reduce(state: State, event: Event): [State, Command[]] {
 
     case 'typed': {
       return [
-        { ...state, text: event.text, mode: { kind: 'searching' } },
+        { ...state, text: event.text, mode: { kind: 'searching' }, suggestions: [], highlighted: -1 },
         [{ do: 'search', text: event.text }],
       ];
     }
@@ -373,8 +374,8 @@ function key(state: State, pressed: string): [State, Command[]] {
       if (item) return ask(state, item);
     }
 
-    // Not a table and nothing suggested: the search is already happening.
-    if (state.text !== '') return [state, []];
+    // Confirm the search result before offering to create an unknown item.
+    if (state.text.trim() !== '') return [state, [{ do: 'quick-add', text: state.text.trim() }]];
 
     // ENTER ON AN EMPTY BOX. The kitchen ticket first — the order then waits in the processing
     // orders — and the bill once the kitchen has everything.

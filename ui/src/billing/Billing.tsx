@@ -56,6 +56,8 @@ import { OrderConflict } from './OrderConflict';
 import { Totals } from './Totals';
 import { Before } from '../preview/Before';
 import { keep, remember } from '../remember';
+import { QuickAddItem } from './QuickAddItem';
+import { LinePrice } from './LinePrice';
 
 import './billing.css';
 
@@ -86,6 +88,9 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   /** The orders that landed while this screen was open: their cards beat for a moment. */
   const arrived = useArrivals(floor, { beat: cart?.arrivalBeat ?? true, sound: cart?.arrivalBeep ?? false });
   const [menu, setMenu] = useState<readonly MenuItemView[]>([]);
+  const [quickAddName, setQuickAddName] = useState<string | null>(null);
+
+  const searchText = useRef('');
   // The grid is unfiltered: the search box is for the menu, and a table is reached by typing
   // its number and pressing Enter.
   const filter = '';
@@ -147,6 +152,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
   // The reducer is PURE, and the commands ride in the state until they are performed.
   const [keys, dispatch] = useReducer(reduceCarried, undefined, carry);
+  searchText.current = keys.text;
   /** The number of the last command performed; a render re-run must not perform it again. */
   const performed = useRef(0);
 
@@ -608,10 +614,22 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           }
           try {
             const items = await call('search_items', { text: command.text, mode: null });
+            if (searchText.current !== command.text) return;
             dispatch({ kind: 'suggestions', items });
           } catch {
+            if (searchText.current !== command.text) return;
             dispatch({ kind: 'suggestions', items: [] });
           }
+          return;
+        }
+        case 'quick-add': {
+          if (!may('menu.manage')) return;
+          try {
+            const items = await call('search_items', { text: command.text, mode: null });
+            if (searchText.current.trim() !== command.text) return;
+            if (items.length) dispatch({ kind: 'suggestions', items });
+            else setQuickAddName(command.text);
+          } catch (cause) { report(cause); }
           return;
         }
         case 'add-item':
@@ -645,7 +663,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
           return;
       }
     },
-    [addItem, completeBill, joinTable, newOrder, openOrderById, openTableById, printKitchen, setOrderType],
+    [addItem, completeBill, joinTable, newOrder, openOrderById, openTableById, printKitchen, setOrderType, may, report],
   );
 
   // Perform everything waiting, in the order it was asked for, then say so.
@@ -772,6 +790,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       const editing =
         event.target instanceof HTMLInputElement ||
         event.target instanceof HTMLTextAreaElement;
+      if (event.isComposing || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
       // Only the boxes that belong to the keyboard engine feed it.
       if (editing && (event.target as HTMLElement).dataset.keys !== 'engine') return;
       // A character typed anywhere on the screen lands in the search box: after a tap on a
@@ -860,6 +879,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
               onChange={(event) => {
                 // The timing, for the scan-or-person question.
                 noteKeystroke(event.target.value);
+                searchText.current = event.target.value;
                 dispatch({ kind: 'typed', text: event.target.value });
               }}
             />
@@ -1076,7 +1096,9 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
               return (
               <div className={cx('mb-cartline', more && 'mb-cartline--more')} key={line.index}>
                 <span className="mb-cartline__name">{line.name}</span>
-                <span className="mb-cartline__amount" title={`${line.qty} × ${line.unitPrice.text}`}>{line.amount.text}</span>
+                {may('menu.manage') ? <LinePrice line={line} onSaved={setCart}
+                  overridden={menu.some((item) => item.id === line.itemId && item.price.paise !== line.unitPrice.paise)} />
+                  : <span className="mb-cartline__amount" title={`${line.qty} × ${line.unitPrice.text}`}>{line.amount.text}</span>}
                 {more ? (
                   <div className="mb-cartline__about">
                     {/* How the money was reached, the extras on it, and any money off. */}
@@ -1534,6 +1556,10 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             void refreshFloor();
           }} />
       ) : null}
+      {quickAddName !== null ? <QuickAddItem initialName={quickAddName}
+        onClose={() => { setQuickAddName(null); searchBox.current?.focus(); }}
+        onMenu={setMenu}
+        onAdded={(fresh) => { setCart(fresh); setQuickAddName(null); dispatch({ kind: 'typed', text: '' }); searchBox.current?.focus(); }} /> : null}
     </Page>
   );
 }
@@ -1658,8 +1684,8 @@ export function PaymentModes({
       */}
       <MoneyInput
         ref={cashBox}
-        aria-label="Cash given"
-        placeholder="Cash given"
+        aria-label={cart?.isCorrection ? 'Additional cash' : 'Cash given'}
+        placeholder={cart?.isCorrection ? 'Additional cash' : 'Cash given'}
         value={cash}
         onChange={onCash}
         onBlur={onCashDone}

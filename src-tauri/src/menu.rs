@@ -226,6 +226,15 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
                 let before = repos.menu().find_item(&ItemId::new(edit.id.clone()))?;
+                // Both Menu and billing quick-add use this transaction, so concurrent
+                // creates cannot slip past the name check in the dialog.
+                if before.is_none() {
+                    let normalise = |name: &str| name.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+                    let wanted = normalise(&edit.name);
+                    if repos.menu().list_items(OUTLET, false)?.iter().any(|item| normalise(&item.name) == wanted) {
+                        return Err(mb_db::DbError::invariant("An item with that name already exists. Use the existing menu item."));
+                    }
+                }
 
                 // The slab: the one chosen; else, for an item that was on its category's or
                 // the shop's rate, the rate of the category it is in now; else the item's own.

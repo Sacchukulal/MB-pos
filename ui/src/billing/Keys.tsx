@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Input, Modal, NumberInput, Pick, Page, PageHeader, SectionHeader, cx, onlyAmount } from '../kit';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
-import { SHORTCUTS, type Mode } from './keyboard';
+import { SHORTCUTS, stepQuantity, type Mode } from './keyboard';
 
 /** The menu items that match what was typed, under the search box. */
 export function Suggestions({
@@ -38,7 +38,10 @@ export function Suggestions({
             aria-selected={index === highlighted}
             className={cx('mb-sheet__item', 'mb-suggestion')}
             // Touch reaches the same place Enter does.
-            onClick={() => onPick(index)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onPick(index);
+            }}
           >
             <span className="mb-suggestion__name">{item.name}</span>
             <span className="mb-suggestion__price">{item.price.text}</span>
@@ -96,6 +99,17 @@ export function HowMany({
         aria-label="Quantity"
         value={mode.text}
         onChange={(event) => onChange(onlyAmount(event.target.value))}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (!['Enter', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.key === 'Enter') {
+            if (!event.repeat) onAdd();
+          } else {
+            onChange(stepQuantity(mode.text, event.key === 'ArrowUp' ? 1 : -1));
+          }
+        }}
       />
     </Modal>
   );

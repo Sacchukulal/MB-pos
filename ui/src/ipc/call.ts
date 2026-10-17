@@ -162,6 +162,7 @@ export interface Commands {
     returns: CartView;
   };
   cart_set_qty: { args: { index: number; qty: string; reason?: string; expectedLine?: string }; returns: CartView };
+  cart_set_price: { args: { index: number; price: string; expectedLine?: string }; returns: CartView };
   cart_remove: { args: { index: number; expectedLine?: string }; returns: CartView };
   cart_clear: { args: { keepType: boolean }; returns: CartView };
   cart_set_order_type: { args: { orderType: string }; returns: CartView };

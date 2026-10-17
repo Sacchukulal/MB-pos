@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CartView } from '../src/ipc/generated/CartView';
 import type { Pushed } from '../src/ipc/generated/Pushed';
@@ -45,6 +46,107 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+it('adds the selected quantity with Enter in the quantity popup exactly once', async () => {
+  const implementation = call.getMockImplementation()!;
+  call.mockImplementation((command: string, args: unknown) => {
+    if (command === 'scanned') return Promise.resolve({ what: 'typing' });
+    if (command === 'search_items') return Promise.resolve([
+      { id: 'egg', name: 'Egg HalfFry', price: money, rateLabel: '5%', category: null },
+    ]);
+    return implementation(command, args);
+  });
+  await show();
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'egg' } });
+  fireEvent.click(await screen.findByRole('option', { name: /Egg HalfFry/ }));
+  const input = await screen.findByRole('textbox', { name: 'Quantity' });
+  expect(input).toHaveFocus();
+  fireEvent.keyDown(input, { key: 'ArrowUp' });
+  expect(input).toHaveValue('2');
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
+  expect(input).toHaveValue('1');
+  fireEvent.change(input, { target: { value: '3' } });
+  fireEvent.keyDown(input, { key: 'Enter', repeat: true });
+  expect(call.mock.calls.some(([command]) => command === 'cart_add')).toBe(false);
+  await userEvent.setup().keyboard('{Enter}');
+  await waitFor(() => expect(call).toHaveBeenCalledWith('cart_add', {
+    itemId: 'egg', qty: '3', note: null,
+  }));
+  expect(call.mock.calls.filter(([command]) => command === 'cart_add')).toHaveLength(1);
+  expect(call.mock.calls.some(([command]) => command === 'complete_bill' || command === 'print_kitchen_ticket')).toBe(false);
+});
+
+it('edits a unit price on this bill through a separate command', async () => {
+  await show();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit unit price for Masala Dosa' }));
+  const input = await screen.findByLabelText('Unit price for Masala Dosa');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(input).toHaveFocus();
+  fireEvent.change(input, { target: { value: '125.50' } });
+  input.focus();
+  await userEvent.setup().keyboard('{Enter}');
+  await waitFor(() => expect(call).toHaveBeenCalledWith('cart_set_price', {
+    index: 0, price: '125.50', expectedLine: 'original-line',
+  }));
+  expect(call.mock.calls.some(([command]) => command === 'save_menu_item')).toBe(false);
+});
+
+it('saves an inline price on blur using the original line token', async () => {
+  await show();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit unit price for Masala Dosa' }));
+  await phoneChangedLine();
+  const input = screen.getByRole('textbox', { name: 'Unit price for Masala Dosa' });
+  fireEvent.change(input, { target: { value: '125.50' } });
+  fireEvent.blur(input);
+  await waitFor(() => expect(call).toHaveBeenCalledWith('cart_set_price', {
+    index: 0, price: '125.50', expectedLine: 'original-line',
+  }));
+  expect(call.mock.calls.filter(([command]) => command === 'cart_set_price')).toHaveLength(1);
+});
+
+it.each(['escape', 'unchanged', 'empty'])('closes an inline price without saving when %s', async (action) => {
+  await show();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit unit price for Masala Dosa' }));
+  const input = screen.getByRole('textbox', { name: 'Unit price for Masala Dosa' });
+  if (action === 'escape') {
+    fireEvent.change(input, { target: { value: '125' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+  } else {
+    if (action === 'empty') fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+  }
+  expect(screen.queryByRole('textbox', { name: 'Unit price for Masala Dosa' })).toBeNull();
+  expect(call.mock.calls.some(([command]) => command === 'cart_set_price' || command === 'cart_clear')).toBe(false);
+});
+it('creates an unknown search item using Menu save and adds one to the cart', async () => {
+  const implementation = call.getMockImplementation()!;
+  call.mockImplementation((command: string, args: unknown) => {
+    if (command === 'scanned') return Promise.resolve({ what: 'typing' });
+    if (command === 'menu_categories') return Promise.resolve([{ id: 'cat_food', name: 'Food', isActive: true }]);
+    if (command === 'tax_page') return Promise.resolve({ shopSlabId: 'tax_food', shopRate: '5', shopBasis: 'exclusive', chargesGst: true,
+      slabs: [{ id: 'tax_food', rate: '5%', priceWords: 'Added on top' }] });
+    if (command === 'menu_rows' || command === 'save_menu_item') return Promise.resolve([]);
+    return implementation(command, args);
+  });
+  await show();
+  const search = screen.getByRole('searchbox');
+  fireEvent.change(search, { target: { value: 'New sandwich' } });
+  await act(async () => { fireEvent.keyDown(search, { key: 'Enter' }); });
+  const dialog = await screen.findByRole('dialog', { name: 'Add new menu item' });
+  expect(within(dialog).getByLabelText('Item name')).toHaveValue('New sandwich');
+  expect(await within(dialog).findByText(/Default tax: 5%/)).toBeInTheDocument();
+  const price = within(dialog).getByLabelText('Price');
+  expect(price).toHaveFocus();
+  fireEvent.change(price, { target: { value: '80' } });
+  price.focus();
+  await userEvent.setup().keyboard('{Enter}');
+  await waitFor(() => expect(call).toHaveBeenCalledWith('cart_add', expect.objectContaining({ qty: '1', note: null })));
+  const saves = call.mock.calls.filter(([command]) => command === 'save_menu_item');
+  expect(saves).toHaveLength(1);
+  expect(saves[0]![1].edit).toMatchObject({ name: 'New sandwich', price: '80', categoryId: 'cat_food', taxClassId: null, priceBasis: null });
+  expect(call).toHaveBeenCalledWith('cart_add', { itemId: saves[0]![1].edit.id, qty: '1', note: null });
+  expect(call.mock.calls.some(([command]) => command === 'cart_set_price')).toBe(false);
+});
 
 it('reverts the latest bill with Ctrl+Z and completes through the existing correction review', async () => {
   const corrected = { ...cart, isCorrection: true, billNumber: 'A/7' };

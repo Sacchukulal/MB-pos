@@ -545,6 +545,8 @@ pub struct CartView {
 pub struct CartLineView {
     pub index: usize,
     #[ts(optional)]
+    pub item_id: Option<String>,
+    #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edit_token: Option<String>,
     pub name: String,
@@ -722,6 +724,7 @@ pub(crate) fn bill_lines(bill: &Bill) -> Vec<CartLineView> {
         .map(|(index, billed)| CartLineView {
             index,
             edit_token: None,
+            item_id: Some(billed.snapshot.item_id.as_str().to_owned()),
             name: billed.snapshot.name.clone(),
             note: billed.note.clone(),
             qty: billed.qty.to_string(),
