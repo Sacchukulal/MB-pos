@@ -16,7 +16,7 @@
  * ui/package-lock.json together, runs the same checks CI runs, commits "release: vX.Y.Z",
  * tags vX.Y.Z and pushes main + tag. Nobody edits a version number by hand.
  */
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,17 +34,35 @@ const files = {
   pkgLock: "ui/package-lock.json",
 };
 const read = (f) => readFileSync(join(root, f), "utf8");
-const sh = (cmd, cwd = root) => { console.log(`\n$ ${cmd}`); execSync(cmd, { cwd, stdio: "inherit" }); };
-const out = (cmd) => execSync(cmd, { cwd: root, encoding: "utf8" }).trim();
+function run(command, cwd = root) {
+  const [file, ...argv] = command;
+  if (process.platform !== "win32") return execFileSync(file, argv, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  // Keep native tools hidden and drain both streams through the workspace helper.
+  const quote = (value) => "'" + value.replaceAll("'", "''") + "'";
+  const helper = join(root, "..", "tools", "Invoke-HiddenCommand.ps1");
+  const script = `$ProgressPreference = 'SilentlyContinue'; & ${quote(helper)} -FilePath ${quote(file)} -ArgumentList @(${argv.map(quote).join(', ')}); exit $LASTEXITCODE`;
+  return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
+    cwd, encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024,
+  });
+}
+const sh = (cmd, cwd = root) => { console.log(`\n$ ${cmd.join(' ')}`); const result = run(cmd, cwd); if (result) process.stdout.write(result); };
+const out = (cmd) => run(cmd).trim();
 const die = (m) => { console.error(`\nrelease: ${m}`); process.exit(1); };
 
 const current = read(files.cargo).match(/^\[workspace\.package\][\s\S]*?^version = "(\d+\.\d+\.\d+)"/m)?.[1];
 if (!current) die("could not find [workspace.package] version in Cargo.toml");
 
 function gates() {
-  sh("cargo clippy --workspace --all-targets --locked -- -D warnings");
-  sh("cargo test --workspace --locked");
-  sh("npm run check", join(root, "ui"));
+  sh(["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"]);
+  sh(["cargo", "test", "--workspace", "--locked"]);
+  // Expand the package's check scripts so Windows never launches npm.cmd.
+  const ui = join(root, "ui");
+  sh([process.execPath, "node_modules/typescript/bin/tsc", "--noEmit"], ui);
+  for (const script of ["check-tokens", "check-layout", "check-fields", "check-ids", "check-no-money", "check-view-names"]) {
+    sh([process.execPath, `scripts/${script}.mjs`], ui);
+  }
+  sh([process.execPath, "../scripts/audit-wiring.mjs"], ui);
+  sh([process.execPath, "node_modules/vitest/vitest.mjs", "run"], ui);
 }
 
 if (flag("--check")) { gates(); console.log("\nrelease: all gates green."); process.exit(0); }
@@ -60,15 +78,15 @@ const next = `${ma}.${mi}.${pa}`;
 
 const cmp = (a, b) => { const x = a.split(".").map(Number), y = b.split(".").map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 if (cmp(next, current) <= 0) die(`${next} is not above the current ${current}. Versions never go backwards.`);
-if (out("git tag -l v" + next)) die(`tag v${next} already exists`);
+if (out(["git", "tag", "-l", "v" + next])) die(`tag v${next} already exists`);
 
-const branch = out("git branch --show-current");
+const branch = out(["git", "branch", "--show-current"]);
 if (branch !== "main") die(`you are on "${branch}"; releases go from main`);
-if (!flag("--dry-run") && out("git status --porcelain")) die("the working tree is not clean. Commit or stash first.");
+if (!flag("--dry-run") && out(["git", "status", "--porcelain"])) die("the working tree is not clean. Commit or stash first.");
 
-const lastTag = out("git tag --sort=-creatordate").split(/\r?\n/)[0] || "";
+const lastTag = out(["git", "tag", "--sort=-creatordate"]).split(/\r?\n/)[0] || "";
 if (lastTag) {
-  const when = out(`git log -1 --format=%cs ${lastTag}`);
+  const when = out(["git", "log", "-1", "--format=%cs", lastTag]);
   // local date, the same calendar git stamps the tag with (%cs); UTC would say yesterday until 05:30 IST
   const d = new Date();
   const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -93,7 +111,7 @@ for (const [f, fn] of Object.entries(edits)) {
 if (flag("--dry-run")) { console.log("\nrelease: dry run, nothing written."); process.exit(0); }
 
 // Cargo.lock: re-resolve only the workspace's own crates, nothing from crates.io moves.
-sh("cargo update --workspace --offline");
+sh(["cargo", "update", "--workspace", "--offline"]);
 
 // every file agrees?
 const seen = {
@@ -109,9 +127,9 @@ for (const [k, v] of Object.entries(seen)) if (v !== next) die(`${k} says ${v}, 
 if (!flag("--skip-tests")) gates();
 
 const notes = opt("--notes") ?? `Magic Bill ${next}`;
-sh(`git add ${Object.values(files).join(" ")}`);
-sh(`git commit -q -m "release: v${next}"`);
-sh(`git tag -a v${next} -m "${notes.replace(/"/g, '\\"')}"`);
+sh(["git", "add", ...Object.values(files)]);
+sh(["git", "commit", "-q", "-m", `release: v${next}`]);
+sh(["git", "tag", "-a", `v${next}`, "-m", notes]);
 if (flag("--no-push")) { console.log(`\nrelease: v${next} committed and tagged, not pushed.`); process.exit(0); }
-sh(`git push origin main v${next}`);
+sh(["git", "push", "origin", "main", `v${next}`]);
 console.log(`\nrelease: v${next} pushed. Watch it with:  gh run watch`);
