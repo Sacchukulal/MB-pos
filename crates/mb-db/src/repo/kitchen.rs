@@ -241,7 +241,7 @@ impl<'a> KitchenRepo<'a> {
     pub fn close_order(&self, order_id: &str) -> Result<usize, DbError> {
         let changed = self.tx.execute(
             "UPDATE kitchen_deliveries SET state = 'closed'
-              WHERE order_id = ?1 AND state NOT IN ('bumped', 'closed')",
+              WHERE order_id = ?1 AND state <> 'closed'",
             rusqlite::params![order_id],
         )?;
         Ok(changed)
@@ -251,9 +251,31 @@ impl<'a> KitchenRepo<'a> {
     pub fn close_finished(&self, outlet: &str) -> Result<usize, DbError> {
         let changed = self.tx.execute(
             "UPDATE kitchen_deliveries SET state = 'closed'
-              WHERE outlet_id = ?1 AND state NOT IN ('bumped', 'closed')
-                AND order_id IN (SELECT id FROM orders WHERE state <> 'open')",
+              WHERE outlet_id = ?1 AND state <> 'closed'
+                AND order_id IN (SELECT id FROM orders WHERE state NOT IN ('open', 'draft'))",
             rusqlite::params![outlet],
+        )?;
+        Ok(changed)
+    }
+
+    /// Repair old completed deliveries without touching live orders or cancellations
+    /// awaiting acknowledgement. Paid-before-preparation tickets last only this day.
+    pub fn reconcile_finished(
+        &self,
+        outlet: &str,
+        keep_paid: bool,
+        day: mb_core::BusinessDay,
+    ) -> Result<usize, DbError> {
+        let changed = self.tx.execute(
+            "UPDATE kitchen_deliveries SET state = 'closed'
+             WHERE outlet_id = ?1 AND state <> 'closed'
+               AND order_id IN (
+                 SELECT id FROM orders WHERE outlet_id = ?1
+                   AND (state = 'voided' OR
+                        (state = 'settled' AND (?2 = 0 OR business_day < ?3)))
+                   AND NOT EXISTS (SELECT 1 FROM order_edits WHERE order_id = orders.id)
+               )",
+            rusqlite::params![outlet, keep_paid, day.days_since_epoch()],
         )?;
         Ok(changed)
     }

@@ -42,6 +42,8 @@ import { HelpSheet, HowMany, Suggestions, TableBox } from './Keys';
 import { carry, ORDER_TYPES, reduceCarried, stepQuantity, type Command as KeyCommand } from './keyboard';
 import { PutOnAccount } from '../credit/Credit';
 import { ReasonDialog } from '../corrections/Reason';
+import { Correction } from '../reports/Bills';
+import type { BillsView } from '../ipc/generated/BillsView';
 import { ApprovalFields } from '../corrections/Approval';
 import { DiscountDialog } from './Discount';
 import { Processing, ProcessingHead, processingOrders } from './Processing';
@@ -95,6 +97,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   const [returning, setReturning] = useState(false);
   const [saveReview, setSaveReview] = useState<CorrectionSaveView | null>(null);
   const [discardingCorrection, setDiscardingCorrection] = useState(false);
+  const [reverting, setReverting] = useState<BillsView | null>(null);
   /** The line whose quantity is being typed, and what has been typed so far. */
   const [typingQty, setTypingQty] = useState<{ index: number; text: string; originalQty: string; expectedLine: string | undefined } | null>(null);
   /** The reason for cancelling a parked order. */
@@ -408,7 +411,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   /**
    * The delta only — never the whole order. The ticket parks the order, which then waits under
    * Processing orders; the counter is clear for the next customer at once. With the ticket
-   * switched off in Settings this is "Save bill": Rust does everything but the paper.
+   * switched off in Settings this saves the table/order without printing KOT.
    */
   const printKitchen = useCallback(async () => {
     try {
@@ -418,7 +421,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       // than on the next tick fifteen seconds later.
       await refreshFloor();
       searchBox.current?.focus();
-      toast.show('ok', kitchenOff ? 'Bill saved.' : 'KOT sent.');
+      toast.show('ok', kitchenOff ? 'Order saved.' : 'KOT sent.');
     } catch (cause) {
       // A dine-in cart with no table: ask for the number, in its own box.
       if (isUiError(cause) && cause.code === 'bill.no_table') setPickingTable('kitchen');
@@ -474,9 +477,10 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       // Whatever is still owing goes down in the mode that is lit — Rust takes it and settles
       // in one command.
       const number = await call('complete_bill', { mode: payMode });
+      // Settlement is committed: refresh the list even if reading the new cart fails.
+      await refreshFloor();
       setCart(await call('current_cart'));
       freshMoney();
-      await refreshFloor();
       toast.show('ok', `Bill ${number} settled.`);
     } catch (cause) {
       if (isUiError(cause) && cause.code === 'bill.return_due') { setSaveReview(null); setReturning(true); }
@@ -672,6 +676,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       // From the ORDER'S OWN LEDGER, so Enter on an empty box picks the right branch after a
       // merge and after a restart — not from anything this screen is remembering.
       kitchenUpToDate: cart?.kitchenUpToDate ?? true,
+      enterCompletesBill: cart?.enterCompletesBill ?? false,
     });
   }, [cart]);
 
@@ -722,6 +727,48 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
   // first.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
+        const target = event.target;
+        // Preserve native text undo, including inside the search box.
+        if (target instanceof HTMLElement && (target.isContentEditable ||
+          target instanceof HTMLTextAreaElement ||
+          (target instanceof HTMLInputElement && (target !== searchBox.current || target.value !== '')))) return;
+        if (event.repeat || event.isComposing || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+        if (!cart || acting || !cart.isEmpty || cart.orderId || cart.isCorrection || keys.mode.kind !== 'searching' || !may('bill.revert')) return;
+        event.preventDefault();
+        act(async () => {
+          try {
+            const bills = await call('bills', { filter: { period: null, query: null, cashier: null, state: null, mode: null } });
+            const last = bills.rows[0];
+            if (!bills.canRevert || !last || last.state !== 'settled' || last.returned || last.dayClosed) {
+              toast.show('info', 'The latest bill today is not available to revert.');
+              return;
+            }
+            setReverting(bills);
+          } catch (cause) { report(cause); }
+        });
+        return;
+      }
+      // Holding Enter must not complete a bill and then open another processing order.
+      if (event.key === 'Enter' && event.repeat) {
+        event.preventDefault();
+        return;
+      }
+      if (event.key === 'F1' || event.key === 'F2') {
+        if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+        event.preventDefault();
+        if (event.repeat || event.isComposing || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+        if (!cart || acting || keys.mode.kind === 'quantity') return;
+        if (event.key === 'F1') {
+          if (!cart.isEmpty) act(printKitchen);
+        } else {
+          act(async () => {
+            if (!cart.isEmpty && cashGiven.trim() !== '') await commitCash(cashGiven);
+            await completeBill();
+          });
+        }
+        return;
+      }
       const editing =
         event.target instanceof HTMLInputElement ||
         event.target instanceof HTMLTextAreaElement;
@@ -767,7 +814,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handledAsScan, mark]);
+  }, [handledAsScan, mark, cart, acting, keys.mode.kind, act, printKitchen, commitCash, cashGiven, completeBill, may, toast, report]);
 
   if (!inApp()) {
     return (
@@ -928,7 +975,6 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             <Scroller inset className="mb-processing__body">
               <Processing
                 orders={processing}
-                arrived={arrived}
                 highlighted={keys.mode.kind === 'processing' ? keys.mode.index : -1}
                 onOpen={openTable}
               />
@@ -957,14 +1003,6 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
       {/* THE CART IS PERMANENT. */}
       <div className="mb-billing__cart">
-        {cart?.isCorrection ? (
-          <div className="mb-cart__floor">
-            <p>Editing bill {cart.billNumber}. The issued bill stays unchanged until you save.</p>
-            <Button size="sm" disabled={acting} onClick={() => setDiscardingCorrection(true)}>Discard changes</Button>
-            <Button size="sm" disabled={acting} onClick={() => act(newOrder)}>Save for later</Button>
-          </div>
-        ) : null}
-
         {/* A very long bill says so. */}
         {cart && cart.lengthSays ? (
           <p className="mb-cart__long">{cart.lengthSays}</p>
@@ -1002,26 +1040,28 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
               {cart.table ? `Table ${cart.table}` : cart.orderType}
             </span>
             {cart.billNumber ? (
-              <span className="mb-cart__no">{cart.billNumber}</span>
+              <span className="mb-cart__no" title={cart.isCorrection ? 'Editing this bill. Complete bill keeps the same number.' : undefined}>
+                {cart.isCorrection ? 'Editing · ' : ''}{cart.billNumber}
+              </span>
             ) : cart.token ? (
               <span className="mb-cart__no">#{cart.token}</span>
             ) : null}
             {/* The small lock for the ← → keys, beside the bill they would change. */}
             {cart.orderTypeLocked ? null : (
               <Button
-                variant="quiet"
+                variant={arrowsLocked ? 'primary' : 'secondary'}
                 size="sm"
                 iconOnly
                 className="mb-ordertype__lock"
                 aria-pressed={arrowsLocked}
                 title={
                   arrowsLocked
-                    ? 'The ← → keys are locked. Press to let them change the order type again.'
-                    : 'Lock the ← → keys so they cannot change the order type.'
+                    ? 'Locked — click to let the arrow keys change the order type.'
+                    : 'Unlocked — click to stop the arrow keys changing the order type.'
                 }
                 aria-label={arrowsLocked ? 'Unlock the arrow keys' : 'Lock the arrow keys'}
                 onClick={() => setArrowsLocked((was) => !was)}
-                icon={<Icon name="lock" size="sm" />}
+                icon={<Icon name={arrowsLocked ? 'lock' : 'unlock'} size="lg" />}
               />
             )}
           </div>
@@ -1177,13 +1217,13 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
               </div>
               );
             })
-          ) : (
+          ) : cart?.isCorrection ? (
             <EmptyState
               small
-              title={cart?.isCorrection ? 'All items removed' : 'Nothing on this bill yet'}
-              hint={cart?.isCorrection ? 'Use Return whole bill to review the refund, or add items to continue editing.' : 'Type an item or a table number in the box above.'}
+              title="All items removed"
+              hint="Use Refund entire bill to review the refund, or add items to continue editing."
             />
-          )}
+          ) : null}
         </Scroller>
         </Panel>
 
@@ -1212,7 +1252,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             onClick={() => act(printKitchen)}
             icon={<Icon name={kitchenOff ? 'file' : 'printer'} />}
           >
-            {kitchenOff ? 'Save bill' : 'Print KOT'}
+            {kitchenOff ? (cart?.orderType === 'Dine in' ? 'Save table' : 'Save order') : 'Print KOT'}
           </Button>
           {/* Always live: an empty bill is refused with a sentence, never with a grey button. */}
           <Button
@@ -1222,7 +1262,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
             onClick={() => act(completeBill)}
             icon={<Icon name="check-circle" />}
           >
-            {cart?.isCorrection ? (cart.isEmpty ? 'Return whole bill' : 'Save changes') : 'Complete bill'}
+            {cart?.isCorrection && cart.isEmpty ? 'Refund entire bill' : 'Complete bill'}
           </Button>
 
           <Button
@@ -1245,6 +1285,10 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
 
         {/* The rest, in two lines: the paper first, then what changes the bill. */}
         <div id={moreActionsId} className="mb-actions--more" hidden={!moreActions}>
+          {cart?.isCorrection ? <>
+            <Button size="sm" disabled={acting} onClick={() => setDiscardingCorrection(true)}>Discard changes</Button>
+            <Button size="sm" disabled={acting} onClick={() => act(newOrder)}>Save for later</Button>
+          </> : null}
           <Button size="sm" disabled={!cart || cart.isEmpty} onClick={() => setPreview(true)}>
             Preview bill
           </Button>
@@ -1315,6 +1359,17 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
       ) : null}
 
       {/* The paper, before it is paper. */}
+      {reverting?.rows[0] ? (
+        <Correction pending={{ kind: 'revert', bill: reverting.rows[0] }} approvers={reverting.approvers}
+          onClose={() => setReverting(null)} onFailed={(message, detail) => toast.show('danger', message, detail)}
+          onDone={async () => {
+            setReverting(null);
+            setCart(await call('current_cart'));
+            freshMoney();
+            await refreshFloor();
+            searchBox.current?.focus();
+          }} />
+      ) : null}
       <Before open={preview} onClose={() => setPreview(false)} onPrint={() => act(completeBill)} />
 
       {/* The order is in the books, so cancelling it is a correction. */}

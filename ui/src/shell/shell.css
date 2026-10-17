@@ -181,8 +181,11 @@
 }
 
 .mb-more__body {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 /* On the set-up screen there is no navigation to fill the middle, so something has to. */

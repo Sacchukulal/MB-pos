@@ -67,13 +67,13 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--settings-field)), 1fr));
   gap: var(--space-4);
-  /* Stretched, so the two rules under it can line the boxes up. */
-  align-items: stretch;
+  /* Units stay below their own input without stretching neighbouring fields. */
+  align-items: start;
 }
 
 /* A run of nothing but tick boxes. */
 .mb-settings__fields--ticks {
-  grid-template-columns: repeat(auto-fill, minmax(var(--settings-tick), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--settings-tick)), 1fr));
   gap: var(--space-2) var(--space-4);
 }
 
@@ -98,18 +98,28 @@
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
-  /* A tick box has no label above it, so it drops to where the boxes beside it are. */
-  justify-content: flex-end;
+  /* Labels and controls start together, including fields with unit captions. */
+  justify-content: flex-start;
 }
 
-/*
- * The boxes in a run line up whatever the labels above them do: the field fills the row, the
- * label stays at the top of it and the box sits at the bottom. A two-line label no longer
- * pushes its own box below its neighbour's.
- */
+/* Do not stretch the gap between a label and its input to fill a neighbouring field. */
 .mb-settings__field > .mb-field {
   flex: 1;
-  justify-content: space-between;
+  justify-content: flex-start;
+}
+
+/* Checkboxes have their own rows, never dangling beside a field's unit or label. */
+.mb-settings__fields:not(.mb-settings__fields--ticks) > .mb-settings__field--tick,
+.mb-settings__fields--billing > .mb-settings__field--tick {
+  grid-column: 1 / -1;
+}
+
+.mb-settings__orderchoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  min-height: var(--control-md);
 }
 
 /* A row of buttons takes the whole line, whatever the grid is doing. */

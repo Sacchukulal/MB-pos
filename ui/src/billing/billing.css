@@ -140,14 +140,13 @@
   font-weight: var(--type-label-weight);
 }
 
-/* Lightly there until it is on: a locked row shows a filled lock, a free one a faint one. */
+/* Keep the padlock distinct even beside a long table or bill number. */
 .mb-ordertype__lock {
-  opacity: var(--dim-faint);
+  flex-shrink: 0;
 }
 
-.mb-ordertype__lock:hover,
-.mb-ordertype__lock[aria-pressed='true'] {
-  opacity: 1;
+.mb-ordertype__lock .mb-icon {
+  stroke-width: 2;
 }
 
 /* The table grid — the floor's view of the open orders. */
@@ -1321,21 +1320,29 @@ input.mb-cartline__qty {
 
 .mb-help {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--panel-width), 1fr));
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--gap-group);
+  flex-shrink: 0;
+}
+
+.mb-shortcuts__intro {
+  margin: 0;
+  color: var(--text-muted);
 }
 
 .mb-help__group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  min-width: 0;
 }
 
 .mb-help__row {
   display: grid;
-  grid-template-columns: var(--help-keys-width) 1fr;
-  gap: var(--space-3);
-  align-items: baseline;
+  grid-template-columns: var(--help-keys-width) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+  padding-block: var(--space-3);
+  border-bottom: var(--border-width) solid var(--border);
   font-size: var(--text-sm);
 }
 
@@ -1347,7 +1354,7 @@ input.mb-cartline__qty {
   font-family: var(--font-num);
   font-size: var(--text-xs);
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 /* Putting some of a bill on its own bill. */

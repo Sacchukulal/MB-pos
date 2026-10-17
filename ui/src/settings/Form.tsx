@@ -3,7 +3,7 @@
  * a screen that keeps one section of its own (Day open/close) draws that section with it too.
  */
 
-import { type ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import {
   Card,
@@ -16,6 +16,7 @@ import {
   MoneyInput,
   NumberInput,
   PhoneInput,
+  Radio,
   SectionHeader,
   Select,
 } from '../kit';
@@ -77,6 +78,7 @@ export function Section({
           <div
             className={cx(
               'mb-settings__fields',
+              section.code === 'billing' && 'mb-settings__fields--billing',
               allTicks(settings) && 'mb-settings__fields--ticks',
               allLines(settings) && 'mb-settings__fields--lines',
             )}
@@ -200,10 +202,24 @@ export function Field({
   inLine?: boolean;
   onChange: (value: string) => void;
 }) {
+  const choiceName = useId();
   const hint = setting.help === '' ? undefined : setting.help;
   // On a shared line the heading beside it says "Total"; the control says "Size".
   const shown = inLine ? setting.short : setting.label;
   const body = (() => {
+    // One persisted flag, two exclusive choices: old shops keep their saved mode.
+    if (setting.key === 'billing.kitchen_ticket_off') return (
+      <div className="mb-field">
+        <div className="mb-field__labelrow">
+          <span className="mb-field__label">{setting.label}</span>
+          {hint ? <InfoTip label={`About ${setting.label}`}>{hint}</InfoTip> : null}
+        </div>
+        <div className="mb-settings__orderchoices" role="radiogroup" aria-label={setting.label}>
+          <Radio name={choiceName} label="Print KOT" checked={value === '0'} disabled={disabled} onChange={() => onChange('0')} />
+          <Radio name={choiceName} label="Save order only" checked={value === '1'} disabled={disabled} onChange={() => onChange('1')} />
+        </div>
+      </div>
+    );
     if (setting.key === 'store.address') return <TextArea label={setting.label} hint={hint}
       value={value} disabled={disabled} maxLength={200} onChange={(event) => onChange(event.currentTarget.value)} />;
     switch (setting.control) {
@@ -245,6 +261,7 @@ export function Field({
       case 'number':
         return (
           <NumberInput
+            size={setting.key === 'billing.bill_copies' ? 'xs' : undefined}
             label={inLine ? undefined : setting.label}
             aria-label={setting.label}
             hint={
@@ -320,6 +337,7 @@ export function Field({
       data-setting={setting.key}
       className={cx(
         'mb-settings__field',
+        setting.control === 'tick' && 'mb-settings__field--tick',
         changed && 'mb-settings__field--changed',
         // A row of buttons wants the whole line, or it wraps into two.
         AS_BUTTONS.has(setting.key) && 'mb-settings__field--wide',

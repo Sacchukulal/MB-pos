@@ -31,6 +31,21 @@ afterEach(() => {
 });
 
 describe.each(['3000ms', '3s'])('order arrival lifetime (%s)', (duration) => {
+  it('ignores counter orders and edits, and announces only a new mobile submission', () => {
+    const { result, rerender } = renderHook(({ floor }) => useArrivals(floor, { sound: true }), {
+      initialProps: { floor: [] as TableView[] },
+    });
+    rerender({ floor: [order('1', '')] });
+    rerender({ floor: [{ ...order('1', ''), total: { paise: 20000n, text: '200.00' } }] });
+    expect(result.current.size).toBe(0);
+    expect(beep).not.toHaveBeenCalled();
+    rerender({ floor: [order('1', 'phone-send-1')] });
+    const pulse = result.current.get('1');
+    expect(pulse).toBeDefined();
+    rerender({ floor: [{ ...order('1', 'phone-send-1'), total: { paise: 30000n, text: '300.00' } }] });
+    expect(result.current.get('1')).toBe(pulse);
+    expect(beep).toHaveBeenCalledTimes(1);
+  });
   beforeEach(() => {
     document.documentElement.style.setProperty('--arrival-duration', duration);
   });
@@ -97,22 +112,23 @@ describe.each(['3000ms', '3s'])('order arrival lifetime (%s)', (duration) => {
     expect(result.current.size).toBe(0);
   });
 
-  it('replaces only the passive pulse in the grid and processing list, preserving focus', () => {
+  it('pulses only the table card, preserving focus and keeping processing quiet', () => {
     const tiles = [order('1')];
     const draw = (generation: number) => <>
       <TableGrid tables={tiles} filter="" onOpen={() => {}} onPrintBill={() => {}} arrived={new Map([['1', generation]])} />
-      <Processing orders={tiles} onOpen={() => {}} arrived={new Map([['1', generation]])} />
+      <Processing orders={tiles} onOpen={() => {}} />
     </>;
     const { container, rerender } = render(draw(1));
     const button = screen.getByRole('button', { name: /Table 1, Main/ });
     button.focus();
     const pulses = [...container.querySelectorAll('.mb-arrival-pulse')];
-    expect(pulses).toHaveLength(2);
+    expect(pulses).toHaveLength(1);
+    expect(container.querySelector('.mb-processing .mb-arrival-pulse')).toBeNull();
     rerender(draw(2));
     expect(screen.getByRole('button', { name: /Table 1, Main/ })).toBe(button);
     expect(document.activeElement).toBe(button);
     const restarted = [...container.querySelectorAll('.mb-arrival-pulse')];
     expect(restarted[0]).not.toBe(pulses[0]);
-    expect(restarted[1]).not.toBe(pulses[1]);
+    expect(restarted).toHaveLength(1);
   });
 });

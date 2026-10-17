@@ -115,7 +115,6 @@ pub const GATED: &[(&str, Feature)] = &[
     ("return_bill_money", Feature::Reports),
     ("return_closed_bill", Feature::Reports),
     ("reprint_bill", Feature::Reports),
-    ("bill_pdf", Feature::Reports),
     ("correction_save_preview", Feature::Reports),
     ("save_bill_correction_draft", Feature::Reports),
     ("days", Feature::Reports),

@@ -56,8 +56,7 @@ settleAsked: boolean,
  */
 by: string | null, byId: string | null, orderId: string | null, 
 /**
- * Stable identity of the food and notes, independent of timers, payments and selection.
- * A same-price substitution or another quantity still deserves an arrival cue.
+ * Last mobile kitchen submission id. Counter edits never change this cue.
  */
 arrivalKey?: string, 
 /**

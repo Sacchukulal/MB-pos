@@ -572,7 +572,6 @@ macro_rules! commands {
             $crate::flows::print_kitchen_ticket,
             // The cook lost the paper.
             $crate::flows::reprint_kitchen_ticket,
-            $crate::flows::bill_pdf,
             $crate::flows::complete_bill,
             $crate::correction_draft::discard_bill_correction,
             $crate::correction_draft::save_bill_correction_draft,

@@ -22,8 +22,8 @@ use crate::words::{self, UiError, UiResult};
 /// How far back the gate looks. A shop that has not closed a day in two months is asked about
 /// the last sixty, not about the whole year.
 const PENDING_WINDOW_DAYS: i32 = 60;
-/// How many days the Day open/close screen lists at most, today included. A younger shop
-/// lists only the days since it opened.
+/// Normal history window, today included. Older unfinished order days are also listed
+/// so a closed day can always be reopened to finish its remaining orders.
 const DAYS_LISTED: i32 = 14;
 
 // The day.
@@ -119,8 +119,7 @@ pub struct DaysView {
     pub day_runs_says: String,
     /// What closing today will leave in the drawer, in words — or empty.
     pub carry_says: String,
-    /// Today and up to thirteen days before it, newest first — never a day before the shop
-    /// opened.
+    /// Today and up to thirteen days before it, plus older unfinished order days, newest first.
     pub days: Vec<DayRowView>,
     /// Holidays already marked for days that have not come yet.
     pub upcoming: Vec<DayRowView>,
@@ -457,6 +456,16 @@ fn days_view(app: &App, include_history: bool) -> UiResult<DaysView> {
                         days.push(row_view(&repos, &look, today, may_act, may_figures)?);
                         day = day.previous();
                     }
+                    // An unfinished order must remain recoverable even after the normal
+                    // history window expires. Include only its day, not every intervening day.
+                    let older: BTreeSet<_> = open.iter()
+                        .map(|order| order.core().business_day)
+                        .filter(|day| *day < from)
+                        .collect();
+                    for day in older.into_iter().rev() {
+                        let look = look_at(&repos, &tables, &open, day)?;
+                        days.push(row_view(&repos, &look, today, may_act, may_figures)?);
+                    }
                     for row in repos.days().locked_after(OUTLET, today)? {
                         let look = Look {
                             day: row.day,
@@ -566,7 +575,11 @@ pub fn day_refusal(
     Ok(repos
         .days()
         .locked_at(OUTLET, day)?
-        .map(|since| locked_refusal(code, since, then)))
+        .map(|since| {
+            let mut refusal = locked_refusal(code, since, then);
+            refusal.message = format!("Business day {day}: {}", refusal.message);
+            refusal
+        }))
 }
 
 /// The same question with no transaction open, for a path that decides before it starts one.

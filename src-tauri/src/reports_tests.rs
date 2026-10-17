@@ -95,6 +95,93 @@ fn sell_a_tea(app: &App) {
     crate::flows::complete_bill_on(app, None).expect("settled");
 }
 
+#[test]
+fn selected_reports_allocate_mixed_bills_and_export_only_matching_items() {
+    use crate::reports::{ReportSelection, report_selected_on};
+    use mb_core::{CategoryId, ItemId, Money};
+    let scratch = Scratch::new("selected_reports");
+    let app = a_licensed_shop(&scratch, "selected_reports");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        let menu = repos.menu();
+        for (id, name) in [("cat_tea", "Tea counter"), ("cat_chaats", "Chaats counter")] {
+            menu.save_category(crate::state::OUTLET, &mb_db::repo::menu::Category {
+                id: CategoryId::new(id), name: name.to_owned(), sort_order: 0, is_active: true,
+                station: None, default_tax_class_id: None,
+            }, crate::flows::now())?;
+        }
+        let original = menu.find_item(&ItemId::new("itm_tea"))?.expect("seed tea");
+        for (id, name, category) in [("itm_tea", "Masala Tea", "cat_tea"),
+            ("itm_bun", "Bun", "cat_tea"), ("itm_chaat", "Chaat", "cat_chaats")] {
+            let mut item = original.clone();
+            item.id = ItemId::new(id);
+            item.name = name.to_owned();
+            item.category_id = Some(CategoryId::new(category));
+            menu.save_item(crate::state::OUTLET, &item, crate::flows::now())?;
+        }
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("menu");
+    for (id, qty) in [("itm_tea", "2"), ("itm_bun", "1"), ("itm_chaat", "3")] {
+        crate::ipc::cart_add_on(&app, id.to_owned(), Some(qty.to_owned()), None).expect("mixed cart");
+    }
+    crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("mixed bill");
+    crate::ipc::cart_add_on(&app, "itm_chaat".to_owned(), Some("1".to_owned()), None).expect("other counter");
+    crate::flows::complete_bill_on(&app, Some("UPI".to_owned())).expect("other bill");
+    let selection = ReportSelection { keys: vec![], category_ids: vec!["cat_tea".to_owned()] };
+    let report = report_selected_on(&app, "items".to_owned(), today(), selection.clone()).expect("tea statement");
+    assert_eq!(report.rows.len(), 2);
+    assert!(report.rows.iter().all(|row| row[0] != "Chaat"));
+    let totals = report.totals.as_ref().expect("totals");
+    assert_eq!(totals[1], "1", "two selected items on one bill count once");
+    assert_eq!(totals[2], "3");
+    assert!(report.subtitle.contains("Tea counter"));
+    let category = report_selected_on(&app, "categories".to_owned(), today(), ReportSelection {
+        keys: vec!["cat_tea".to_owned()], category_ids: vec![],
+    }).expect("category report");
+    assert_eq!(category.totals, report.totals, "category and item breakdown must reconcile");
+    let item = report_selected_on(&app, "items".to_owned(), today(), ReportSelection {
+        keys: vec!["itm_tea".to_owned()], category_ids: vec![],
+    }).expect("one item");
+    assert_eq!(item.rows.len(), 1);
+    assert_eq!(item.rows[0][0], "Masala Tea");
+    assert_eq!(item.totals.as_ref().expect("totals")[2], "2");
+    let empty = report_selected_on(&app, "items".to_owned(), today(), ReportSelection {
+        keys: vec!["itm_chaat".to_owned()], ..selection.clone()
+    }).expect("intersection");
+    assert!(empty.rows.is_empty());
+    assert_eq!(empty.totals.expect("zero totals")[1], "0");
+    let csv = crate::reports::csv_of(&report);
+    assert!(csv.contains("Masala Tea") && csv.contains("Bun") && !csv.contains("Chaat"));
+    let pdf = crate::reports::pdf_of(&app, &report).expect("filtered PDF");
+    assert!(pdf.starts_with(b"%PDF"));
+    let shared = crate::share::share_report_selected_on(&app, "items".to_owned(), today(),
+        crate::share::Channel::Copy, selection.clone()).expect("selected summary");
+    assert!(shared.text.contains("Tea counter") && shared.text.contains("Bun") && !shared.text.contains("Chaat"));
+    let (port, paper) = a_printer_that_keeps_the_paper();
+    print_to(&app, port);
+    crate::reports::report_print_selected_on(&app, "items".to_owned(), today(), selection.clone()).expect("print selection");
+    let bytes = paper.recv_timeout(std::time::Duration::from_secs(30)).expect("printed");
+    let printed = String::from_utf8_lossy(&bytes);
+    assert!(printed.contains("Tea counter") && printed.contains("Bun") && !printed.contains("Chaat"));
+    // The next day's comparison must use the same counter, not the whole shop.
+    let tomorrow = crate::flows::today(crate::flows::now()).next().to_string();
+    let next = report_selected_on(&app, "items".to_owned(), PeriodArg { from: tomorrow.clone(), to: tomorrow }, selection).expect("comparison");
+    assert_eq!(Money::parse(&next.compare.expect("comparison").before).expect("money"),
+        Money::parse(totals.last().expect("total")).expect("money"));
+    for id in ["sales_type", "sales_mode", "sales_cashier", "sales_section", "sales_terminal"] {
+        let all = crate::reports::report_on(&app, id.to_owned(), today()).expect("all");
+        let first = &all.filters.expect("choices").choices[0];
+        let one = report_selected_on(&app, id.to_owned(), today(), ReportSelection {
+            keys: vec![first.id.clone()], category_ids: vec![],
+        }).expect("selected group");
+        assert_eq!(one.rows.len(), 1, "{id}");
+        assert_eq!(one.rows[0][0], first.label, "{id}");
+    }
+    assert!(report_selected_on(&app, "tax_rate".to_owned(), today(), ReportSelection {
+        keys: vec!["not-a-tax-filter".to_owned()], category_ids: vec![],
+    }).is_err(), "unsupported selections must never silently export everything");
+}
+
 /// The button queues a job, and the job is a REPORT — which is the half migration 0016 exists
 /// for: before it the database refused the kind and nothing reached paper at all.
 #[test]

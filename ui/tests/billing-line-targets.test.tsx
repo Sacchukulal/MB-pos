@@ -33,12 +33,12 @@ beforeEach(() => {
     orderType: 'Dine in', table: '4', payments: [], paid: zero, balance: money, change: zero,
     isEmpty: false, kitchenUpToDate: false, kitchenTold: false, covers: null,
     orderId: 'order_4', token: null, billNumber: null, fromTheFloor: [], lengthSays: '',
-    orderTypeLocked: true, kitchenTicketOff: false, tablesOnCounter: true,
+    orderTypeLocked: true, kitchenTicketOff: false, enterCompletesBill: false, tablesOnCounter: true,
     arrivalBeep: false, arrivalBeat: false,
   };
   call.mockImplementation((command: string) => {
     if (command === 'correction_save_preview') return Promise.resolve({ cart, proposalToken: 'review', originalTotal: money, newTotal: money, needsApproval: false, approvers: [] });
-    if (command === 'menu_items' || command === 'open_orders') return Promise.resolve([]);
+    if (command === 'search_items' || command === 'menu_items' || command === 'open_orders') return Promise.resolve([]);
     if (command === 'device_manager') return Promise.resolve({ devices: [] });
     if (command === 'reasons') return Promise.resolve([{ id: 'reason_1', text: 'Customer request' }]);
     return Promise.resolve(cart);
@@ -46,11 +46,91 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it('reverts the latest bill with Ctrl+Z and completes through the existing correction review', async () => {
+  const corrected = { ...cart, isCorrection: true, billNumber: 'A/7' };
+  cart = { ...cart, isEmpty: true, lines: [], orderId: null };
+  const implementation = call.getMockImplementation()!;
+  call.mockImplementation((command: string, args: unknown) => {
+    if (command === 'bills') return Promise.resolve({ canRevert: true, approvers: [], rows: [
+      { orderId: 'order_4', number: 'A/7', total: money, state: 'settled', returned: false, dayClosed: false },
+      { orderId: 'older', number: 'A/6', total: money, state: 'settled' },
+    ] });
+    if (command === 'bill_correction_offer') return Promise.resolve({ needsApproval: false, tenders: [], remaining: money });
+    if (command === 'revert_bill') { cart = corrected; return Promise.resolve('Ready'); }
+    return implementation(command, args);
+  });
+  await act(async () => { render(<ToastProvider><Billing onGoTo={vi.fn()} /></ToastProvider>); });
+  fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'z', ctrlKey: true });
+  const dialog = await screen.findByRole('dialog', { name: /Revert bill A\/7/ });
+  await screen.findByLabelText('Customer request');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Revert bill' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('revert_bill', {
+    orderId: 'order_4', reason: 'Customer request', approverStaffId: null, approverPin: null,
+  }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: 'Complete bill' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('correction_save_preview'));
+});
+
+it('keeps Ctrl+Z away from an occupied counter and typed search text', async () => {
+  await show();
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+  expect(call.mock.calls.some(([name]) => name === 'bills')).toBe(false);
+  cleanup();
+  cart = { ...cart, isEmpty: true, lines: [], orderId: null };
+  await act(async () => { render(<ToastProvider><Billing onGoTo={vi.fn()} /></ToastProvider>); });
+  const search = screen.getByRole('searchbox');
+  fireEvent.change(search, { target: { value: 'tea' } });
+  fireEvent.keyDown(search, { key: 'z', ctrlKey: true });
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true, repeat: true });
+  expect(call.mock.calls.some(([name]) => name === 'bills')).toBe(false);
+});
+
+it.each([
+  [false, false, 'Print KOT', 'print_kitchen_ticket'],
+  [true, false, 'Save table', 'print_kitchen_ticket'],
+  [false, true, 'Print KOT', 'complete_bill'],
+  [true, true, 'Save table', 'complete_bill'],
+] as const)('uses the saved workflow: no KOT=%s, direct Enter=%s', async (kitchenTicketOff, enterCompletesBill, label, command) => {
+  cart = { ...cart, kitchenTicketOff, enterCompletesBill };
+  await act(async () => { render(<ToastProvider><Billing onGoTo={vi.fn()} /></ToastProvider>); });
+  expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+  await act(async () => { fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'Enter', repeat: true }); });
+  expect(call.mock.calls.some(([name]) => name === 'print_kitchen_ticket' || name === 'complete_bill')).toBe(false);
+  await act(async () => { fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'Enter' }); });
+  await waitFor(() => expect(call.mock.calls.some(([name]) => name === command)).toBe(true));
+  if (enterCompletesBill) expect(call.mock.calls.some(([name]) => name === 'print_kitchen_ticket')).toBe(false);
+});
+
+it.each([['F1', 'print_kitchen_ticket'], ['F2', 'complete_bill']])('runs %s after mouse input without needing KOT first', async (key, command) => {
+  await act(async () => { render(<ToastProvider><Billing onGoTo={vi.fn()} /></ToastProvider>); });
+  await act(async () => { fireEvent.keyDown(screen.getByRole('button', { name: 'Complete bill' }), { key }); });
+  expect(call.mock.calls.some(([name]) => name === command)).toBe(true);
+  if (key === 'F2') expect(call.mock.calls.some(([name]) => name === 'print_kitchen_ticket')).toBe(false);
+  expect(call.mock.calls.some(([name]) => name === 'cart_clear_payments')).toBe(false);
+});
+
+it('ignores repeated or modified function keys and function keys behind dialogs', async () => {
+  await show();
+  fireEvent.keyDown(window, { key: 'F2', repeat: true });
+  fireEvent.keyDown(window, { key: 'F1', ctrlKey: true });
+  const dialog = document.createElement('div');
+  dialog.setAttribute('role', 'dialog');
+  document.body.appendChild(dialog);
+  fireEvent.keyDown(window, { key: 'F2' });
+  dialog.remove();
+  expect(call.mock.calls.some(([name]) => name === 'complete_bill' || name === 'print_kitchen_ticket')).toBe(false);
+});
+
 it('shows explicit correction actions and confirms before discarding', async () => {
   cart.isCorrection = true;
   cart.billNumber = 'A/7';
   await show();
-  expect(screen.getByRole('button', { name: 'Save changes' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Complete bill' })).toBeTruthy();
+  expect(screen.getByText('Editing · A/7')).toBeTruthy();
+  expect(screen.queryByText(/The issued bill stays unchanged/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull();
+  fireEvent.click(screen.getByTitle('The rest of the actions'));
   fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
   expect(call.mock.calls.some(([name]) => name === 'discard_bill_correction')).toBe(false);
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard changes' }));
@@ -61,7 +141,7 @@ it('takes an empty correction to the full return flow after saving its draft', a
   cart = { ...cart, isCorrection: true, isEmpty: true, lines: [], billNumber: 'A/7' };
   const go = vi.fn();
   render(<ToastProvider><Billing onGoTo={go} /></ToastProvider>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Return whole bill' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Refund entire bill' }));
   await waitFor(() => expect(go).toHaveBeenCalledWith('reports/bills/order_4'));
   expect(call).toHaveBeenCalledWith('save_bill_correction_draft');
   expect(call.mock.calls.some(([name]) => name === 'complete_bill')).toBe(false);
@@ -73,7 +153,7 @@ it('asks for the original payment return before submitting a reduced correction'
   cart.change = money;
   cart.payments = [{ index: 0, reference: null, mode: 'Card', refundMode: 'card', amount: money }];
   await show();
-  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Complete bill' }));
   await screen.findByRole('button', { name: 'Confirm return' });
   expect(screen.getByLabelText('Return by Card')).toBeTruthy();
   expect(call.mock.calls.some(([name]) => name === 'complete_bill')).toBe(false);
@@ -87,7 +167,7 @@ it('uses the fresh preflight cart for return amounts after a concurrent order up
   call.mockImplementation((command: string) => command === 'correction_save_preview'
     ? Promise.resolve({ cart: current, proposalToken: 'new-review', originalTotal: money, newTotal: zero, needsApproval: false, approvers: [] })
     : Promise.resolve(cart));
-  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Complete bill' }));
   await screen.findByRole('button', { name: 'Confirm return' });
   expect(screen.getByLabelText('Return by UPI')).toHaveValue('160.00');
   expect(call.mock.calls.some(([name]) => name === 'complete_bill')).toBe(false);

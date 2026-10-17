@@ -293,10 +293,9 @@
 }
 
 /*
- * ARRIVED: something new landed on this card while the screen was already open — a phone's
- * order on a table's tile, a row joining the processing list. The ring beats a few times, the
- * bell's own beat, and stops. Only the passive pulse is replaced on another arrival so the
- * card keeps keyboard focus. Its inset ring remains inside clipped grid/processing edges.
+ * ARRIVED: a phone submitted new food while the screen was open. The table card blinks
+ * once; processing rows stay quiet. Only the passive pulse is replaced on another arrival
+ * so the card keeps keyboard focus. Its inset ring remains inside clipped grid edges.
  */
 .mb-arrived.mb-arrived {
   position: relative;
@@ -310,7 +309,7 @@
   border-radius: inherit;
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: calc(var(--focus-ring-width) * -1);
-  animation: mb-arrive var(--motion-beat) var(--ease) var(--beats);
+  animation: mb-arrive var(--arrival-duration) var(--ease) 1 forwards;
 }
 
 @keyframes mb-arrive {

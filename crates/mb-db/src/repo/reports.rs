@@ -159,108 +159,76 @@ impl<'a> ReportsRepo<'a> {
         period: Period,
         by: SalesBy,
     ) -> Result<Vec<Bucket>, DbError> {
+        Ok(self.sales_by_selected(outlet, period, by, &[], &[])?.0)
+    }
+
+    /// Filter stored sale lines/payments before grouping, so mixed bills and returns
+    /// retain their exact allocation and each matching bill is counted only once.
+    pub fn sales_by_selected(
+        &self,
+        outlet: &str,
+        period: Period,
+        by: SalesBy,
+        keys: &[String],
+        categories: &[String],
+    ) -> Result<(Vec<Bucket>, i64), DbError> {
         let (from, to) = (
             encode::business_day_to_sql(period.from),
             encode::business_day_to_sql(period.to),
         );
-        let sold = Self::SOLD;
-
-        // Item and category read `order_lines`, so they are a different shape: a bill's grand
-        // total cannot be attributed to one line, and pretending otherwise is how an item
-        // report stops adding up.
-        let sql = match by {
-            SalesBy::Item | SalesBy::Category => {
-                let (key, label) = match by {
-                    SalesBy::Item => ("COALESCE(l.item_id, l.name)", "l.name"),
-                    _ => (
-                        "COALESCE(l.category_id, '')",
-                        "COALESCE(c.name, 'No category')",
-                    ),
-                };
-                format!(
-                    "SELECT {key} AS k, {label} AS lbl,
-                            COUNT(DISTINCT CASE WHEN o.sale_count = 1 THEN o.id END),
-                            COALESCE(SUM(bl.gross_including_tax), 0),
-                            COALESCE(SUM(bl.line_discount + bl.bill_discount_share), 0),
-                            COALESCE(SUM(bl.cgst + bl.sgst + bl.igst), 0),
-                            COALESCE(SUM(l.qty), 0)
-                       FROM report_sale_orders o
-                       JOIN report_order_lines l ON l.order_id = o.id
-                       JOIN report_bill_lines bl ON bl.order_line_id = l.id
-                  LEFT JOIN categories c  ON c.id = l.category_id
-                      WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
-                        AND {sold}
-                   GROUP BY k
-                   ORDER BY SUM(bl.gross_including_tax) DESC"
-                )
-            }
-            _ => {
-                let (key, label, extra_join) = match by {
-                    SalesBy::Day => ("o.business_day", "o.business_day", ""),
-                    // Local time: `settled_at` is UTC milliseconds and the shop's clock is
-                    // +05:30, so the offset is added before the hour is taken.
-                    SalesBy::Hour => (
-                        "CAST(((o.settled_at + 19800000) / 3600000) % 24 AS INTEGER)",
-                        "CAST(((o.settled_at + 19800000) / 3600000) % 24 AS INTEGER)",
-                        "",
-                    ),
-                    SalesBy::OrderType => ("o.order_type", "o.order_type", ""),
-                    SalesBy::Cashier => (
-                        "o.settled_by",
-                        "COALESCE(s.name, 'Unknown')",
-                        "LEFT JOIN staff s ON s.id = o.settled_by",
-                    ),
-                    SalesBy::Terminal => (
-                        "o.terminal_id",
-                        // The till's NAME, resolved here — the same rule the cashier report
-                        // follows, and for the same reason: a report that hands back ids is a
-                        // screen writing SQL by post.
-                        "COALESCE(tm.name, o.terminal_id)",
-                        "LEFT JOIN terminals tm ON tm.id = o.terminal_id",
-                    ),
-                    SalesBy::Section => (
-                        "COALESCE(t.section_id, '')",
-                        "COALESCE(sec.name, 'No table')",
-                        "LEFT JOIN dining_tables t ON t.id = o.table_id \
-                         LEFT JOIN sections sec ON sec.id = t.section_id",
-                    ),
-                    // A payment mode is a property of the PAYMENT, not of the bill: one bill
-                    // can be cash and UPI at once.
-                    _ => ("p.mode", "p.mode", "JOIN report_sale_payments p ON p.order_id = o.id"),
-                };
-                let amount = if by == SalesBy::PaymentMode {
-                    "COALESCE(SUM(p.amount), 0)"
-                } else {
-                    "COALESCE(SUM(b.grand_total), 0)"
-                };
-                let (discount, tax) = if by == SalesBy::PaymentMode {
-                    // A split payment has no tax/discount allocation. These columns are
-                    // omitted from the payment report, rather than repeating the bill.
-                    ("0", "0")
-                } else {
-                    ("COALESCE(SUM(b.total_discount), 0)",
-                     "COALESCE(SUM(b.total_cgst + b.total_sgst + b.total_igst), 0)")
-                };
-                format!(
-                    "SELECT {key} AS k, {label} AS lbl,
-                            COUNT(DISTINCT CASE WHEN o.sale_count = 1 THEN o.id END),
-                            {amount},
-                            {discount},
-                            {tax},
-                            0
-                       FROM report_sale_orders o
-                       JOIN report_sale_bills b ON b.order_id = o.id
-                       {extra_join}
-                      WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3
-                        AND {sold}
-                   GROUP BY k
-                   ORDER BY k"
-                )
-            }
+        let line_report = matches!(by, SalesBy::Item | SalesBy::Category);
+        let (key, label, joins) = match by {
+            SalesBy::Item => ("COALESCE(l.item_id, l.name)", "l.name", ""),
+            SalesBy::Category => ("COALESCE(l.category_id, '')", "COALESCE(c.name, 'No category')", ""),
+            SalesBy::Day => ("o.business_day", "o.business_day", ""),
+            SalesBy::Hour => (
+                "CAST(((o.settled_at + 19800000) / 3600000) % 24 AS INTEGER)",
+                "CAST(((o.settled_at + 19800000) / 3600000) % 24 AS INTEGER)", ""),
+            SalesBy::OrderType => ("o.order_type", "o.order_type", ""),
+            SalesBy::Cashier => ("COALESCE(o.settled_by, '')", "COALESCE(s.name, 'Unknown')",
+                "LEFT JOIN staff s ON s.id = o.settled_by"),
+            SalesBy::Section => ("COALESCE(t.section_id, '')", "COALESCE(sec.name, 'No table')",
+                "LEFT JOIN dining_tables t ON t.id = o.table_id LEFT JOIN sections sec ON sec.id = t.section_id"),
+            SalesBy::Terminal => ("o.terminal_id", "COALESCE(tm.name, o.terminal_id)",
+                "LEFT JOIN terminals tm ON tm.id = o.terminal_id"),
+            SalesBy::PaymentMode => ("p.mode", "p.mode", "JOIN report_sale_payments p ON p.order_id = o.id"),
         };
-
+        let (source, amount, discount, tax, quantity) = if line_report {
+            ("FROM report_sale_orders o JOIN report_order_lines l ON l.order_id = o.id
+              JOIN report_bill_lines bl ON bl.order_line_id = l.id
+              LEFT JOIN categories c ON c.id = l.category_id".to_owned(),
+             "bl.gross_including_tax", "bl.line_discount + bl.bill_discount_share",
+             "bl.cgst + bl.sgst + bl.igst", "l.qty")
+        } else {
+            (format!("FROM report_sale_orders o JOIN report_sale_bills b ON b.order_id = o.id {joins}"),
+             if by == SalesBy::PaymentMode { "p.amount" } else { "b.grand_total" },
+             if by == SalesBy::PaymentMode { "0" } else { "b.total_discount" },
+             if by == SalesBy::PaymentMode { "0" } else { "b.total_cgst + b.total_sgst + b.total_igst" }, "0")
+        };
+        let category_clause = if line_report {
+            "AND (json_array_length(?5) = 0 OR COALESCE(l.category_id, '') IN (SELECT value FROM json_each(?5)))"
+        } else {
+            "AND json_array_length(?5) = 0"
+        };
+        let source = format!("{source}
+            WHERE o.outlet_id = ?1 AND o.business_day BETWEEN ?2 AND ?3 AND {}
+              AND (json_array_length(?4) = 0 OR CAST({key} AS TEXT) IN (SELECT value FROM json_each(?4)))
+              {category_clause}", Self::SOLD);
+        let sql = format!("SELECT {key} AS k, {label} AS lbl,
+            COUNT(DISTINCT CASE WHEN o.sale_count = 1 THEN o.id END),
+            COALESCE(SUM({amount}), 0), COALESCE(SUM({discount}), 0),
+            COALESCE(SUM({tax}), 0), COALESCE(SUM({quantity}), 0)
+            {source} GROUP BY k ORDER BY {}",
+            if line_report { "SUM(bl.gross_including_tax) DESC" } else { "k" });
+        let keys_json = serde_json::to_string(keys).map_err(|e| DbError::invariant(e.to_string()))?;
+        let categories_json = serde_json::to_string(categories).map_err(|e| DbError::invariant(e.to_string()))?;
+        let bill_count = self.tx.query_row(
+            &format!("SELECT COUNT(DISTINCT CASE WHEN o.sale_count = 1 THEN o.id END) {source}"),
+            rusqlite::params![outlet, from, to, keys_json, categories_json],
+            |row| row.get::<_, i64>(0),
+        )?;
         let mut stmt = self.tx.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params![outlet, from, to], |row| {
+        let rows = stmt.query_map(rusqlite::params![outlet, from, to, keys_json, categories_json], |row| {
             Ok((
                 row.get::<_, rusqlite::types::Value>(0)?,
                 row.get::<_, rusqlite::types::Value>(1)?,
@@ -288,13 +256,13 @@ impl<'a> ReportsRepo<'a> {
         }
         // A shop brought down from the cloud has only its last 30 days as bills; the older days
         // come from the totals the cloud kept. A day with bills of its own is never doubled.
-        if by == SalesBy::Day {
+        if by == SalesBy::Day && keys.is_empty() && categories.is_empty() {
             let have: std::collections::BTreeSet<String> = out.iter().map(|b| b.key.clone()).collect();
             let older = crate::repo::wire::WireRepo::new(self.tx).cloud_days(outlet, period)?;
             out.extend(older.into_iter().filter(|b| !have.contains(&b.key)));
             out.sort_by_key(|b| b.key.parse::<i64>().unwrap_or(0));
         }
-        Ok(out)
+        Ok((out, bill_count))
     }
 
     /// Tips included in the payment allocation, signed on the original sale and return days.

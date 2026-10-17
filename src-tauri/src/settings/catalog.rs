@@ -1874,13 +1874,30 @@ pub const CATALOG: &[Entry] = &[
         "Minutes of nobody touching it. 0 never locks by itself.",
         ["lock", "idle", "timeout", "screen"], 0..=240 "minutes", u32,
         billing.idle_lock_minutes),
+    // Switched on the Floor screen, where the tables are.
+    flag!(
+        "billing.tables_on_counter",
+        Billing,
+        Row,
+        "Tables on the billing screen",
+        "On, the billing screen shows the table grid. Off, only the orders being cooked show \
+         there; a table number typed in the box still opens that table.",
+        [
+            "tables",
+            "billing screen",
+            "grid",
+            "parcel only",
+            "counter",
+            "hide tables"
+        ],
+        billing.tables_on_counter
+    ),
     flag!(
         "billing.arrival_beep",
         Billing,
         Row,
-        "Beep when an order comes in",
-        "A short sound when a phone puts an order on the floor, or adds to one already there. \
-         The card beats either way; this is for a cashier looking at a customer, not the screen.",
+        "Beep for mobile orders",
+        "Play a short sound when a phone submits new food to the kitchen. Counter orders stay quiet.",
         ["beep", "sound", "chime", "alert", "phone order", "notification"],
         billing.arrival_beep
     ),
@@ -1888,9 +1905,8 @@ pub const CATALOG: &[Entry] = &[
         "billing.arrival_beat",
         Billing,
         Row,
-        "Cards beat when an order comes in",
-        "The table's card and its row under Processing orders beat a few times when a phone puts \
-         an order on it, or adds to one already there.",
+        "Blink the table card for mobile orders",
+        "Blink once when a phone submits new food. Counter orders and the processing list stay quiet.",
         ["beat", "flash", "blink", "wave", "highlight", "phone order"],
         billing.arrival_beat
     ),
@@ -1909,10 +1925,19 @@ pub const CATALOG: &[Entry] = &[
         "billing.kitchen_ticket_off",
         Billing,
         Row,
-        "This shop has no kitchen ticket",
-        "For a counter where the food is already made.",
-        ["kot", "disable", "off", "no kitchen"],
+        "Order button",
+        "Choose Print KOT to send a kitchen ticket, or Save order only to keep an unpaid order without printing KOT. Complete bill is available in either mode.",
+        ["kot", "kitchen ticket", "save table", "save order", "disable", "off", "no kitchen"],
         billing.kitchen_ticket_off
+    ),
+    flag!(
+        "billing.enter_completes_bill",
+        Billing,
+        Row,
+        "Enter completes the bill directly",
+        "After adding items, press Enter with the search box empty to complete and print the bill using the selected payment mode, without saving to Processing orders first. Item selection and quantity entry stay unchanged. F1 still saves or sends KOT; F2 always completes the bill.",
+        ["enter", "keyboard", "fast service", "bakery", "complete bill", "direct print"],
+        billing.enter_completes_bill
     ),
     flag!(
         "billing.kitchen_screen",
@@ -1924,23 +1949,14 @@ pub const CATALOG: &[Entry] = &[
         ["kds", "screen", "display", "kitchen"],
         billing.kitchen_screen
     ),
-    // Switched on the Floor screen, where the tables are.
     flag!(
-        "billing.tables_on_counter",
+        "billing.kitchen_keep_paid",
         Billing,
         Row,
-        "Tables on the billing screen",
-        "On, the billing screen shows the table grid. Off, only the orders being cooked show \
-         there; a table number typed in the box still opens that table.",
-        [
-            "tables",
-            "billing screen",
-            "grid",
-            "parcel only",
-            "counter",
-            "hide tables"
-        ],
-        billing.tables_on_counter
+        "Keep paid orders on the kitchen screen until ready",
+        "For payment before preparation. Paid tickets stay until the kitchen completes them, day close, or the next business date. Off, completing the bill clears its kitchen tickets. Applies only when the kitchen screen is enabled.",
+        ["kds", "prepaid", "paid", "ready", "kitchen"],
+        billing.kitchen_keep_paid
     ),
     // The day.
     // First, because it decides whether anything below it happens at all.
@@ -2271,10 +2287,13 @@ const TOPICS: &[(&str, &str)] = &[
     ("billing.rounding", "At the counter"),
     ("billing.lock_order_type", "At the counter"),
     ("billing.locked_order_type", "At the counter"),
-    ("billing.kitchen_ticket_off", "Before it prints"),
-    ("billing.kitchen_screen", "Before it prints"),
-    ("billing.arrival_beep", "At the counter"),
-    ("billing.arrival_beat", "At the counter"),
+    ("billing.kitchen_ticket_off", "Order workflow"),
+    ("billing.enter_completes_bill", "Order workflow"),
+    ("billing.kitchen_screen", "Kitchen screen"),
+    ("billing.kitchen_keep_paid", "Kitchen screen"),
+    ("billing.arrival_beep", "Mobile order notifications"),
+    ("billing.arrival_beat", "Mobile order notifications"),
+    ("billing.tables_on_counter", "At the counter"),
     ("billing.idle_lock_minutes", "At the counter"),
     ("billing.service_charge", "Charges you add"),
     ("billing.packing_charge", "Charges you add"),

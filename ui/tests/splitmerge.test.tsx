@@ -113,7 +113,7 @@ function cart(over: Partial<CartView> = {}): CartView {
     fromTheFloor: [],
     lengthSays: '',
     orderTypeLocked: true,
-    kitchenTicketOff: false,
+    kitchenTicketOff: false, enterCompletesBill: false,
     tablesOnCounter: true,
     arrivalBeep: false,
     arrivalBeat: true,

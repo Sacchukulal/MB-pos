@@ -559,10 +559,14 @@ impl<'a> CorrectionsRepo<'a> {
         Ok(out)
     }
 
-    /// How many reverts nobody has signed off yet.
+    /// Completed corrections awaiting sign-off. Drafts cannot be approved yet.
     pub fn reverts_waiting(&self, outlet: &str) -> Result<i64, DbError> {
         Ok(self.tx.query_row(
-            "SELECT COUNT(*) FROM bill_reverts WHERE outlet_id = ?1 AND approved_at IS NULL",
+            "SELECT COUNT(*) FROM bill_reverts r JOIN orders o ON o.id = r.order_id
+             WHERE r.outlet_id = ?1 AND r.approved_at IS NULL
+               AND o.state = 'settled'
+               AND NOT EXISTS (SELECT 1 FROM bill_returns returned WHERE returned.order_id = o.id)
+               AND NOT EXISTS (SELECT 1 FROM order_edits e WHERE e.order_id = o.id)",
             [outlet],
             |row| row.get(0),
         )?)

@@ -397,6 +397,28 @@ fn a_day_with_an_open_order_is_left_for_later() {
 
 // The lock.
 
+#[test]
+fn weeks_old_orders_remain_recoverable_and_leave_processing_after_completion() {
+    let scratch = Scratch::new("weeks_old_order");
+    let app = a_shop(&scratch, "weeks_old_order");
+    let old = BusinessDay::from_days_since_epoch(today().days_since_epoch() - 30);
+    app.with_cart_mut(|state| {
+        state.set_order_type(mb_core::OrderType::Parcel);
+        Ok(())
+    }).expect("parcel");
+    crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), None, None).expect("food");
+    crate::flows::print_kitchen_ticket_on(&app).expect("kitchen");
+    let id = app.with_cart(|state| Ok(state.order_id().expect("saved").to_owned())).expect("id");
+    move_today_to(&app, old);
+    let days = days_on(&app).expect("days");
+    assert!(days.days.iter().any(|row| row.day == old.to_string()), "old unfinished day is reachable");
+    crate::ipc::open_order_on(&app, id.clone()).expect("open old order");
+    crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("complete old bill");
+    assert!(!crate::floor::floor_on(&app).expect("floor").tiles.iter()
+        .any(|tile| tile.order_id.as_deref() == Some(id.as_str()) && tile.processing));
+    assert!(!days_on(&app).expect("days after settlement").days.iter().any(|row| row.day == old.to_string()));
+}
+
 /// A closed day takes no more money: not a bill, not an expense, not a drawer movement.
 #[test]
 fn a_locked_day_refuses_a_settle_an_expense_and_a_cash_movement() {
@@ -427,7 +449,7 @@ fn a_locked_day_refuses_a_settle_an_expense_and_a_cash_movement() {
         refused.message
     );
     assert!(
-        refused.message.starts_with("That day was closed at "),
+        refused.message.starts_with(&format!("Business day {}: That day was closed at ", today())),
         "{}",
         refused.message
     );

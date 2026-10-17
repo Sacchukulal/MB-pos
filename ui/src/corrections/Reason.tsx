@@ -51,6 +51,11 @@ export function ReasonDialog({
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
+  const reasonList = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    reasonList.current?.querySelector<HTMLInputElement>('input:checked')?.focus();
+  }, [choices]);
 
   useEffect(() => {
     call('reasons', { kind })
@@ -88,6 +93,7 @@ export function ReasonDialog({
 
   return (
     <Modal open title={what} wide={wide} onClose={() => { if (!inFlight.current) onCancel(); }}
+      onEnter={() => void confirm()}
       actions={
         <>
           <Button variant="quiet" disabled={busy} onClick={onCancel}>
@@ -99,9 +105,29 @@ export function ReasonDialog({
         </>
       }
     >
+      <div onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+        const target = event.target as HTMLElement;
+        if (event.key === 'Enter' && !target.closest('button, textarea, select, [contenteditable="true"]')) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!event.repeat) void confirm();
+        }
+        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
+          (reasonList.current?.contains(target) || target.dataset.reasonNote === 'true')) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (busy || disabled || choices.length === 0) return;
+          const next = (choices.findIndex((choice) => choice.text === chosen) +
+            (event.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length;
+          setChosen(choices[next]!.text);
+          setProblem(null);
+          reasonList.current?.querySelectorAll<HTMLInputElement>('input')[next]?.focus();
+        }
+      }}>
       {description ? <p className="mb-muted">{description}</p> : null}
       {children}
-      <div className="mb-reasons">
+      <div className="mb-reasons" ref={reasonList}>
         {choices.map((choice) => (
           <Radio
             key={choice.id}
@@ -117,6 +143,7 @@ export function ReasonDialog({
       </div>
 
       <Input
+        data-reason-note="true"
         label="Additional note"
         hint="Optional. Recorded in history with your name."
         value={note}
@@ -133,6 +160,7 @@ export function ReasonDialog({
           {problem}
         </p>
       ) : null}
+      </div>
 
     </Modal>
   );

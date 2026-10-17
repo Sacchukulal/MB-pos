@@ -119,11 +119,20 @@ pub fn look(app: &App, station: &str) -> KitchenView {
 /// `look`, at a stated time.
 #[must_use]
 pub fn look_at(app: &App, station: &str, at: Timestamp) -> KitchenView {
+    let config = app.shop_config();
+    if !config.billing.kitchen_screen {
+        return KitchenView {
+            station: station.to_owned(), stations: vec![DEFAULT_STATION.to_owned()],
+            tickets: Vec::new(), headline: "The kitchen screen is off.".to_owned(),
+            late: 0, waiting_courses: Vec::new(), last_cleared: None,
+        };
+    }
     let gathered = app
         .with_shop(|shop| {
             shop.db
                 .transaction(|tx| {
                     let repos = mb_db::Repos::new(tx);
+                    repos.kitchen().reconcile_finished(OUTLET, config.billing.kitchen_keep_paid, crate::flows::today(at))?;
                     let tickets = repos.kitchen().outstanding(OUTLET, station)?;
                     let categories = repos.menu().list_categories(OUTLET)?;
                     let mut orders = BTreeMap::new();
@@ -515,6 +524,7 @@ pub fn acknowledge_on(app: &App, id: String) -> UiResult<KitchenView> {
 /// Fire a course — send the next part of an order to the kitchen when the table is ready for
 /// it.
 pub fn fire_on(app: &App, order_id: String, course: String) -> UiResult<KitchenView> {
+    require_screen(app)?;
     let who = crate::guard::require(app, Permission::BillCreate)?;
 
     // The kitchen is never told twice.
@@ -542,13 +552,17 @@ fn with_ticket<T>(
     id: &str,
     change: impl FnOnce(&mut mb_db::repo::kitchen::Ticket) -> UiResult<T>,
 ) -> UiResult<T> {
+    require_screen(app)?;
+    let config = app.shop_config();
     let taken = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| {
                 let repos = mb_db::Repos::new(tx);
+                repos.kitchen().reconcile_finished(OUTLET, config.billing.kitchen_keep_paid, crate::flows::today(now()))?;
                 let Some(mut ticket) = repos.kitchen().get(id)? else {
                     return Ok(None);
                 };
+                if ticket.delivery.state == State::Closed { return Ok(None); }
                 match change(&mut ticket) {
                     Ok(value) => {
                         repos.kitchen().save(&ticket)?;
@@ -566,6 +580,13 @@ fn with_ticket<T>(
             "That ticket is no longer on this screen. Refresh and try again.",
         )),
     }
+}
+
+fn require_screen(app: &App) -> UiResult<()> {
+    if !app.shop_config().billing.kitchen_screen {
+        return Err(UiError::new("kitchen.off", "The kitchen screen is off."));
+    }
+    Ok(())
 }
 
 /// Send an order to the kitchen screen.
@@ -702,11 +723,17 @@ pub fn print_what_nobody_drew_at(app: &App, at: Timestamp) -> u32 {
     // This runs on its own thread every five seconds, so it is the one caller that can
     // genuinely collide with a cashier.
     let _one_at_a_time = app.begin_action();
+    let config = app.shop_config();
 
     let overdue = app
         .with_shop(|shop| {
             shop.db
-                .transaction(|tx| mb_db::Repos::new(tx).kitchen().awaiting_ack(OUTLET))
+                .transaction(|tx| {
+                    let repos = mb_db::Repos::new(tx);
+                    repos.kitchen().reconcile_finished(OUTLET, config.billing.kitchen_screen && config.billing.kitchen_keep_paid, crate::flows::today(at))?;
+                    if !config.billing.kitchen_screen { return Ok(Vec::new()); }
+                    repos.kitchen().awaiting_ack(OUTLET)
+                })
                 .map_err(|e| words::from_db(&e))
         })
         .unwrap_or_default();

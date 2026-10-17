@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const { call } = vi.hoisted(() => ({ call: vi.fn() }));
@@ -6,7 +6,7 @@ vi.mock('../src/ipc/call', () => ({ call,
   isUiError: (cause: unknown) => !!cause && typeof cause === 'object' && 'code' in cause,
 }));
 vi.mock('../src/shell/licence', () => ({ useLicenceRevision: () => 0 }));
-import { Bills } from '../src/reports/Bills';
+import { Bills, Correction } from '../src/reports/Bills';
 import { ToastProvider } from '../src/kit';
 
 const money = (paise: number) => ({ paise: BigInt(paise), text: (paise / 100).toFixed(2) });
@@ -24,6 +24,7 @@ beforeEach(() => {
       cashiers: [], approvers: [{ id: 'manager', name: 'Manager' }], waiting: 0,
       canRevert: true, canVoid: true, canReprint: true, canApprove: false,
     });
+    if (command === 'bill_detail') return Promise.resolve({ row: { orderId: 'sale', number: 'A/7', state, stateWord: state === 'settled' ? 'Paid' : 'Voided', total: money(9000), returned: false }, lines: [], edits: [], history: [], bill: null, canApprove: false, canRefund: true });
     if (command === 'bill_correction_offer') return Promise.resolve({
       remaining: money(5000), billTotal: money(9000), needsApproval: manager,
       closedDay: closed, returned: false, tenders: [{ mode: 'upi', remaining: money(5000), input: '50.00' }],
@@ -33,6 +34,76 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+it('serializes pending approvals and blocks repeat clicks until refreshed', async () => {
+  const implementation = call.getMockImplementation()!;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  call.mockImplementation(async (command: string, args: unknown) => {
+    if (command === 'approve_revert') return pending;
+    const value = await implementation(command, args);
+    if (command === 'bill_detail') {
+      value.canApprove = true;
+      value.edits = ['first', 'second'].map((id) => ({ id, by: 'Cashier', at: 'Today',
+        reason: 'Wrong items', beforeTotal: money(9000), changes: [], beforeLines: [], approvedAt: null }));
+    }
+    return value;
+  });
+  render(<ToastProvider><Bills /></ToastProvider>);
+  fireEvent.click(await screen.findByText('A/7'));
+  const approve = await screen.findByRole('button', { name: 'Approve' });
+  fireEvent.click(approve);
+  fireEvent.click(approve);
+  expect(approve).toBeDisabled();
+  expect(call.mock.calls.filter(([name]) => name === 'approve_revert')).toEqual([
+    ['approve_revert', { revertId: 'first' }],
+  ]);
+  release();
+  await waitFor(() => expect(approve).toBeEnabled());
+  expect(call.mock.calls.filter(([name]) => name === 'approve_revert')).toEqual([
+    ['approve_revert', { revertId: 'first' }], ['approve_revert', { revertId: 'second' }],
+  ]);
+});
+
+it('hides Return money when the original payment has already been fully refunded', async () => {
+  state = 'voided';
+  const implementation = call.getMockImplementation()!;
+  call.mockImplementation(async (command: string, args: unknown) => {
+    const value = await implementation(command, args);
+    if (command === 'bill_detail') value.canRefund = false;
+    return value;
+  });
+  render(<ToastProvider><Bills /></ToastProvider>);
+  fireEvent.click(await screen.findByText('A/7'));
+  await screen.findByRole('dialog', { name: 'Bill A/7' });
+  expect(screen.queryByRole('button', { name: 'Return money' })).toBeNull();
+});
+
+it('replaces a stale refund form with a closeable explanation if another refund used up the balance', async () => {
+  const implementation = call.getMockImplementation()!;
+  const view = await implementation('bills');
+  call.mockImplementation((command: string, args: unknown) => command === 'bill_correction_offer'
+    ? Promise.resolve({ remaining: money(0), tenders: [], needsApproval: false, billTotal: money(9000) })
+    : implementation(command, args));
+  render(<ToastProvider><Correction pending={{ kind: 'refund', bill: view.rows[0] }} approvers={[]}
+    onClose={vi.fn()} onDone={vi.fn()} onFailed={vi.fn()} /></ToastProvider>);
+  await screen.findByText(/There is no payment left to refund/);
+  expect(screen.queryByLabelText('Additional note')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Record the money going back' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Close' })).toBeEnabled();
+});
+
+it('shows an unfinished correction as Editing instead of asking for approval', async () => {
+  const implementation = call.getMockImplementation()!;
+  const view = await implementation('bills');
+  view.rows[0].correctionOpen = true;
+  view.rows[0].approval = 'waiting';
+  call.mockImplementation((command: string, args: unknown) => command === 'bills' ? Promise.resolve(view) : implementation(command, args));
+  render(<ToastProvider><Bills /></ToastProvider>);
+  await screen.findByRole('button', { name: 'Resume bill' });
+  expect(screen.getByText('Editing')).toBeTruthy();
+  expect(screen.queryByText('Needs approval')).toBeNull();
+});
 
 it('opens the existing reprint confirmation directly without opening the bill or actions menu', async () => {
   render(<ToastProvider><Bills /></ToastProvider>);
@@ -46,13 +117,13 @@ it('opens the existing reprint confirmation directly without opening the bill or
 
 it('keeps cancellation without refund on the existing reason and void command', async () => {
   render(<ToastProvider><Bills /></ToastProvider>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Actions for bill A/7' }));
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Cancel bill (no refund)' }));
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete bill' }));
   await screen.findByLabelText('Customer request');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel bill (no refund)' })).toBeEnabled());
+  await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete bill' })).toBeEnabled());
   expect(screen.getByText(/This cancels the bill without recording a refund/)).toBeTruthy();
   expect(call.mock.calls.some(([name]) => name === 'void_bill' || name === 'bill_detail')).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Cancel bill (no refund)' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete bill' }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('void_bill', {
     orderId: 'sale', reason: 'Customer request', approverStaffId: null, approverPin: null,
   }));
@@ -65,9 +136,13 @@ it('keeps restricted actions hidden when the menu opens', async () => {
   view.canRevert = false; view.canVoid = false; view.canReprint = false;
   call.mockImplementation((command: string, args: unknown) => command === 'bills' ? Promise.resolve(view) : implementation(command, args));
   render(<ToastProvider><Bills /></ToastProvider>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Actions for bill A/7' }));
+
+  await screen.findByText('A/7');
   expect(screen.queryByRole('button', { name: 'Reprint bill' })).toBeNull();
-  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Invoice PDF']);
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Revert bill' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Delete bill' })).toBeNull();
+  expect(screen.queryByText('Invoice PDF')).toBeNull();
 });
 
 it.each([false, true])('checks whole-return permission before opening the correction route (allowed: %s)', async (canVoid) => {
@@ -98,8 +173,9 @@ it.each([false, true])('checks whole-return permission before opening the correc
 
 async function show(action: string) {
   render(<ToastProvider><Bills /></ToastProvider>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Actions for bill A/7' }));
-  fireEvent.click(screen.getByRole('menuitem', { name: action }));
+
+  fireEvent.click(await screen.findByText('A/7'));
+  fireEvent.click(await screen.findByRole('button', { name: action }));
   await screen.findByLabelText('Return by upi');
   await screen.findByLabelText('Customer request');
 }
@@ -120,7 +196,7 @@ it('sends one atomic whole return and blocks a second click while it is saving',
   const implementation = call.getMockImplementation()!;
   call.mockImplementation((command: string, args: unknown) => command === 'void_and_return_bill'
     ? new Promise(() => undefined) : implementation(command, args));
-  await show('Return whole bill');
+  await show('Refund entire bill');
   const button = screen.getByRole('button', { name: 'Confirm return' });
   fireEvent.click(button); fireEvent.click(button);
   await waitFor(() => expect(call.mock.calls.filter(([name]) => name === 'void_and_return_bill')).toHaveLength(1));
@@ -130,7 +206,7 @@ it('sends one atomic whole return and blocks a second click while it is saving',
 
 it('explains and submits a closed-day linked return instead of voiding the old bill', async () => {
   closed = true;
-  await show('Return whole bill');
+  await show('Refund entire bill');
   expect(screen.getByText(/original closed bill stays unchanged/i)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Confirm return' }));
   await waitFor(() => expect(call.mock.calls.some(([name]) => name === 'return_closed_bill')).toBe(true));
@@ -139,7 +215,7 @@ it('explains and submits a closed-day linked return instead of voiding the old b
 
 it('asks for required manager approval before attempting the write', async () => {
   manager = true;
-  await show('Return whole bill');
+  await show('Refund entire bill');
   expect(screen.getByLabelText('Their PIN')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Confirm return' }));
   expect(call.mock.calls.some(([name]) => name === 'void_and_return_bill')).toBe(false);

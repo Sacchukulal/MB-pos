@@ -86,7 +86,16 @@ fn closed_sale_stays_intact_and_return_posts_exact_sales_tax_and_actual_tenders_
             let buckets = repos.reports().sales_by(OUTLET, Period::one_day(day(1)), by)?;
             assert_eq!(buckets.iter().map(|b| b.gross.paise()).sum::<i64>(), -original.bill.grand_total.paise(), "{by:?}");
             assert!(buckets.iter().all(|b| b.bills == 0));
+            for bucket in &buckets {
+                let (selected, count) = repos.reports().sales_by_selected(OUTLET, Period::one_day(day(1)), by, std::slice::from_ref(&bucket.key), &[])?;
+                assert_eq!(selected, vec![bucket.clone()], "selection must keep signed returns: {by:?}");
+                assert_eq!(count, 0, "a return is not another sale");
+            }
         }
+        let (none, count) = repos.reports().sales_by_selected(OUTLET, Period::one_day(day(1)), SalesBy::Item,
+            &["missing-item".to_owned()], &[])?;
+        assert!(none.is_empty());
+        assert_eq!(count, 0);
         let taxes = repos.reports().tax_by_rate(OUTLET, Period::one_day(day(1)))?;
         assert_eq!(taxes[0].cgst.paise(), -original.bill.total_gst.central.paise());
         assert_eq!(taxes[0].sgst.paise(), -original.bill.total_gst.state.paise());

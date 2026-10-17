@@ -77,7 +77,7 @@ function show() {
 
 /** Answer `kitchen` with this view and every action with it too. */
 function serve(v: KitchenView) {
-  call.mockImplementation(() => Promise.resolve(v));
+  call.mockImplementation((command: string) => Promise.resolve(command === 'app_status' ? { kitchenScreen: true } : v));
 }
 
 beforeEach(() => {
@@ -88,6 +88,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the kitchen display', () => {
+  it('does not fetch, acknowledge or bump tickets while disabled', async () => {
+    call.mockImplementation((command: string) => Promise.resolve(command === 'app_status' ? { kitchenScreen: false } : view({ tickets: [ticket({ tone: 'new' })] })));
+    show();
+    await screen.findByText('The kitchen screen is off');
+    fireEvent.keyDown(window, { key: '1' });
+    expect(call.mock.calls.map(([command]) => command)).toEqual(['app_status']);
+  });
   it('shows the food, the place and the wait', async () => {
     serve(view());
     show();

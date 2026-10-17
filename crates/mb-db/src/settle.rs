@@ -48,6 +48,23 @@ pub fn settle_checked(
     by: StaffId,
     authorize: impl FnOnce(&Repos<'_>) -> Result<(), DbError>,
 ) -> Result<SettledOrder, DbError> {
+    settle_checked_with_kitchen(db, till, order, bill, settlement, at, by, false, authorize)
+}
+
+/// Settle with the shop's payment-before-preparation policy. Kitchen closure is atomic
+/// with payment; service-only orders created for combined tables keep their tickets.
+#[allow(clippy::too_many_arguments, reason = "settlement inputs and kitchen policy")]
+pub fn settle_checked_with_kitchen(
+    db: &Db,
+    till: Till<'_>,
+    order: OpenOrder,
+    bill: Bill,
+    settlement: Settlement,
+    at: Timestamp,
+    by: StaffId,
+    keep_paid: bool,
+    authorize: impl FnOnce(&Repos<'_>) -> Result<(), DbError>,
+) -> Result<SettledOrder, DbError> {
     let (outlet, terminal) = (till.outlet, till.terminal);
     db.transaction(|tx| {
         let repos = Repos::new(tx);
@@ -200,6 +217,9 @@ pub fn settle_checked(
             }
         }
         repos.orders().finish_edit(&settled.core.id)?;
+        if !keep_paid {
+            repos.kitchen().close_order(settled.core.id.as_str())?;
+        }
         Ok(settled)
     })
 }

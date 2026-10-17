@@ -32,6 +32,7 @@ export interface State {
   cartHasItems: boolean;
   /** Whether the kitchen has been told everything in the cart. */
   kitchenUpToDate: boolean;
+  enterCompletesBill: boolean;
 }
 
 /** Ten, and it is a design decision rather than a performance limit. */
@@ -54,7 +55,7 @@ export type Event =
   | { kind: 'suggestions'; items: readonly MenuItemView[] }
   | { kind: 'tables'; tables: readonly TableView[] }
   | { kind: 'processing'; orders: readonly TableView[] }
-  | { kind: 'cart'; hasItems: boolean; kitchenUpToDate: boolean }
+  | { kind: 'cart'; hasItems: boolean; kitchenUpToDate: boolean; enterCompletesBill?: boolean }
   /** The order type, and whether the shop's settings lock it. */
   | { kind: 'order-type'; value: string; locked: boolean }
   /** A tap. Touch reaches everything the keyboard does. */
@@ -128,6 +129,7 @@ export function initial(orderType: string = ORDER_TYPES[0]): State {
     orderTypeLocked: false,
     cartHasItems: false,
     kitchenUpToDate: true,
+    enterCompletesBill: false,
   };
 }
 
@@ -168,6 +170,7 @@ export function reduce(state: State, event: Event): [State, Command[]] {
           ...state,
           cartHasItems: event.hasItems,
           kitchenUpToDate: event.kitchenUpToDate,
+          enterCompletesBill: event.enterCompletesBill ?? false,
         },
         [],
       ];
@@ -378,7 +381,7 @@ function key(state: State, pressed: string): [State, Command[]] {
     if (state.cartHasItems) {
       return [
         state,
-        [{ do: state.kitchenUpToDate ? 'complete-bill' : 'print-kitchen' }],
+        [{ do: state.enterCompletesBill || state.kitchenUpToDate ? 'complete-bill' : 'print-kitchen' }],
       ];
     }
     const firstOpen = state.processing[0];
@@ -436,12 +439,17 @@ export const SHORTCUTS: readonly {
   what: string;
   group: string;
 }[] = [
+  { group: 'The order', keys: 'Ctrl + Z', what: 'Revert the latest bill today from an empty counter; complete it with the same bill number. Text fields keep normal undo.' },
+  { group: 'The order', keys: 'F1', what: 'Print KOT or save the table/order, as selected in Settings > Billing > Order workflow' },
+  { group: 'The order', keys: 'F2', what: 'Complete and print the bill directly, without printing KOT first; uses the selected payment mode' },
+  { group: 'The order', keys: 'Enter in Cash given', what: 'Save the cash amount and complete the bill' },
+  { group: 'The counter', keys: 'Tab / Shift + Tab', what: 'Move to the next or previous control; Enter or Space activates a button' },
   { group: 'Searching', keys: 'type', what: 'Search the menu — from anywhere on the screen' },
   { group: 'Searching', keys: '↑ ↓', what: 'Move through the suggestions' },
   { group: 'Searching', keys: 'Enter', what: 'Choose the highlighted item, then say how many' },
   { group: 'Searching', keys: '↑ ↓ / Enter / Esc', what: 'How many: one more or fewer, add it, or leave it' },
   { group: 'The order', keys: 'press the quantity', what: 'Change how many, on the line' },
-  { group: 'The order', keys: 'Enter', what: 'On an empty box: print the kitchen ticket — the order waits under Processing orders' },
+  { group: 'The order', keys: 'Enter', what: 'With items added and the search box empty: save/send KOT first, or complete directly when Enter completes the bill directly is enabled in Billing settings' },
   { group: 'The order', keys: 'Enter', what: 'On an order from Processing orders: complete the bill' },
   { group: 'The order', keys: 'table number, Enter', what: "Open that table's order — typed items go with you" },
   { group: 'The order', keys: 'Enter, with no table', what: 'A dine-in order asks for its table number in a box; type it and the kitchen ticket goes' },
@@ -457,4 +465,9 @@ export const SHORTCUTS: readonly {
   // not only on this one — but it is documented HERE, because the help sheet is generated from
   // this table and a shortcut written down somewhere else is a shortcut nobody learns.
   { group: 'The counter', keys: 'Ctrl + L', what: 'Lock the counter' },
+  { group: 'Settle requests', keys: '↑ / ↓', what: 'With the settle requests dialog open, choose a mobile payment request' },
+  { group: 'Settle requests', keys: '← / →', what: 'Choose the payment mode for the selected request' },
+  { group: 'Settle requests', keys: 'Enter', what: 'Settle the selected request' },
+  { group: 'Kitchen', keys: '1–9', what: 'On the Kitchen screen, advance the corresponding visible ticket or acknowledge its cancellation' },
+  { group: 'Dialogs', keys: 'Esc', what: 'Close the current dialog; some actions wait until their work finishes' },
 ];

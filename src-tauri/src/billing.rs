@@ -529,6 +529,8 @@ pub struct CartView {
     pub order_type_locked: bool,
     /// The shop has no kitchen ticket, so its buttons are not shown.
     pub kitchen_ticket_off: bool,
+    /// Enter on an empty search completes the bill directly, when enabled by the shop.
+    pub enter_completes_bill: bool,
     /// The billing screen shows the table grid; off, the orders being cooked take its room.
     pub tables_on_counter: bool,
     /// A beep when a phone lands an order — the shop's switch under Settings › Billing.
@@ -665,8 +667,7 @@ pub struct TableView {
     pub by: Option<String>,
     pub by_id: Option<String>,
     pub order_id: Option<String>,
-    /// Stable identity of the food and notes, independent of timers, payments and selection.
-    /// A same-price substitution or another quantity still deserves an arrival cue.
+    /// Last mobile kitchen submission id. Counter edits never change this cue.
     #[ts(optional)]
     pub arrival_key: Option<String>,
     /// The letter, when this tile is a second party on its table ("B" of "4B"). With no
@@ -802,6 +803,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
         length_says: state.cart.length_says().unwrap_or_default(),
         order_type_locked: config.billing.lock_order_type,
         kitchen_ticket_off: config.billing.kitchen_ticket_off,
+        enter_completes_bill: config.billing.enter_completes_bill,
         tables_on_counter: config.billing.tables_on_counter,
         arrival_beep: config.billing.arrival_beep,
         arrival_beat: config.billing.arrival_beat,
@@ -1160,7 +1162,7 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         by: None,
         by_id: Some(core.created_by.as_str().to_owned()),
         order_id: Some(id.clone()),
-        arrival_key: Some(arrival_key(&core.cart, core.note.as_deref())),
+        arrival_key: None,
         seat: core.seat().map(|s| s.as_str().to_owned()),
         token: order.token().map(|claimed| claimed.formatted.clone()),
         bill_number: order.bill_number().map(|claimed| claimed.formatted.clone()),
@@ -1175,16 +1177,6 @@ fn tile_for(order: &AnyOrder, seat: Seat<'_>) -> TableView {
         section_order: section.order,
         seats: crate::ipc::count(seats),
     }
-}
-
-/// The persisted order contents are the source of arrival identity. Billing revision only
-/// changes on bill corrections, and a monetary total misses equal-price item changes.
-fn arrival_key(cart: &Cart, note: Option<&str>) -> String {
-    let lines: Vec<_> = cart.lines().iter().map(|line| (line.identity(), line.qty)).collect();
-    // These concrete types contain no fallible map keys or floating-point values.
-    let contents = serde_json::to_vec(&(lines, note)).unwrap_or_default();
-    let digest = ring::digest::digest(&ring::digest::SHA256, &contents);
-    digest.as_ref().iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The room a tile sits in: its name, and where the shop puts it. The two always travel
@@ -1234,10 +1226,18 @@ pub(crate) fn decorate(
         mb_db::repo::events::SETTLE_DECLINED,
     )?;
     let people = repos.people().list_staff(crate::state::OUTLET)?;
+    let arrivals = repos.events().latest_of_two(
+        mb_db::repo::events::PHONE_ORDER,
+        mb_db::repo::events::PHONE_ORDER,
+    )?;
     for tile in tiles.iter_mut() {
         let Some(order_id) = tile.order_id.clone() else {
             continue;
         };
+        // Only phone submissions announce an arrival. Counter edits, totals and
+        // timer refreshes must never replay a phone's notification.
+        tile.arrival_key = arrivals.iter().find(|event| event.order_id == order_id)
+            .and_then(|event| event.detail.clone());
         tile.kitchen_minutes = told
             .iter()
             .find(|(id, _)| id == &order_id)
@@ -1311,22 +1311,6 @@ mod tests {
 
     fn one() -> Qty {
         Qty::from_whole(1).expect("qty")
-    }
-
-    #[test]
-    fn arrival_identity_detects_equal_price_substitutions_quantities_and_notes() {
-        let first = item("itm_one", "First", 10_000, mb_core::TaxSpec::exempt());
-        let second = item("itm_two", "Second", 10_000, mb_core::TaxSpec::exempt());
-        let mut cart = Cart::new();
-        cart.add(first, one(), None, vec![]).expect("first item");
-        let baseline = arrival_key(&cart, None);
-        assert_eq!(baseline, arrival_key(&cart.clone(), None), "unchanged rereads are stable");
-        assert_ne!(baseline, arrival_key(&cart, Some("Takeaway containers")));
-        cart.set_qty(0, Qty::from_whole(2).expect("two")).expect("quantity");
-        assert_ne!(baseline, arrival_key(&cart, None));
-        let mut swapped = Cart::new();
-        swapped.add(second, one(), None, vec![]).expect("substitute");
-        assert_ne!(baseline, arrival_key(&swapped, None), "the same price is not the same food");
     }
 
     /// A registered shop — a blank GST number bills without GST, by design.

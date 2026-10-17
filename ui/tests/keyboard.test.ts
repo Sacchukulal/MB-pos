@@ -85,6 +85,27 @@ const cart = (hasItems: boolean, kitchenUpToDate = true): Event => ({
 const chosen = (): State =>
   run(initial(), type('dos'), suggest(item('itm_dosa', 'Masala Dosa')), press('Enter'))[0];
 
+describe('fast service Enter', () => {
+  it.each([false, true])('completes directly with kitchenUpToDate=%s', (kitchenUpToDate) => {
+    const [, commands] = run(initial(), { kind: 'cart', hasItems: true, kitchenUpToDate, enterCompletesBill: true }, press('Enter'));
+    expect(commands).toEqual([{ do: 'complete-bill' }]);
+  });
+
+  it('keeps item selection and quantity confirmation separate from completion', () => {
+    const enabled = { ...initial(), enterCompletesBill: true, cartHasItems: true };
+    const [asking, commands] = run(enabled, type('dos'), suggest(item('itm_dosa', 'Masala Dosa')), press('Enter'));
+    expect(asking.mode.kind).toBe('quantity');
+    expect(commands.some((command) => command.do === 'complete-bill')).toBe(false);
+    const [, added] = reduce(asking, press('Enter'));
+    expect(added).toEqual([{ do: 'add-item', itemId: 'itm_dosa', qty: '1' }, { do: 'focus-search' }]);
+  });
+
+  it('returns to the normal KOT/save workflow when switched off', () => {
+    const [, commands] = run({ ...initial(), enterCompletesBill: true }, cart(true, false), press('Enter'));
+    expect(commands).toEqual([{ do: 'print-kitchen' }]);
+  });
+});
+
 describe('searching', () => {
   it('typing searches, and the first result is highlighted', () => {
     // Highlighted immediately, so Enter is always one keystroke away.

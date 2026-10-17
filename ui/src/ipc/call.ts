@@ -109,6 +109,7 @@ import type { PhonesView } from './generated/PhonesView';
 import type { PeriodArg } from './generated/PeriodArg';
 import type { ReportListView } from './generated/ReportListView';
 import type { ReportView } from './generated/ReportView';
+import type { ReportSelection } from './generated/ReportSelection';
 import type { SavedFileView } from './generated/SavedFileView';
 import type { CounterEdit } from './generated/CounterEdit';
 import type { NoticesView } from './generated/NoticesView';
@@ -265,7 +266,6 @@ export interface Commands {
   cancel_order: { args: { orderId: string; reason: string }; returns: void };
   void_line: { args: { index: number; reason: string; expectedLine?: string }; returns: CartView };
   reprint_bill: { args: { orderId: string; reason: string }; returns: string };
-  bill_pdf: { args: { orderId: string }; returns: SavedFileView };
 
   // The menu.
   menu_categories: { args: void; returns: CategoryView[] };
@@ -553,7 +553,7 @@ export interface Commands {
 
   /** The summary is composed in Rust; this side sends it. */
   share_report: {
-    args: { id: string; period: PeriodArg; channel: Channel };
+    args: { id: string; period: PeriodArg; channel: Channel; selection?: ReportSelection };
     returns: ShareView;
   };
 
@@ -654,11 +654,11 @@ export interface Commands {
   // Thirteen reports behind four commands, because the report list is the screen.
   dashboard: { args: { period: PeriodArg | null }; returns: DashboardView };
   report_list: { args: void; returns: ReportListView };
-  report: { args: { id: string; period: PeriodArg }; returns: ReportView };
-  report_csv: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
-  report_pdf: { args: { id: string; period: PeriodArg }; returns: SavedFileView };
+  report: { args: { id: string; period: PeriodArg; selection?: ReportSelection }; returns: ReportView };
+  report_csv: { args: { id: string; period: PeriodArg; selection?: ReportSelection }; returns: SavedFileView };
+  report_pdf: { args: { id: string; period: PeriodArg; selection?: ReportSelection }; returns: SavedFileView };
   /** On the shop's own printer, on the paper that is in it. */
-  report_print: { args: { id: string; period: PeriodArg }; returns: string };
+  report_print: { args: { id: string; period: PeriodArg; selection?: ReportSelection }; returns: string };
 
   // The phones this counter serves.
   network: { args: void; returns: NetworkView };

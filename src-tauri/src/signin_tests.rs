@@ -1399,6 +1399,7 @@ fn a_big_void_needs_a_second_person() {
     let scratch = Scratch::new("void_approval");
     let app = a_trading_shop(&scratch);
     hire(&app, "staff_waiter", "Priya", RolePreset::Waiter, "1111");
+    hire(&app, "staff_manager", "Anil", RolePreset::Manager, "3579");
 
     // Every void in this shop needs approval.
     app.with_shop(|shop| {
@@ -1422,13 +1423,16 @@ fn a_big_void_needs_a_second_person() {
     let target = bills[0].order_id.clone();
 
     // (a) no approver at all.
+    login_on(&app, "staff_manager".to_owned(), "3579".to_owned()).expect("manager signed in");
     let refused = void_bill_on(&app, target.clone(), "Wrong price".to_owned(), None, None)
         .expect_err("a big void went through unapproved");
     assert_eq!(refused.code, "void.needs_approval");
     assert!(refused.message.contains("manager"), "{}", refused.message);
 
     // (b) an approver who may not void.
-    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("signed back in");
+    let refused = void_bill_on(&app, target.clone(), "Wrong price".to_owned(),
+        Some("staff_manager".to_owned()), Some("3579".to_owned())).expect_err("self approval");
+    assert_eq!(refused.code, "void.second_person");
     let refused = void_bill_on(
         &app,
         target.clone(),

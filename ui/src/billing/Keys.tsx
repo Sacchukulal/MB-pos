@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { Button, Input, Modal, NumberInput, Pick, cx, onlyAmount } from '../kit';
+import { Button, Input, Modal, NumberInput, Pick, Page, PageHeader, SectionHeader, cx, onlyAmount } from '../kit';
 import type { MenuItemView } from '../ipc/generated/MenuItemView';
 import type { TableView } from '../ipc/generated/TableView';
 import { SHORTCUTS, type Mode } from './keyboard';
@@ -270,7 +270,6 @@ function OccupiedTableBox({ table, tables, busy, onOpen, onClose }: {
 
 /** The shortcut sheet. */
 export function HelpSheet({ onClose }: { onClose: () => void }) {
-  const groups = [...new Set(SHORTCUTS.map((s) => s.group))];
   return (
     <Modal
       open
@@ -286,10 +285,25 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
         </>
       }
     >
-      <div className="mb-help">
+      <ShortcutList />
+    </Modal>
+  );
+}
+
+export function KeyboardShortcuts() {
+  return <Page className="mb-shortcuts">
+    <PageHeader title="Keyboard shortcuts" />
+    <p className="mb-shortcuts__intro">In Billing, type an item, press Enter, choose its quantity and press Enter again. Use F1 for KOT or F2 to complete the bill directly. Finish any open dialog before using F1 or F2.</p>
+    <ShortcutList />
+  </Page>;
+}
+
+function ShortcutList() {
+  const groups = [...new Set(SHORTCUTS.map((s) => s.group))];
+  return <div className="mb-help">
         {groups.map((group) => (
           <div className="mb-help__group" key={group}>
-            <span className="mb-floor__heading">{group}</span>
+            <SectionHeader title={group} />
             {SHORTCUTS.filter((s) => s.group === group).map((shortcut) => (
               <div className="mb-help__row" key={`${group}-${shortcut.keys}-${shortcut.what}`}>
                 <kbd className="mb-help__keys">{shortcut.keys}</kbd>
@@ -298,7 +312,5 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         ))}
-      </div>
-    </Modal>
-  );
+      </div>;
 }

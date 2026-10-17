@@ -16,6 +16,7 @@ const { ToastProvider } = await import('../src/kit');
 import type { SettingsView } from '../src/ipc/generated/SettingsView';
 import type { SettingView } from '../src/ipc/generated/SettingView';
 import type { PreviewLine } from '../src/ipc/generated/PreviewLine';
+import { Field } from '../src/settings/Form';
 
 function line(
   text: string,
@@ -60,6 +61,21 @@ function setting(
     ...extra,
   };
 }
+
+it('keeps Print KOT and Save order as one exclusive persisted setting', () => {
+  const changed = vi.fn();
+  const field = setting('billing.kitchen_ticket_off', 'Order button', 'tick', '0');
+  const { rerender } = render(<Field setting={field} value="0" changed={false} disabled={false} onChange={changed} />);
+  expect(screen.getByRole('radio', { name: 'Print KOT' })).toBeChecked();
+  expect(screen.getByRole('radio', { name: 'Save order only' })).not.toBeChecked();
+  fireEvent.click(screen.getByRole('radio', { name: 'Save order only' }));
+  expect(changed).toHaveBeenLastCalledWith('1');
+  rerender(<Field setting={field} value="1" changed={false} disabled={false} onChange={changed} />);
+  expect(screen.getByRole('radio', { name: 'Print KOT' })).not.toBeChecked();
+  expect(screen.getByRole('radio', { name: 'Save order only' })).toBeChecked();
+  fireEvent.click(screen.getByRole('radio', { name: 'Print KOT' }));
+  expect(changed).toHaveBeenLastCalledWith('0');
+});
 
 const view: SettingsView = {
   hasShop: true,

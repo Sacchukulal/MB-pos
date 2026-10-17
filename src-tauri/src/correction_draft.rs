@@ -64,11 +64,11 @@ pub fn preview_on(app: &App) -> UiResult<CorrectionSaveView> {
     let approvers = app.with_shop(|shop| shop.db.read_transaction(|tx| {
         Ok(mb_db::Repos::new(tx).people().list_staff(OUTLET)?.into_iter()
             .filter(|person| person.status == mb_db::repo::people::StaffStatus::Active
-                && person.permissions.has(Permission::BillVoid) && person.id != actor.staff_id)
+                && person.permissions.has(Permission::BillVoid) && person.id != actor.staff_id && person.pin_hash.is_some())
             .map(|person| crate::lan::PersonPick { id: person.id.as_str().to_owned(), name: person.name }).collect())
     }).map_err(|error| words::from_db(&error)))?;
     let cart = app.with_cart(|state| crate::billing::cart_view(state, &app.shop_config()))?;
-    Ok(CorrectionSaveView { cart, proposal_token: proposal_token(app)?, original_total: original.into(), new_total: amount.into(), needs_approval: needs_manager(&issued, amount, threshold), approvers })
+    Ok(CorrectionSaveView { cart, proposal_token: proposal_token(app)?, original_total: original.into(), new_total: amount.into(), needs_approval: !app.sessions().current().is_some_and(|session| session.is_owner()) && needs_manager(&issued, amount, threshold), approvers })
 }
 
 pub fn proposal_token(app: &App) -> UiResult<String> {
@@ -83,7 +83,7 @@ pub fn authorize_on(app: &App, approver_id: Option<String>, pin: Option<String>)
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let actor = guard::require(app, Permission::BillRevert)?;
     let (issued, amount, threshold) = proposal(app)?;
-    let manager = needs_manager(&issued, amount, threshold);
+    let manager = !app.sessions().current().is_some_and(|session| session.is_owner()) && needs_manager(&issued, amount, threshold);
     let by = if manager {
         let (Some(id), Some(pin)) = (approver_id, pin) else {
             return Err(UiError::new("void.needs_approval", "This corrected bill needs a manager's approval before saving."));
@@ -244,6 +244,8 @@ mod tests {
         let scratch = Scratch::new("final_correction_approval");
         let (app, id, before) = editing(&scratch);
         crate::signin_tests::hire(&app, "manager_final", "Manager", mb_auth::RolePreset::Manager, "2468");
+        crate::signin_tests::hire(&app, "operator_final", "Operator", mb_auth::RolePreset::Manager, "1357");
+        crate::ipc::login_on(&app, "operator_final".into(), "1357".into()).expect("staff operator");
         app.with_shop(|shop| shop.db.transaction(|tx| {
             mb_db::Repos::new(tx).settings().set(OUTLET, APPROVAL_KEY,
                 &mb_core::Money::from_paise(6_000), crate::flows::now(), None)
@@ -272,6 +274,8 @@ mod tests {
     fn lowering_the_corrected_total_does_not_avoid_approval_on_the_original_amount() {
         let scratch = Scratch::new("final_original_threshold");
         let (app, _, _) = editing(&scratch);
+        crate::signin_tests::hire(&app, "operator_final", "Operator", mb_auth::RolePreset::Manager, "1357");
+        crate::ipc::login_on(&app, "operator_final".into(), "1357".into()).expect("staff operator");
         app.with_shop(|shop| shop.db.transaction(|tx| mb_db::Repos::new(tx).settings().set(
             OUTLET, APPROVAL_KEY, &mb_core::Money::from_paise(4_000), crate::flows::now(), None))
             .map_err(|error| words::from_db(&error))).expect("threshold");

@@ -8,6 +8,8 @@ use crate::error::DbError;
 
 /// A kitchen ticket went to the printer.
 pub const KITCHEN_TICKET: &str = "kitchen_ticket";
+/// New food submitted by a phone; the detail is its exactly-once intent id.
+pub const PHONE_ORDER: &str = "phone_order";
 /// A phone asked for the bill and the counter printed it for the table.
 pub const BILL_ASKED: &str = "bill_asked";
 /// A phone asked the counter to settle the bill; a person at the counter confirms or declines.

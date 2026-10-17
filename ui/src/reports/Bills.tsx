@@ -16,7 +16,6 @@ import {
   Notice,
   Numeric,
   Panel,
-  RowMenu,
   Scroller,
   SearchField,
   Select,
@@ -223,85 +222,61 @@ export function Bills({ onGoTo, initialOrderId, periods = [] }: {
     if (opened) await open(opened);
   };
 
-  const approve = async (revertId: string) => {
+  const approvingRef = useRef(false);
+  const [approving, setApproving] = useState(false);
+  const approve = async (revertIds: string[]) => {
+    if (approvingRef.current) return;
+    approvingRef.current = true;
+    setApproving(true);
     try {
-      await call('approve_revert', { revertId });
+      for (const revertId of revertIds) await call('approve_revert', { revertId });
       toast.show('ok', 'Approved.');
-      await refresh();
     } catch (cause) {
       complain(cause);
+    } finally {
+      try { await refresh(); } finally {
+        approvingRef.current = false;
+        setApproving(false);
+      }
     }
   };
 
-  const invoice = (bill: BillRowView) => {
-    call('bill_pdf', { orderId: bill.orderId })
-      .then((saved) => toast.show('ok', saved.message))
-      .catch(complain);
-  };
-
-  /** The buttons for one bill: on its row, and again in its dialog. */
+  /** Keep the row compact; refunds remain available inside the bill details. */
   const actionsFor = (bill: BillRowView, size: 'sm' | 'md') => {
     if (!view || bill.state === 'cancelled') return null;
     const paid = bill.state === 'settled' && !bill.returned;
     const inRow = size === 'sm';
-    const correctionActions = (
-      <>
-        {paid && view.canRevert && !bill.dayClosed ? (
-          <Button
-            role={inRow ? 'menuitem' : undefined}
-            size={size}
-            variant={inRow ? 'quiet' : 'primary'}
-            onClick={() => setPending({ kind: 'revert', bill })}
-          >
-            {bill.correctionOpen ? 'Resume changes' : 'Edit / return items'}
-          </Button>
-        ) : null}
-        {paid && view.canVoid ? (
-          <Button role={inRow ? 'menuitem' : undefined} size={size} variant="quiet" onClick={() => setPending({ kind: 'return', bill })}>
-            Return whole bill
-          </Button>
-        ) : null}
-        {!paid && view.canVoid ? (
-          <Button role={inRow ? 'menuitem' : undefined} size={size} variant="quiet" onClick={() => setPending({ kind: 'refund', bill })}>Return money</Button>
-        ) : null}
-      </>
-    );
     return (
       <>
-        {!inRow ? correctionActions : null}
         {view.canReprint ? (
-          inRow ? (
-            <span className="mb-tip">
-              <Button size={size} variant="quiet" iconOnly className="mb-bills__reprint"
-                title="Reprint bill" aria-label="Reprint bill" icon={<Icon name="printer" size="sm" />}
-                onClick={() => setPending({ kind: 'reprint', bill })} />
-              <span className="mb-tip__bubble" role="tooltip">Reprint bill</span>
-            </span>
-          ) : (
-            <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'reprint', bill })}>
-              Reprint
-            </Button>
-          )
+          <Button size="md" variant="secondary" iconOnly
+            title="Reprint bill" aria-label="Reprint bill" icon={<Icon name="printer" size="lg" />}
+            onClick={() => setPending({ kind: 'reprint', bill })} />
         ) : null}
-        <RowMenu label={`${inRow ? 'Actions' : 'More'} for bill ${bill.number}`} size={size}
-          text={inRow ? 'Actions' : undefined} icon={inRow ? 'chevron-down' : 'more'} keyboardNavigation>
-          {inRow ? correctionActions : null}
-          <Button role="menuitem" size="sm" variant="quiet" onClick={() => invoice(bill)}>
-            Invoice PDF
+        {paid && view.canRevert && !bill.dayClosed ? (
+          <Button size={size} onClick={() => setPending({ kind: 'revert', bill })}
+            title="Open in Billing and complete with the same bill number">
+            {bill.correctionOpen ? 'Resume bill' : 'Revert bill'}
           </Button>
-          {paid && view.canVoid && !bill.dayClosed ? (
-            <>
-              <div role="separator" className="mb-bills__action-divider" />
-              <Button role="menuitem" size="sm" variant="danger" onClick={() => setPending({ kind: 'void', bill })}>
-                Cancel bill (no refund)
-              </Button>
-            </>
-          ) : null}
-        </RowMenu>
+        ) : null}
+        {paid && view.canVoid && !bill.dayClosed ? (
+          <Button size="md" variant="danger" iconOnly
+            title="Delete bill" aria-label="Delete bill" icon={<Icon name="trash" size="lg" />}
+            onClick={() => setPending({ kind: 'void', bill })} />
+        ) : null}
+        {!inRow && paid && view.canVoid ? (
+          <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'return', bill })}>
+            Refund entire bill
+          </Button>
+        ) : null}
+        {!inRow && !paid && view.canVoid && detail?.canRefund ? (
+          <Button size={size} variant="quiet" onClick={() => setPending({ kind: 'refund', bill })}>
+            Return money
+          </Button>
+        ) : null}
       </>
     );
   };
-
   const columns: Column<BillRowView>[] = [
     {
       key: 'number',
@@ -318,6 +293,16 @@ export function Bills({ onGoTo, initialOrderId, periods = [] }: {
       numeric: true,
       render: (b) => (b.state === 'cancelled' ? '—' : <Money value={b.total} />),
     },
+    {
+      key: 'do',
+      header: '',
+      render: (b) => (
+        // Keep bill controls ahead of secondary details on narrow screens.
+        <div className="mb-row mb-bills__actions" onClick={(event) => event.stopPropagation()}>
+          {actionsFor(b, 'sm')}
+        </div>
+      ),
+    },
     { key: 'paidBy', header: 'Paid by', optional: true, render: (b) => b.paidBy },
     { key: 'cashier', header: 'Taken by', render: (b) => b.cashier ?? '—' },
     {
@@ -329,8 +314,8 @@ export function Bills({ onGoTo, initialOrderId, periods = [] }: {
             <Badge tone={TONES[b.state] ?? 'neutral'}>{b.stateWord}</Badge>
             {b.returned ? <Badge tone="warn">Returned</Badge> : null}
             {b.edited ? <Badge tone="accent">Edited</Badge> : null}
-            {b.approval === 'waiting' ? <Badge tone="warn">Needs approval</Badge> : null}
-            {b.approval === 'approved' ? <Badge tone="ok">Approved</Badge> : null}
+            {b.correctionOpen ? <Badge tone="accent">Editing</Badge> : b.approval === 'waiting' ? <Badge tone="warn">Needs approval</Badge> : null}
+            {!b.correctionOpen && b.approval === 'approved' ? <Badge tone="ok">Approved</Badge> : null}
           </span>
           {b.voidReason ? <span className="mb-bills__second">{b.voidReason}</span> : null}
           {b.refunded ? (
@@ -345,16 +330,6 @@ export function Bills({ onGoTo, initialOrderId, periods = [] }: {
       numeric: true,
       optional: true,
       render: (b) => (b.reprints > 0 ? <Numeric>{b.reprints + 1}</Numeric> : ''),
-    },
-    {
-      key: 'do',
-      header: '',
-      render: (b) => (
-        // The buttons act on the bill; only the rest of the row opens it.
-        <div className="mb-row mb-bills__actions" onClick={(event) => event.stopPropagation()}>
-          {actionsFor(b, 'sm')}
-        </div>
-      ),
     },
   ];
 
@@ -451,6 +426,7 @@ export function Bills({ onGoTo, initialOrderId, periods = [] }: {
           notice={returnNotice}
           actions={detail ? actionsFor(detail.row, 'md') : null}
           onApprove={approve}
+          approving={approving}
           onClose={close}
         />
       ) : null}
@@ -484,12 +460,14 @@ function BillDialog({
   notice,
   actions,
   onApprove,
+  approving,
   onClose,
 }: {
   detail: BillDetailView | null;
   notice: string | null;
   actions: ReactNode;
-  onApprove: (revertId: string) => void | Promise<void>;
+  onApprove: (revertIds: string[]) => void | Promise<void>;
+  approving: boolean;
   onClose: () => void;
 }) {
   const lineColumns: Column<CartLineView>[] = [
@@ -545,9 +523,8 @@ function BillDialog({
           {detail?.canApprove && waiting.length > 0 ? (
             <Button
               variant="primary"
-              onClick={() => {
-                for (const edit of waiting) void onApprove(edit.id);
-              }}
+              disabled={approving}
+              onClick={() => { void onApprove(waiting.map((edit) => edit.id)); }}
             >
               Approve
             </Button>
@@ -574,14 +551,16 @@ function BillDialog({
                 <Badge tone={TONES[row.state] ?? 'neutral'}>{row.stateWord}</Badge>
                 {row.returned ? <Badge tone="warn">Returned on a later day</Badge> : null}
                 {row.edited ? <Badge tone="accent">Edited</Badge> : null}
+                {row.correctionOpen ? <Badge tone="accent">Editing</Badge> : null}
                 {row.reprints > 0 ? <Badge tone="neutral">{row.reprints + 1} copies</Badge> : null}
               </span>
             </Fact>
           </Facts>
 
-          {detail.edits.map((edit) => (
+          {row.correctionOpen ? <p className="mb-muted">An edit is still open. Choose Resume bill, then Complete bill or Discard changes in Billing.</p> : null}
+          {detail.edits.map((edit, index) => (
             <div className="mb-stack mb-stack--gap-inline" key={edit.id}>
-              <Notice tone={edit.approvedAt ? 'ok' : 'warn'}>
+              <Notice tone={edit.approvedAt ? 'ok' : row.state !== 'settled' || row.returned ? 'info' : 'warn'}>
                 <span className="mb-stack mb-stack--gap-inline">
                   <strong>
                     Taken back by {edit.by}, {edit.at}: {edit.reason}
@@ -597,7 +576,8 @@ function BillDialog({
                   <span>
                     {edit.approvedAt
                       ? `Approved by ${edit.approvedBy ?? ''}, ${edit.approvedAt}`
-                      : 'Waiting for approval'}
+                      : row.state !== 'settled' || row.returned ? 'Bill cancelled or returned; no edit approval required.'
+                      : row.correctionOpen && index === detail.edits.length - 1 ? 'Edit in progress — complete the bill to finish.' : 'Waiting for approval'}
                   </span>
                 </span>
               </Notice>
@@ -676,7 +656,7 @@ function TotalLine({ label, value, strong }: { label: string; value: string; str
   );
 }
 
-function Correction({
+export function Correction({
   pending,
   approvers,
   onClose,
@@ -712,15 +692,15 @@ function Correction({
   // Editing a settled bill uses the shop's existing correction reasons.
   const kind: ReasonKind = pending.kind === 'reprint' ? 'reprint' : 'void';
   const what = {
-    revert: `Edit bill ${bill.number} — ${bill.total.text}`,
-    void: `Cancel bill ${bill.number} — ${bill.total.text}`,
+    revert: `Revert bill ${bill.number} — ${bill.total.text}`,
+    void: `Delete bill ${bill.number} — ${bill.total.text}`,
     return: `Return bill ${bill.number}`,
     reprint: `Reprint bill ${bill.number}`,
     refund: `Return money on bill ${bill.number}`,
   }[pending.kind];
   const confirmLabel = {
-    revert: 'Edit bill',
-    void: 'Cancel bill (no refund)',
+    revert: 'Revert bill',
+    void: 'Delete bill',
     return: 'Confirm return',
     reprint: 'Print another copy',
     refund: 'Record the money going back',
@@ -777,14 +757,21 @@ function Correction({
     }
   };
 
+  if (pending.kind === 'refund' && offer && offer.tenders.length === 0) {
+    return <Modal open title={`Bill ${bill.number}`} onClose={onClose}
+      actions={<Button onClick={onClose}>Close</Button>}>
+      <Notice tone="info">There is no payment left to refund. Any refunds already recorded remain in this bill’s history.</Notice>
+    </Modal>;
+  }
+
   return (
     <ReasonDialog
       wide={returnsMoney}
       kind={kind}
       what={what}
       description={pending.kind === 'revert'
-        ? 'Change the items on the billing screen, then Save changes. The bill keeps its number.'
-        : pending.kind === 'void' ? 'This cancels the bill without recording a refund. Use Return whole bill if you are paying the customer back.'
+        ? 'Change the items on the billing screen, then Complete bill. The bill keeps its number.'
+        : pending.kind === 'void' ? 'This cancels the bill without recording a refund and keeps its audit history. To refund the customer, open the bill details and choose Refund entire bill.'
         : returnsMoney ? 'Enter refunds by original payment method. This records the refund; send Card/UPI refunds through your provider separately. Prepared food is not returned to stock.' : undefined}
       confirmLabel={confirmLabel}
       needsApproval={needsApproval}

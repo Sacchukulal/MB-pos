@@ -18,4 +18,8 @@ bill: BillView | null, payments: Array<PaymentView>, tip: MoneyView, change: Mon
 /**
  * Every time this bill was taken back, oldest first.
  */
-edits: Array<RevertView>, canApprove: boolean, };
+edits: Array<RevertView>, canApprove: boolean,
+/**
+ * There is still original-tender money available and this person may return it.
+ */
+canRefund: boolean, };

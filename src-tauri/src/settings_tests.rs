@@ -443,6 +443,48 @@ fn bill_copies_are_validated_saved_and_loaded() {
     assert_eq!(old.bill_copies, 1);
 }
 
+#[test]
+fn billing_workflow_settings_persist_independently_and_reach_the_cart() {
+    use crate::settings::ipc::{SettingEdit, save_on};
+    let scratch = Scratch::new("billing-workflow");
+    let app = a_shop(&scratch, "workflow");
+    let old: crate::settings::Billing = serde_json::from_str("{}").expect("older settings");
+    assert!(!old.enter_completes_bill);
+    for kitchen_off in [false, true] {
+        for direct in [false, true] {
+            save_on(&app, vec![
+                SettingEdit { key: "billing.kitchen_ticket_off".to_owned(), value: u8::from(kitchen_off).to_string() },
+                SettingEdit { key: "billing.enter_completes_bill".to_owned(), value: u8::from(direct).to_string() },
+            ]).expect("save workflow");
+            app.reload_shop_config();
+            let cart = crate::ipc::current_cart_on(&app).expect("cart");
+            assert_eq!(cart.kitchen_ticket_off, kitchen_off);
+            assert_eq!(cart.enter_completes_bill, direct);
+        }
+    }
+}
+
+#[test]
+fn kitchen_screen_and_prepaid_policy_default_off_and_persist_independently() {
+    use crate::settings::ipc::{SettingEdit, save_on};
+    let scratch = Scratch::new("kitchen-policy");
+    let app = a_shop(&scratch, "policy");
+    let old: crate::settings::Billing = serde_json::from_str("{}").expect("older settings");
+    assert!(!old.kitchen_screen);
+    assert!(!old.kitchen_keep_paid);
+    for enabled in [false, true] {
+        for keep_paid in [false, true] {
+            save_on(&app, vec![
+                SettingEdit { key: "billing.kitchen_screen".to_owned(), value: u8::from(enabled).to_string() },
+                SettingEdit { key: "billing.kitchen_keep_paid".to_owned(), value: u8::from(keep_paid).to_string() },
+            ]).expect("save kitchen policy");
+            app.reload_shop_config();
+            assert_eq!(app.shop_config().billing.kitchen_screen, enabled);
+            assert_eq!(app.shop_config().billing.kitchen_keep_paid, keep_paid);
+        }
+    }
+}
+
 fn updated_at(app: &App) -> i64 {
     app.with_shop(|shop| {
         shop.db

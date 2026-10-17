@@ -159,7 +159,6 @@ fn expired_license_locks_all_reports_but_keeps_new_billing_and_operational_drawe
         crate::refunds::refund_batch_on(&app, id.clone(), vec![("cash".into(), mb_core::Money::from_paise(100))], "Return".into()).expect_err("refund"),
         crate::refunds::return_closed_bill_on(&app, id.clone(), vec![], "Return".into(), "expired-return".into(), None, None).expect_err("historical return"),
         crate::corrections::reprint_bill_on(&app, id.clone(), "Copy".into()).expect_err("reprint"),
-        crate::flows::bill_pdf_on(&app, id.clone()).expect_err("historical invoice"),
         crate::flows::preview_order_on(&app, Some(id)).expect_err("historical preview"),
         crate::dayclose::days_on(&app).expect_err("Days history"),
         crate::reports::dashboard_on(&app, None).expect_err("dashboard"),

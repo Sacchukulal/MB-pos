@@ -38,9 +38,19 @@ pub fn share_report_on(
     period: crate::reports::PeriodArg,
     channel: Channel,
 ) -> UiResult<ShareView> {
+    share_report_selected_on(app, id, period, channel, crate::reports::ReportSelection::default())
+}
+
+pub fn share_report_selected_on(
+    app: &App,
+    id: String,
+    period: crate::reports::PeriodArg,
+    channel: Channel,
+    selection: crate::reports::ReportSelection,
+) -> UiResult<ShareView> {
     // Sending a report out is exporting it, on top of reading it.
     crate::guard::require(app, mb_auth::Permission::ReportsExport)?;
-    let report = crate::reports::report_on(app, id, period)?;
+    let report = crate::reports::report_selected_on(app, id, period, selection)?;
     let text = summarise(&report);
     hand_over(app, &text, &report.title, channel)
 }
@@ -231,8 +241,12 @@ pub fn share_report(
     id: String,
     period: crate::reports::PeriodArg,
     channel: Channel,
+    selection: Option<crate::reports::ReportSelection>,
 ) -> UiResult<ShareView> {
-    share_report_on(&app, id, period, channel)
+    match selection {
+        Some(selection) => share_report_selected_on(&app, id, period, channel, selection),
+        None => share_report_on(&app, id, period, channel),
+    }
 }
 
 #[cfg(test)]
@@ -256,6 +270,7 @@ mod tests {
         let report = crate::reports::ReportView {
             id: "sales_day".to_owned(),
             title: "Sales by day".to_owned(),
+            filters: None,
             subtitle: "1 Aug to 9 Aug 2026".to_owned(),
             columns: Vec::new(),
             rows: (0..30)

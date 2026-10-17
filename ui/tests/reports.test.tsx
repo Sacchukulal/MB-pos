@@ -120,6 +120,77 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it('applies category and item selections to display, print, exports and share, then clears them', async () => {
+  const filteredReport: ReportView = { ...invented, id: 'items', title: 'Item sales',
+    filters: { label: 'Item', categories: [{ id: 'tea', label: 'Tea counter' }, { id: 'chaat', label: 'Chaats counter' }],
+      choices: [{ id: 'masala', label: 'Masala Tea' }, { id: 'bun', label: 'Bun' }] } };
+  call.mockImplementation((command: string) => {
+    if (command === 'report_list') return Promise.resolve({ ...list, reports: [
+      { id: 'items', title: 'Item sales', description: 'Items', group: 'Items' },
+    ] });
+    if (command === 'report') return Promise.resolve(filteredReport);
+    if (command === 'share_report') return Promise.resolve({ text: 'Tea only', says: 'Copied', caveat: '' });
+    return answer(command);
+  });
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(async () => undefined) } });
+  render(<ToastProvider><Reports initial="items" /></ToastProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Select categories' }));
+  fireEvent.click(screen.getByLabelText('Tea counter'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply selection' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('report', {
+    id: 'items', period: { from: '2026-08-09', to: '2026-08-09' }, selection: { keys: [], categoryIds: ['tea'] },
+  }));
+  fireEvent.click(screen.getByRole('button', { name: 'Select items' }));
+  fireEvent.click(screen.getByLabelText('Masala Tea'));
+  fireEvent.click(screen.getByLabelText('Bun'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply selection' }));
+  const request = { id: 'items', period: { from: '2026-08-09', to: '2026-08-09' }, selection: { keys: ['masala', 'bun'], categoryIds: ['tea'] } };
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Print' })).toBeEnabled());
+  expect(call).toHaveBeenCalledWith('report', request);
+  fireEvent.click(screen.getByRole('button', { name: 'Print' }));
+  expect(call).toHaveBeenCalledWith('report_print', request);
+  for (const [label, command] of [['PDF', 'report_pdf'], ['CSV', 'report_csv']]) {
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: label }));
+    expect(call).toHaveBeenCalledWith(command, request);
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'Share' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Copy' }));
+  expect(call).toHaveBeenCalledWith('share_report', { ...request, channel: 'copy' });
+  fireEvent.click(screen.getByRole('button', { name: 'This month' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('report', { ...request, period: { from: '2026-08-01', to: '2026-08-09' } }));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('report', { id: 'items', period: { from: '2026-08-01', to: '2026-08-09' } }));
+});
+
+it('blocks output while a new selection loads and ignores an older response', async () => {
+  const selectable: ReportView = { ...invented, id: 'categories', filters: { label: 'Category', categories: null,
+    choices: [{ id: 'tea', label: 'Tea counter' }, { id: 'chaat', label: 'Chaats counter' }] } };
+  const pending: Array<(report: ReportView) => void> = [];
+  call.mockImplementation((command: string, args?: { selection?: unknown }) => {
+    if (command === 'report_list') return Promise.resolve({ ...list, reports: [
+      { id: 'categories', title: 'Category sales', description: 'Categories', group: 'Items' },
+    ] });
+    if (command === 'report') return args?.selection ? new Promise((resolve) => pending.push(resolve)) : Promise.resolve(selectable);
+    return answer(command);
+  });
+  render(<ToastProvider><Reports initial="categories" /></ToastProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Select categories' }));
+  fireEvent.click(screen.getByLabelText('Tea counter'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply selection' }));
+  expect(screen.getByRole('button', { name: 'Print' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Share' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Select categories' }));
+  fireEvent.click(screen.getByLabelText('Chaats counter'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply selection' }));
+  await act(async () => { pending[1]!({ ...selectable, rows: [['Current selection', '1', '20.00']] }); });
+  expect(screen.getByText('Current selection')).toBeTruthy();
+  await act(async () => { pending[0]!({ ...selectable, rows: [['Stale selection', '1', '10.00']] }); });
+  expect(screen.queryByText('Stale selection')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Print' })).toBeEnabled();
+});
+
 function open() {
   return render(
     <ToastProvider>
@@ -506,16 +577,16 @@ it('preserves an open edit dialog and its typed reason across a valid licence re
     return answer(command);
   });
   open();
-  fireEvent.click(await screen.findByRole('button', { name: 'Actions for bill A/7' }));
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Edit / return items' }));
-  const dialog = await screen.findByRole('dialog', { name: /Edit bill A\/7/ });
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Revert bill' }));
+  const dialog = await screen.findByRole('dialog', { name: /Revert bill A\/7/ });
   fireEvent.change(screen.getByLabelText('Additional note'), { target: { value: 'Keep this reason' } });
   let allow!: (value: ReportListView) => void;
   recheck = new Promise((resolve) => { allow = resolve; });
   fireEvent(window, new Event('focus'));
   expect(screen.queryByRole('dialog')).toBeNull();
   await act(async () => { allow(list); });
-  expect(await screen.findByRole('dialog', { name: /Edit bill A\/7/ })).toBe(dialog);
+  expect(await screen.findByRole('dialog', { name: /Revert bill A\/7/ })).toBe(dialog);
   expect(screen.getByLabelText('Additional note')).toHaveValue('Keep this reason');
   expect(call.mock.calls.filter(([command]) => command === 'reasons')).toHaveLength(1);
 });

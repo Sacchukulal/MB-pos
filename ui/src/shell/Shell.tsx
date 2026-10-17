@@ -20,6 +20,7 @@ import { DayGate } from './DayGate';
 import { More } from './More';
 import { BILL_LOOKUP_PERMISSIONS, MayProvider } from './permissions';
 import { Billing } from '../billing/Billing';
+import { KeyboardShortcuts } from '../billing/Keys';
 import { SettleDesk } from '../billing/SettleDesk';
 import { Health } from '../health/Health';
 import { Kitchen } from '../kitchen/Kitchen';
@@ -74,6 +75,13 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     icon: 'receipt',
     // `go` so an empty shop's counter can open the menu, the floor and the printers.
     render: (go) => <Billing onGoTo={go} />,
+    needs: 'bill.create',
+  },
+  {
+    id: 'keyboard-shortcuts',
+    label: 'Keyboard shortcuts',
+    icon: 'file',
+    render: () => <KeyboardShortcuts />,
     needs: 'bill.create',
   },
   {

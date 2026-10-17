@@ -667,7 +667,7 @@ pub fn complete_bill_authorized_on(
         };
         // The bill number is claimed in there, with the money, if no printed bill gave the
         // order one already.
-        let settled = mb_db::settle::settle_checked(
+        let settled = mb_db::settle::settle_checked_with_kitchen(
             &shop.db,
             till,
             open,
@@ -675,6 +675,7 @@ pub fn complete_bill_authorized_on(
             settlement,
             at,
             settled_by.clone(),
+            config.billing.kitchen_screen && config.billing.kitchen_keep_paid,
             |repos| {
                 if let Some(expected) = &expected_working {
                     repos.orders().assert_working(expected)?;
@@ -952,51 +953,6 @@ fn order_id_of(order: &AnyOrder) -> Option<String> {
     Some(order.core().id.as_str().to_owned())
 }
 
-pub fn bill_pdf_on(app: &App, order_id: String) -> UiResult<crate::reports::SavedFileView> {
-    crate::licensing::gate(app, mb_license::Feature::Reports)?;
-    crate::guard::require_any(app, crate::guard::BILL_DOCUMENT_PERMISSIONS)?;
-    let order = find_order(app, &OrderId::new(&order_id))?
-        .ok_or_else(|| UiError::new("preview.no_order", "That bill is not on this counter."))?;
-    let bill = bill_of(app, &order)?;
-    let number = order
-        .bill_number()
-        .map(|n| n.formatted.clone())
-        .ok_or_else(|| {
-            UiError::new(
-                "invoice.no_number",
-                "That order has no bill number yet, so there is no invoice to make.",
-            )
-        })?;
-
-    // The printer's own metrics, not a face's.
-    let metrics = mb_print::metrics::Metrics::printer_font(mb_print::paper::Paper::new(
-        mb_print::paper::PaperKind::A4,
-    ));
-    let document = bill_document(
-        app,
-        &metrics,
-        &BillPaper {
-            order: &order,
-            bill: &bill,
-            copy: Copy::Original,
-            cashier: None,
-            logo: false,
-        },
-    )?;
-    let laid =
-        mb_print::layout::layout_for(&document, &metrics).map_err(|e| words::from_print(&e))?;
-
-    let clean: String = number
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect();
-    crate::reports::save_and_show(
-        app,
-        &format!("Invoice-{clean}.pdf"),
-        &mb_print::pdf::to_pdf(&laid),
-    )
-}
-
 /// The bill for a stored order. A settled order carries the bill it was settled with; anything
 /// else is computed from its own cart, the same way the counter does it.
 pub(crate) fn bill_of(app: &App, order: &AnyOrder) -> UiResult<mb_core::Bill> {
@@ -1264,11 +1220,6 @@ pub fn print_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
 #[tauri::command]
 pub fn reprint_kitchen_ticket(app: State<'_, App>) -> UiResult<String> {
     reprint_kitchen_ticket_on(&app)
-}
-
-#[tauri::command]
-pub fn bill_pdf(app: State<'_, App>, order_id: String) -> UiResult<crate::reports::SavedFileView> {
-    bill_pdf_on(&app, order_id)
 }
 
 #[tauri::command]

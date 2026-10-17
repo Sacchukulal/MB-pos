@@ -108,9 +108,9 @@ function table(over: Partial<TableView> & Pick<TableView, 'id' | 'label'>): Tabl
 describe('arrivals', () => {
   it('beats for an order that landed while the screen was open, never for the first read', () => {
     vi.useFakeTimers();
-    document.documentElement.style.setProperty('--motion-beat', '1000ms');
+    document.documentElement.style.setProperty('--arrival-duration', '3000ms');
     document.documentElement.style.setProperty('--beats', '3');
-    const busy = (label: string) => table({ id: `tbl_${label}`, label, state: 'occupied', orderId: `ord_${label}` });
+    const busy = (label: string) => table({ id: `tbl_${label}`, label, state: 'occupied', orderId: `ord_${label}`, arrivalKey: `phone_${label}` });
 
     const { result, rerender } = renderHook(({ floor }) => useArrivals(floor), {
       initialProps: { floor: null as readonly TableView[] | null },
@@ -135,12 +135,12 @@ describe('arrivals', () => {
     // A phone adds food to table 1: the bill is not the bill it was, so its card beats too —
     // a timer moving on is not that.
     rerender({
-      floor: [{ ...busy('1'), total: { paise: 99_900n, text: '999.00' } }, busy('2'), busy('3')],
+      floor: [{ ...busy('1'), arrivalKey: 'phone_1_more', total: { paise: 99_900n, text: '999.00' } }, busy('2'), busy('3')],
     });
     expect([...result.current.keys()]).toEqual(['ord_1']);
     act(() => vi.advanceTimersByTime(3000));
     rerender({
-      floor: [{ ...busy('1'), total: { paise: 99_900n, text: '999.00' }, minutes: 9 }, busy('2'), busy('3')],
+      floor: [{ ...busy('1'), arrivalKey: 'phone_1_more', total: { paise: 99_900n, text: '999.00' }, minutes: 9 }, busy('2'), busy('3')],
     });
     expect(result.current.size).toBe(0);
 
@@ -686,9 +686,9 @@ describe('the processing orders (2026-08-27)', () => {
     expect(parcel.textContent).toContain('1h 10m');
   });
 
-  it('says so when nothing is cooking', () => {
-    render(<Processing orders={[]} onOpen={vi.fn()} />);
-    expect(screen.getByText('No active kitchen orders')).toBeInTheDocument();
+  it('stays blank when nothing is cooking', () => {
+    const { container } = render(<Processing orders={[]} onOpen={vi.fn()} />);
+    expect(container).toBeEmptyDOMElement();
   });
 
   // 2026-09-13: the token is the number on the kitchen ticket and the bill, and the only one

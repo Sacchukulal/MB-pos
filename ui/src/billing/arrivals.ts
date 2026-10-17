@@ -9,8 +9,8 @@ export type Arrivals = ReadonlyMap<string, number>;
 const NONE: Arrivals = new Map();
 
 function shape(tile: TableView): string {
-  // Older saved previews do not have the new field. Live Rust always supplies it.
-  return tile.arrivalKey ?? tile.total?.text ?? '';
+  // Rust supplies the last mobile submission id, never a counter total.
+  return tile.arrivalKey ?? '';
 }
 
 /** The duration remains readable when motion is disabled: the cue then stays still. */
@@ -18,7 +18,7 @@ function arrivalDuration(): number {
   const duration = cssTimeMs(
     getComputedStyle(document.documentElement).getPropertyValue('--arrival-duration'),
   );
-  return duration > 0 ? duration : 3000;
+  return duration > 0 ? duration : 1000;
 }
 
 export function useArrivals(
@@ -45,7 +45,7 @@ export function useArrivals(
         clocks.current.delete(id);
       }
     }
-    const fresh = [...now].filter(([id, value]) => before.get(id) !== value).map(([id]) => id);
+    const fresh = [...now].filter(([id, value]) => value !== '' && before.get(id) !== value).map(([id]) => id);
     if (fresh.length > 0 && sound) beep();
     const additions = new Map<string, number>();
     if (beat) {

@@ -1302,6 +1302,9 @@ fn splitting_sent_food_preserves_kitchen_station_course_and_completion() {
     use mb_core::kitchen_delivery::{Delivery, State};
     let scratch = Scratch::new("split_kitchen_work");
     let app = a_shop_with_a_room(&scratch);
+    let mut config = app.shop_config();
+    config.billing.kitchen_screen = true;
+    app.publish_shop_config(config);
     let id = seat(&app, "ord_split_kds", "tbl_1", &[("itm_dosa", 12_000, 2), ("itm_tea", 2_000, 2)], None);
     let mut order = read(&app, &id);
     let mut cart = Cart::new();

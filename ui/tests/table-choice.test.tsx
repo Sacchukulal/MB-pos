@@ -194,7 +194,7 @@ describe('saving after the table choice', () => {
       orderType: 'Dine in', table: null, payments: [], paid: zero, balance: money, change: zero,
       isEmpty: false, kitchenUpToDate: false, kitchenTold: false, covers: null,
       orderId: null, token: null, billNumber: null, fromTheFloor: [], lengthSays: '',
-      orderTypeLocked: false, kitchenTicketOff: false, tablesOnCounter: true,
+      orderTypeLocked: false, kitchenTicketOff: false, enterCompletesBill: false, tablesOnCounter: true,
       arrivalBeep: false, arrivalBeat: false,
     };
     call.mockImplementation((command: string, args?: { seat?: string }) => {

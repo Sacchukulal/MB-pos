@@ -59,7 +59,6 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ),
     // Making a customer's invoice out of a bill that already exists is reading, not billing —
     // the same authority as looking at the bill list.
-    ("bill_pdf", Access::NeedsAny(BILL_DOCUMENT_PERMISSIONS)),
     ("current_cart", Access::Needs(Permission::BillCreate)),
     ("reload_current_order", Access::Needs(Permission::BillCreate)),
     ("cart_add", Access::Needs(Permission::BillCreate)),
@@ -599,16 +598,6 @@ pub fn require_owner(app: &App) -> UiResult<Actor> {
 /// Reading an individual receipt is part of the actions that require finding it.
 /// This grants neither those actions nor access to report aggregates and exports.
 pub const BILL_LOOKUP_PERMISSIONS: &[Permission] = &[
-    Permission::ReportsView,
-    Permission::BillRevert,
-    Permission::BillRevertApprove,
-    Permission::BillVoid,
-    Permission::BillReprint,
-];
-
-/// A billing-only role can issue an individual invoice without browsing receipt history.
-pub const BILL_DOCUMENT_PERMISSIONS: &[Permission] = &[
-    Permission::BillCreate,
     Permission::ReportsView,
     Permission::BillRevert,
     Permission::BillRevertApprove,

@@ -208,6 +208,77 @@ fn tickets(app: &App, station: &str) -> Vec<kitchen::KitchenTicket> {
     kitchen::look(app, station).tickets
 }
 
+fn pay(app: &App, id: &str) {
+    crate::ipc::open_order_on(app, id.to_owned()).expect("load order");
+    crate::flows::complete_bill_on(app, Some("cash".to_owned())).expect("paid");
+}
+
+#[test]
+fn payment_closes_pending_tickets_in_the_payment_transaction() {
+    let scratch = Scratch::new("kds_pending_paid");
+    let app = a_kitchen(&scratch, "pending_paid");
+    let id = order(&app, &["itm_naan"]);
+    pay(&app, &id);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let rows = repos.kitchen().for_order(&id)?;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].delivery.state, mb_core::kitchen_delivery::State::Closed);
+        assert!(!repos.orders().list_open(OUTLET)?.iter().any(|order| order.core().id.as_str() == id));
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("committed state");
+}
+
+#[test]
+fn payment_closes_kitchen_tickets_and_prevents_recall() {
+    let scratch = Scratch::new("kds_paid_closed");
+    let app = a_kitchen(&scratch, "paid_closed");
+    let id = order(&app, &["itm_naan"]);
+    let ticket = tickets(&app, "Tandoor")[0].id.clone();
+    kitchen::shown_on(&app, ticket.clone()).expect("shown");
+    kitchen::bump_on(&app, ticket.clone()).expect("ready");
+    pay(&app, &id);
+    assert!(tickets(&app, "Tandoor").is_empty());
+    assert!(kitchen::look(&app, "Tandoor").last_cleared.is_none());
+    assert!(kitchen::recall_on(&app, ticket).is_err());
+    assert_eq!(kitchen::print_what_nobody_drew_at(&app, later(60)), 0);
+}
+
+#[test]
+fn prepaid_tickets_survive_payment_but_not_the_next_business_date() {
+    let scratch = Scratch::new("kds_prepaid");
+    let app = a_kitchen(&scratch, "prepaid");
+    let mut config = app.shop_config();
+    config.billing.kitchen_keep_paid = true;
+    app.publish_shop_config(config);
+    let id = order(&app, &["itm_naan"]);
+    pay(&app, &id);
+    assert_eq!(tickets(&app, "Tandoor").len(), 1);
+    let open = order(&app, &["itm_lassi"]);
+    assert!(kitchen::look_at(&app, "Tandoor", later(48 * 60 * 60)).tickets.is_empty());
+    assert_eq!(kitchen::look_at(&app, "Kitchen", later(48 * 60 * 60)).tickets[0].order_id, open);
+}
+
+#[test]
+fn disabled_screen_does_not_acknowledge_or_print_and_repairs_old_paid_tickets() {
+    let scratch = Scratch::new("kds_disabled_paid");
+    let app = a_kitchen(&scratch, "disabled_paid");
+    let mut config = app.shop_config();
+    config.billing.kitchen_keep_paid = true;
+    app.publish_shop_config(config.clone());
+    let id = order(&app, &["itm_naan"]);
+    let ticket = tickets(&app, "Tandoor")[0].id.clone();
+    pay(&app, &id);
+    config.billing.kitchen_screen = false;
+    app.publish_shop_config(config.clone());
+    assert!(tickets(&app, "Tandoor").is_empty());
+    assert!(kitchen::shown_on(&app, ticket).is_err());
+    assert_eq!(kitchen::print_what_nobody_drew_at(&app, later(60)), 0);
+    config.billing.kitchen_screen = true;
+    app.publish_shop_config(config);
+    assert!(tickets(&app, "Tandoor").is_empty());
+}
+
 // The right station, and nowhere else.
 
 /// The tandoor screen shows tandoor food.

@@ -235,6 +235,10 @@ fn the_counter_decides_the_kitchen_delta_and_a_retry_sends_nothing() {
     );
 
     let first = go(&app, &intent("fire1", Some(&order), What::SendToKitchen));
+    let arrival = || crate::floor::floor_on(&app).expect("floor").tiles.into_iter()
+        .find(|tile| tile.order_id.as_deref() == Some(order.as_str()))
+        .and_then(|tile| tile.arrival_key);
+    assert_eq!(arrival().as_deref(), Some("fire1"));
     assert!(
         first.message().contains("2 items") || first.message().contains("1 item"),
         "it did not say what it sent: {}",
@@ -247,6 +251,7 @@ fn the_counter_decides_the_kitchen_delta_and_a_retry_sends_nothing() {
 
     // A DIFFERENT send, with nothing new, tells the truth rather than reprinting.
     let again = go(&app, &intent("fire2", Some(&order), What::SendToKitchen));
+    assert_eq!(arrival().as_deref(), Some("fire1"), "retries and empty sends stay quiet");
     assert!(
         again.message().contains("already has"),
         "it re-sent food the kitchen already had: {}",
@@ -268,6 +273,7 @@ fn the_counter_decides_the_kitchen_delta_and_a_retry_sends_nothing() {
         ),
     );
     let third = go(&app, &intent("fire3", Some(&order), What::SendToKitchen));
+    assert_eq!(arrival().as_deref(), Some("fire3"));
     assert!(
         third.message().contains("1 item"),
         "the delta was wrong: {}",

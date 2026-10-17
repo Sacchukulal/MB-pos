@@ -196,8 +196,12 @@ pub struct Billing {
     pub lock_order_type: bool,
     pub locked_order_type: mb_core::OrderType,
     pub kitchen_ticket_off: bool,
+    /// Enter on an empty item search completes the bill instead of sending KOT first.
+    pub enter_completes_bill: bool,
     /// Orders go to the Kitchen screen; paper only when nobody sees them in time.
     pub kitchen_screen: bool,
+    /// Prepaid food can remain on the kitchen screen for the current business day.
+    pub kitchen_keep_paid: bool,
     /// The billing screen shows the table grid. Off for a counter that bills parcels only:
     /// the tables are still on the Floor, and a number typed in the box still opens one.
     pub tables_on_counter: bool,
@@ -228,7 +232,9 @@ impl Default for Billing {
             lock_order_type: false,
             locked_order_type: mb_core::OrderType::DineIn,
             kitchen_ticket_off: false,
+            enter_completes_bill: false,
             kitchen_screen: false,
+            kitchen_keep_paid: false,
             tables_on_counter: true,
             arrival_beep: true,
             arrival_beat: true,

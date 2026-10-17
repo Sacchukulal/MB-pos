@@ -29,6 +29,35 @@ pub struct ReportView {
     pub compare: Option<CompareView>,
     /// Anything the report needs to admit: "4 items have no cost price".
     pub notes: Vec<String>,
+    #[ts(optional)]
+    pub filters: Option<ReportFiltersView>,
+}
+
+/// Empty selections mean all. Values are stable database keys, never display names.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReportSelection {
+    #[serde(default)]
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub category_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+pub struct ReportChoiceView {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+pub struct ReportFiltersView {
+    pub label: String,
+    pub choices: Vec<ReportChoiceView>,
+    /// Item sales may also be limited to selected categories.
+    pub categories: Option<Vec<ReportChoiceView>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -497,6 +526,10 @@ fn compare(now: Money, before: Money, previous: Period) -> CompareView {
 
 /// Build one report.
 pub fn report_on(app: &App, id: String, period: PeriodArg) -> UiResult<ReportView> {
+    report_selected_on(app, id, period, ReportSelection::default())
+}
+
+pub fn report_selected_on(app: &App, id: String, period: PeriodArg, selection: ReportSelection) -> UiResult<ReportView> {
     let Some(entry) = find(&id) else {
         return Err(UiError::new(
             "report.unknown",
@@ -507,11 +540,16 @@ pub fn report_on(app: &App, id: String, period: PeriodArg) -> UiResult<ReportVie
     guard::require(app, entry.needs)?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let period = period.parse()?;
+    let selectable = matches!(entry.kind, Kind::Sales(by) if !matches!(by, SalesBy::Day | SalesBy::Hour));
+    if (!selection.keys.is_empty() && !selectable)
+        || (!selection.category_ids.is_empty() && !matches!(entry.kind, Kind::Sales(SalesBy::Item))) {
+        return Err(UiError::new("report.selection", "This selection does not belong to this report."));
+    }
 
     // A reader, not the writer.
     app.with_shop(|shop| {
         shop.db
-            .read_transaction(|tx| build(&mb_db::Repos::new(tx), entry, period))
+            .read_transaction(|tx| build(&mb_db::Repos::new(tx), entry, period, &selection))
             .map_err(|e| words::from_db(&e))
     })
 }
@@ -525,12 +563,31 @@ fn build(
     repos: &mb_db::Repos<'_>,
     entry: &Entry,
     period: Period,
+    selection: &ReportSelection,
 ) -> Result<ReportView, mb_db::DbError> {
     let reports = repos.reports();
     let mut notes = Vec::new();
+    let mut filters = None;
+    let mut subtitle = period_words(period);
     let (columns, rows, totals, compare_view) = match entry.kind {
         Kind::Sales(by) => {
-            let buckets = reports.sales_by(OUTLET, period, by)?;
+            let (buckets, matching_bills) = reports.sales_by_selected(OUTLET, period, by, &selection.keys, &selection.category_ids)?;
+            if !matches!(by, SalesBy::Day | SalesBy::Hour) {
+                let choices = report_choices(&reports, period, by, &selection.keys)?;
+                let categories = if by == SalesBy::Item {
+                    Some(report_choices(&reports, period, SalesBy::Category, &selection.category_ids)?)
+                } else { None };
+                for (label, selected, options) in [
+                    (label_for(by), &selection.keys, choices.as_slice()),
+                    ("Category", &selection.category_ids, categories.as_deref().unwrap_or(&[])),
+                ] {
+                    if !selected.is_empty() {
+                        let names: Vec<_> = options.iter().filter(|option| selected.contains(&option.id)).map(|option| option.label.as_str()).collect();
+                        subtitle.push_str(&format!(" · {label}: {}", names.join(", ")));
+                    }
+                }
+                filters = Some(ReportFiltersView { label: label_for(by).to_owned(), choices, categories });
+            }
             let wants_qty = matches!(by, SalesBy::Item | SalesBy::Category);
             let wants_tax = by != SalesBy::PaymentMode;
             let mut columns = vec![column(label_for(by), false), column("Bills", true)];
@@ -577,7 +634,7 @@ fn build(
                 .collect();
 
             if wants_qty || by == SalesBy::PaymentMode {
-                bills = reports.sold_count(OUTLET, period)?;
+                bills = matching_bills;
                 notes.push("A bill can appear in more than one row; the total counts each bill once.".to_owned());
             }
             if by == SalesBy::Day && bills > 0 {
@@ -596,7 +653,7 @@ fn build(
             // The comparison, from the same query over the previous period.
             let previous = period.previous();
             let before = reports
-                .sales_by(OUTLET, previous, by)?
+                .sales_by_selected(OUTLET, previous, by, &selection.keys, &selection.category_ids)?.0
                 .iter()
                 .try_fold(Money::ZERO, |sum, b| sum.add(b.gross))
                 .unwrap_or(Money::ZERO);
@@ -1285,13 +1342,29 @@ fn build(
     Ok(ReportView {
         id: entry.id.to_owned(),
         title: entry.title.to_owned(),
-        subtitle: period_words(period),
+        subtitle,
         columns,
         rows,
         totals,
         compare: compare_view,
         notes,
+        filters,
     })
+}
+
+fn report_choices(reports: &mb_db::repo::reports::ReportsRepo<'_>, period: Period, by: SalesBy, selected: &[String]) -> Result<Vec<ReportChoiceView>, mb_db::DbError> {
+    let mut choices = std::collections::BTreeMap::new();
+    for span in [period.previous(), period] {
+        for bucket in reports.sales_by(OUTLET, span, by)? {
+            choices.insert(bucket.key, bucket.label);
+        }
+    }
+    for id in selected {
+        choices.entry(id.clone()).or_insert_with(|| format!("Selected {} (no sales in these periods)", label_for(by).to_lowercase()));
+    }
+    let mut choices: Vec<_> = choices.into_iter().map(|(id, label)| ReportChoiceView { id, label }).collect();
+    choices.sort_by(|a, b| a.label.cmp(&b.label).then(a.id.cmp(&b.id)));
+    Ok(choices)
 }
 
 /// `8:20` — a duration a shopkeeper reads, not a number of milliseconds.
@@ -2354,8 +2427,11 @@ pub fn report_list(app: tauri::State<'_, App>) -> UiResult<ReportListView> {
 }
 
 #[tauri::command]
-pub fn report(app: tauri::State<'_, App>, id: String, period: PeriodArg) -> UiResult<ReportView> {
-    report_on(&app, id, period)
+pub fn report(app: tauri::State<'_, App>, id: String, period: PeriodArg, selection: Option<ReportSelection>) -> UiResult<ReportView> {
+    match selection {
+        Some(selection) => report_selected_on(&app, id, period, selection),
+        None => report_on(&app, id, period),
+    }
 }
 
 #[tauri::command]
@@ -2363,10 +2439,11 @@ pub fn report_csv(
     app: tauri::State<'_, App>,
     id: String,
     period: PeriodArg,
+    selection: Option<ReportSelection>,
 ) -> UiResult<SavedFileView> {
     // Taking a report out of the building is its own permission, on top of reading it.
     guard::require(&app, Permission::ReportsExport)?;
-    let report = report_on(&app, id, period)?;
+    let report = report_selected_on(&app, id, period, selection.unwrap_or_default())?;
     let name = file_name(&report, "csv");
     save_and_show(&app, &name, csv_of(&report).as_bytes())
 }
@@ -2376,9 +2453,10 @@ pub fn report_pdf(
     app: tauri::State<'_, App>,
     id: String,
     period: PeriodArg,
+    selection: Option<ReportSelection>,
 ) -> UiResult<SavedFileView> {
     guard::require(&app, Permission::ReportsExport)?;
-    let report = report_on(&app, id, period)?;
+    let report = report_selected_on(&app, id, period, selection.unwrap_or_default())?;
     let bytes = pdf_of(&app, &report)?;
     let name = file_name(&report, "pdf");
     save_and_show(&app, &name, &bytes)
@@ -2391,14 +2469,22 @@ pub fn report_print(
     app: tauri::State<'_, App>,
     id: String,
     period: PeriodArg,
+    selection: Option<ReportSelection>,
 ) -> UiResult<String> {
-    report_print_on(&app, id, period)
+    match selection {
+        Some(selection) => report_print_selected_on(&app, id, period, selection),
+        None => report_print_on(&app, id, period),
+    }
 }
 
 pub fn report_print_on(app: &App, id: String, period: PeriodArg) -> UiResult<String> {
+    report_print_selected_on(app, id, period, ReportSelection::default())
+}
+
+pub fn report_print_selected_on(app: &App, id: String, period: PeriodArg, selection: ReportSelection) -> UiResult<String> {
     // Paper is paper: printing a report is taking it out of the building, like saving it.
     guard::require(app, Permission::ReportsExport)?;
-    let report = report_on(app, id, period)?;
+    let report = report_selected_on(app, id, period, selection)?;
     let printer = crate::flows::default_printer(app)?;
     let document = to_document(app, &report, printer.paper);
     app.print(

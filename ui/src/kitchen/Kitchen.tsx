@@ -22,19 +22,22 @@ export function Kitchen() {
     if (!inApp()) return;
     call('app_status')
       .then((status) => setScreenOn(status.kitchenScreen))
-      .catch(() => setScreenOn(true));
+      .catch(() => setScreenOn(false));
   }, []);
-  useEffect(readStatus, [readStatus]);
 
   // ONE clock for the whole screen — see the note above.
   const tick = useTick();
+  useEffect(readStatus, [readStatus, tick]);
+  useEffect(() => {
+    if (screenOn !== true) setView(null);
+  }, [screenOn]);
 
   // One reporter for the whole product, obeying the tone the engine set — so "the kitchen
   // already has this" is not shown in the colour of a real fault.
   const report = useReport();
 
   const load = useCallback(() => {
-    if (!inApp()) return;
+    if (!inApp() || screenOn !== true) return;
     call('kitchen', { station })
       .then(setView)
       .catch(() => {
@@ -42,7 +45,7 @@ export function Kitchen() {
          * A kitchen screen that goes blank is the failure this whole feature exists to prevent.
          */
       });
-  }, [station]);
+  }, [station, screenOn]);
 
   // The tick moves the minutes; a change arrives by push.
   useEffect(load, [load, tick]);
@@ -61,13 +64,13 @@ export function Kitchen() {
 
   /** Tell the counter this screen DREW the ticket — not that it arrived. */
   useEffect(() => {
-    if (!view) return;
+    if (screenOn !== true || !view) return;
     for (const ticket of view.tickets) {
       if (ticket.tone === 'new') {
         call('kitchen_shown', { id: ticket.id }).catch(() => undefined);
       }
     }
-  }, [view]);
+  }, [view, screenOn]);
 
   const act = (work: Promise<KitchenView>) => {
     work.then(setView).catch(report);
@@ -76,7 +79,7 @@ export function Kitchen() {
   // Keyboard, for a shop that mounted a numpad instead of a touchscreen.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!view || event.ctrlKey || event.altKey) return;
+      if (screenOn !== true || !view || event.repeat || event.ctrlKey || event.altKey) return;
       const index = Number(event.key) - 1;
       const ticket = view.tickets[index];
       if (!Number.isNaN(index) && index >= 0 && ticket) {

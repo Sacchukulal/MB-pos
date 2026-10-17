@@ -12,6 +12,47 @@ fn shop(scratch: &Scratch) -> App {
 }
 
 #[test]
+fn approval_policy_exempts_owner_and_only_offers_available_other_managers() {
+    use crate::signin_tests::hire;
+    use mb_auth::RolePreset;
+    let scratch = Scratch::new("approval_owner_and_managers");
+    let app = shop(&scratch);
+    for (id, name) in [("manager", "Manager"), ("inactive", "Inactive"), ("no_pin", "No PIN")] {
+        hire(&app, id, name, RolePreset::Manager, "3579");
+    }
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        mb_db::Repos::new(tx).settings().set(crate::state::OUTLET, crate::corrections::APPROVAL_KEY,
+            &mb_core::Money::from_paise(1), crate::flows::now(), None)?;
+        tx.execute("UPDATE staff SET status = 'suspended' WHERE id = 'inactive'", [])?;
+        tx.execute("UPDATE staff SET pin_hash = NULL WHERE id = 'no_pin'", [])?;
+        Ok(())
+    }).map_err(|e| crate::words::from_db(&e))).expect("policy and unavailable staff");
+    crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("issued");
+    let row = crate::corrections::list_bills_on(&app).expect("bills").remove(0);
+    assert!(!crate::corrections::approval_needed_on(&app, mb_core::Money::from_paise(99999)).expect("owner policy"));
+    crate::corrections::revert_bill_on(&app, row.order_id.clone(), "Correct items".into(), None, None).expect("edit");
+    assert!(!crate::correction_draft::preview_on(&app).expect("stand-in owner").needs_approval);
+    crate::ipc::login_on(&app, "staff_owner".into(), "2468".into()).expect("owner login");
+    let preview = crate::correction_draft::preview_on(&app).expect("owner preview");
+    assert!(!preview.needs_approval);
+    assert_eq!(preview.approvers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["manager"]);
+    crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("owner completes without second manager");
+    assert_eq!(crate::corrections::bills_on(&app, Default::default()).expect("approved").waiting, 0);
+
+    crate::ipc::login_on(&app, "manager".into(), "3579".into()).expect("manager login");
+    let bills = crate::corrections::bills_on(&app, Default::default()).expect("manager choices");
+    assert_eq!(bills.approvers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["staff_owner"]);
+    crate::corrections::revert_bill_on(&app, row.order_id.clone(), "Correct items".into(), None, None).expect("manager edit");
+    assert!(crate::correction_draft::preview_on(&app).expect("manager preview").needs_approval);
+    assert!(crate::correction_draft::authorize_on(&app, None, None).is_err());
+    assert!(crate::correction_draft::authorize_on(&app, Some("manager".into()), Some("3579".into())).is_err());
+    crate::correction_draft::authorize_on(&app, Some("staff_owner".into()), Some("2468".into())).expect("another manager approves");
+    crate::correction_draft::discard_on(&app, row.order_id.clone()).expect("discard draft");
+    crate::ipc::login_on(&app, "staff_owner".into(), "2468".into()).expect("owner login");
+    crate::corrections::void_bill_on(&app, row.order_id, "Wrong items".into(), None, None).expect("owner cancels without approval");
+}
+
+#[test]
 fn reverted_bills_process_under_the_same_number_until_completed() {
     for sent in [false, true] {
         let scratch = Scratch::new(if sent { "processing_revert_sent" } else { "processing_revert_unsent" });
@@ -23,6 +64,12 @@ fn reverted_bills_process_under_the_same_number_until_completed() {
         let row = crate::corrections::list_bills_on(&app).expect("bills").remove(0);
         assert!(crate::ipc::open_orders_on(&app).expect("floor").iter().all(|tile| !tile.processing));
         crate::corrections::revert_bill_on(&app, row.order_id.clone(), "Correct items".to_owned(), None, None).expect("edit");
+        let editing = crate::corrections::bills_on(&app, Default::default()).expect("draft status");
+        assert!(editing.rows[0].correction_open);
+        assert_eq!(editing.rows[0].approval, None, "unfinished edits are not approval requests");
+        assert_eq!(editing.waiting, 0);
+        let detail = crate::corrections::bill_detail_on(&app, row.order_id.clone()).expect("draft detail");
+        assert!(!detail.can_approve, "complete the edit before approval");
         let tiles = crate::ipc::open_orders_on(&app).expect("reopened floor");
         let tile = tiles.iter().find(|tile| tile.order_id.as_deref() == Some(row.order_id.as_str())).expect("same order");
         assert!(tile.processing, "a correction must remain reachable even without an old KOT");
@@ -32,6 +79,10 @@ fn reverted_bills_process_under_the_same_number_until_completed() {
         crate::ipc::open_order_on(&app, row.order_id.clone()).expect("resume edit");
         let completed = crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("complete correction");
         assert_eq!(completed, number);
+        let finished = crate::corrections::bills_on(&app, Default::default()).expect("completed status");
+        assert!(!finished.rows[0].correction_open);
+        assert_eq!(finished.rows[0].approval.as_deref(), Some("approved"));
+        assert_eq!(finished.waiting, 0);
         assert!(crate::ipc::open_orders_on(&app).expect("completed floor").iter().all(|tile| !tile.processing));
     }
 }
@@ -106,6 +157,34 @@ fn an_issued_bill_cannot_be_voided_under_a_pending_correction() {
     let working = crate::flows::find_order(&app, &mb_core::OrderId::new(&row.order_id)).expect("working");
     assert!(matches!(working, Some(AnyOrder::Open(_))));
     assert_eq!(crate::corrections::list_bills_on(&app).expect("issued")[0].total, row.total);
+}
+
+#[test]
+fn returning_an_empty_correction_clears_approval_work_and_only_offers_remaining_money() {
+    for full in [true, false] {
+        let scratch = Scratch::new(if full { "empty_correction_full_refund" } else { "empty_correction_partial_refund" });
+        let app = shop(&scratch);
+        crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("settled");
+        let row = crate::corrections::list_bills_on(&app).expect("bills").remove(0);
+        crate::corrections::revert_bill_on(&app, row.order_id.clone(), "Return items".to_owned(), None, None).expect("edit");
+        app.with_cart_mut(|state| { state.cart = mb_core::Cart::new(); Ok(()) }).expect("remove food");
+        crate::correction_draft::save_on(&app).expect("save empty correction");
+        let offer = crate::refunds::offer_on(&app, row.order_id.clone()).expect("refund offer");
+        let amount = mb_core::Money::parse(&offer.tenders[0].input).expect("money");
+        let amount = if full { amount } else { mb_core::Money::from_paise(amount.paise().checked_div(2).expect("half")) };
+        crate::corrections::void_bill_with_returns_on(&app, row.order_id.clone(), "Refund meal".to_owned(), None, None,
+            Some(vec![(offer.tenders[0].mode.clone(), amount)])).expect("void and refund");
+        let bills = crate::corrections::bills_on(&app, Default::default()).expect("list after refund");
+        assert_eq!(bills.waiting, 0);
+        assert_eq!(bills.rows[0].approval, None);
+        let detail = crate::corrections::bill_detail_on(&app, row.order_id.clone()).expect("detail");
+        assert!(!detail.can_approve);
+        assert_eq!(detail.can_refund, !full);
+        assert!(!detail.edits.is_empty(), "retain edit history");
+        assert!(crate::corrections::approve_revert_on(&app, detail.edits[0].id.clone()).is_err());
+        let after = crate::refunds::offer_on(&app, row.order_id).expect("remaining offer");
+        assert_eq!(after.tenders.is_empty(), full);
+    }
 }
 
 #[test]

@@ -221,7 +221,7 @@
   --motion-beat: 1000ms;
   --beats: 3;
   /* An arrival stays visible this long even when its motion is disabled. */
-  --arrival-duration: 3000ms;
+  --arrival-duration: 1000ms;
   /*
    * The second exception, for the same reason: a late order's dot breathes slowly for as long
    * as the order is late, so a cashier looking at the queue sees it without a red box round
@@ -609,7 +609,7 @@
    * dark", the borders "too dull"): the ground is a deep slate, a panel a clear step up, a
    * row inside a panel another, and the line round a panel light enough to be a line.
    */
-  --bg: #0b1120;
+  --bg: #000000;
   --surface: #172033;
   --chart-highlight: #61d9b6;
   --surface-2: #1f2a40;
@@ -674,6 +674,13 @@
   --shadow: var(--level-raised);
   --shadow-pop: var(--level-pop);
   --overlay: rgb(3 7 18 / 65%);
+}
+
+/* Crisper billing edges in dark mode, retaining the shared one-pixel width. */
+[data-theme="dark"] .mb-billing {
+  --border: #63738d;
+  --border-strong: #8a9bb4;
+  --panel-border: #687993;
 }
 
 /* The base. Small on purpose: everything else is a component. */

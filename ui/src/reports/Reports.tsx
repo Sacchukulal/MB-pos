@@ -1,6 +1,6 @@
 /** Every report, on one screen. */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   Button,
@@ -26,6 +26,10 @@ import { ReportExport, ReportHeader, ReportPeriod } from './ReportHeader';
 import type { ReportEntryView } from '../ipc/generated/ReportEntryView';
 import type { ReportListView } from '../ipc/generated/ReportListView';
 import type { ReportView } from '../ipc/generated/ReportView';
+import type { ReportSelection } from '../ipc/generated/ReportSelection';
+import { SelectionPicker } from './SelectionPicker';
+
+const ALL_SELECTION: ReportSelection = { keys: [], categoryIds: [] };
 
 import './reports.css';
 
@@ -76,6 +80,12 @@ export function Reports({
   const [report, setReport] = useState<ReportView | null>(null);
   const [loadedFor, setLoadedFor] = useState('');
   const [busy, setBusy] = useState(false);
+  const [selections, setSelections] = useState<Record<string, ReportSelection>>({});
+  const selection = selections[chosen] ?? ALL_SELECTION;
+  const filtered = selection.keys.length > 0 || selection.categoryIds.length > 0;
+  const request = useMemo(() => ({ id: chosen, period: { from, to }, ...(filtered ? { selection } : {}) }),
+    [chosen, from, to, selection, filtered]);
+  const requestKey = JSON.stringify(request);
   const toast = useToast();
 
   const fold = (group: string) => {
@@ -140,12 +150,11 @@ export function Reports({
     if (checkedRevision !== licenceRevision || !from || !to || chosen === DAYS || chosen === BILLS || !list || locked) return;
     let current = true;
     setBusy(true);
-    setReport(null);
-    call('report', { id: chosen, period: { from, to } })
+    call('report', request)
       .then((fresh) => {
         if (current) {
           setReport(fresh);
-          setLoadedFor(`${chosen}/${from}/${to}`);
+          setLoadedFor(requestKey);
         }
       })
       .catch((cause) => {
@@ -155,24 +164,27 @@ export function Reports({
       })
       .finally(() => { if (current) setBusy(false); });
     return () => { current = false; };
-  }, [chosen, from, to, complain, list, locked, licenceRevision, checkedRevision]);
+  }, [chosen, from, to, complain, list, locked, licenceRevision, checkedRevision, request, requestKey]);
 
   const save = (command: 'report_csv' | 'report_pdf') => {
-    call(command, { id: chosen, period: { from, to } })
+    if (!currentReport) return;
+    call(command, request)
       .then((saved) => toast.show('ok', saved.message, saved.path))
       .catch(complain);
   };
 
   /** The same figures, on the roll the bills come off. */
   const print = () => {
-    call('report_print', { id: chosen, period: { from, to } })
+    if (!currentReport) return;
+    call('report_print', request)
       .then((says) => toast.show('ok', says))
       .catch(complain);
   };
 
   /** Send the figures to somebody. */
   const share = (channel: 'copy' | 'whats_app' | 'email' | 'folder') => {
-    call('share_report', { id: chosen, period: { from, to }, channel })
+    if (!currentReport) return;
+    call('share_report', { ...request, channel })
       .then((shared) => {
         if (channel === 'copy') void navigator.clipboard.writeText(shared.text);
         toast.show('ok', shared.says, shared.caveat === '' ? undefined : shared.caveat);
@@ -185,7 +197,8 @@ export function Reports({
     ? <Locked says={locked} onOpenAccount={onGoTo ? () => onGoTo('account') : undefined} />
     : <Spinner label="Loading reports" />;
 
-  const currentReport = loadedFor === `${chosen}/${from}/${to}` ? report : null;
+  const currentReport = loadedFor === requestKey ? report : null;
+  const filters = report?.id === chosen ? report.filters : null;
   const selected = list?.reports.find((entry) => entry.id === chosen);
   const columns: readonly Column<Line>[] =
     currentReport?.columns.map((spec, index) => ({
@@ -281,6 +294,15 @@ export function Reports({
             setFrom(nextFrom);
             setTo(nextTo);
           }} />
+          {filters ? <div className="mb-row">
+            {filters.categories ? <SelectionPicker label="Categories" choices={filters.categories} selected={selection.categoryIds}
+              onChange={(categoryIds) => setSelections((prior) => ({ ...prior, [chosen]: { ...selection, categoryIds } }))} /> : null}
+            <SelectionPicker label={filters.label === 'Category' ? 'Categories' : filters.label === 'Paid by' ? 'Payment modes' : `${filters.label}s`}
+              choices={filters.choices} selected={selection.keys}
+              onChange={(keys) => setSelections((prior) => ({ ...prior, [chosen]: { ...selection, keys } }))} />
+            {filtered ? <Button size="sm" variant="quiet" onClick={() => setSelections((prior) => ({ ...prior, [chosen]: ALL_SELECTION }))}>Clear filters</Button> : null}
+          </div> : null}
+          {filtered && currentReport ? <p className="mb-muted">{currentReport.subtitle}</p> : null}
         </ReportHeader>
 
         {currentReport ? (

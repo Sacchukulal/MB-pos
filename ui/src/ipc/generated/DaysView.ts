@@ -24,8 +24,7 @@ dayRunsSays: string,
  */
 carrySays: string, 
 /**
- * Today and up to thirteen days before it, newest first — never a day before the shop
- * opened.
+ * Today and up to thirteen days before it, plus older unfinished order days, newest first.
  */
 days: Array<DayRowView>, 
 /**

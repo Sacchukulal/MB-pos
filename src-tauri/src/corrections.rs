@@ -175,6 +175,8 @@ pub struct BillDetailView {
     /// Every time this bill was taken back, oldest first.
     pub edits: Vec<RevertView>,
     pub can_approve: bool,
+    /// There is still original-tender money available and this person may return it.
+    pub can_refund: bool,
 }
 
 // The list.
@@ -264,7 +266,9 @@ pub fn bills_on(app: &App, filter: BillFilter) -> UiResult<BillsView> {
                 let waiting = repos.corrections().reverts_waiting(OUTLET)?;
                 let approvers = staff
                     .iter()
-                    .filter(|s| s.permissions.has(Permission::BillVoid))
+                    .filter(|s| s.status == mb_db::repo::people::StaffStatus::Active
+                        && s.permissions.has(Permission::BillVoid)
+                        && s.id != who.staff_id && s.pin_hash.is_some())
                     .map(|s| crate::lan::PersonPick {
                         id: s.id.as_str().to_owned(),
                         name: s.name.clone(),
@@ -444,11 +448,11 @@ fn with_the_register(
     let reverts = repos.corrections().reverts_of(id)?;
     if !reverts.is_empty() {
         row.edited = true;
-        row.approval = Some(if reverts.iter().all(|r| r.approved_at.is_some()) {
+        row.approval = if row.correction_open || row.state != "settled" || row.returned { None } else { Some(if reverts.iter().all(|r| r.approved_at.is_some()) {
             "approved".to_owned()
         } else {
             "waiting".to_owned()
-        });
+        }) };
     }
     Ok(row)
 }
@@ -706,8 +710,11 @@ pub fn bill_detail_on(app: &App, order_id: String) -> UiResult<BillDetailView> {
                     change: change.into(),
                     history: history.into_iter().map(|(_, h)| h).collect(),
                     can_approve: who.must(Permission::BillRevertApprove).is_ok()
+                        && row.state == "settled" && !row.returned
                         && !pending_edit
                         && edits.iter().any(|e| e.approved_at.is_none()),
+                    can_refund: who.can(Permission::BillVoid)
+                        && repos.corrections().refundable_payments(&id)?.iter().any(|(_, amount)| amount.is_positive()),
                     edits,
                     row,
                 })
@@ -1060,6 +1067,9 @@ pub fn void_bill_with_returns_on(
 }
 
 pub(crate) fn approval_needed_on(app: &App, total: Money) -> UiResult<bool> {
+    if app.sessions().current().is_some_and(|session| session.is_owner()) {
+        return Ok(false);
+    }
     let threshold: Option<Money> = app.with_shop(|shop| {
         shop.db
             .transaction(|tx| mb_db::Repos::new(tx).settings().get(OUTLET, APPROVAL_KEY))
@@ -1084,6 +1094,9 @@ pub(crate) fn approve_if_needed(app: &App, total: Money, approver_staff_id: Opti
         ));
     };
 
+    if app.sessions().current().is_some_and(|session| session.actor.staff_id.as_str() == staff_id) {
+        return Err(UiError::new("void.second_person", "Another authorized manager must approve this cancellation or refund."));
+    }
     verify_approver_on(app, &staff_id, &pin)
 }
 
@@ -1323,6 +1336,10 @@ pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
                 let row = repos
                     .corrections()
                     .approve_revert(&revert_id, &who.staff_id, at)?;
+                if !matches!(repos.orders().find(&row.order_id)?, Some(AnyOrder::Settled(_)))
+                    || repos.returns().contains(&row.order_id)? {
+                    return Err(mb_db::DbError::invariant("This bill was cancelled or returned; no edit approval is required."));
+                }
                 // This check shares the approval transaction, so a refusal rolls the
                 // signature back too. The issued sale remains visible during correction.
                 if repos.orders().find_working(&row.order_id)? != repos.orders().find(&row.order_id)? {
@@ -1739,6 +1756,7 @@ pub fn refund_on(
 /// to the bill. The badges on the screen say the same things.
 fn state_cell(row: &BillRowView) -> String {
     let mut out = row.state_word.clone();
+    if row.correction_open { out.push_str(", editing"); }
     if row.returned { out.push_str(", returned on a later day"); }
     if row.edited {
         out.push_str(", edited");
@@ -1850,6 +1868,7 @@ pub(crate) fn bills_report(app: &App, filter: BillFilter) -> UiResult<crate::rep
     Ok(crate::reports::ReportView {
         id: "bills".to_owned(),
         title: bills_title(&view, &filter),
+        filters: None,
         subtitle: crate::reports::period_words(period),
         columns,
         rows,

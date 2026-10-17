@@ -711,6 +711,10 @@ fn do_it(
             // New food reaches the kitchen screen too; a stop is paper only, as at the counter.
             if kind == TicketKind::New {
                 repos.events().record(
+                    order_id, at, day, mb_db::repo::events::PHONE_ORDER,
+                    Some(staff), Some(&intent.id),
+                )?;
+                repos.events().record(
                     order_id,
                     at,
                     day,
