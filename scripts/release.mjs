@@ -64,7 +64,7 @@ if (!current) die("could not find [workspace.package] version in Cargo.toml");
 
 function gates() {
   sh(["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"]);
-  sh(["cargo", "test", "--workspace", "--locked"]);
+  sh(["cargo", "test", "--workspace", "--locked", "--no-fail-fast", "--", "--quiet"]);
   // Expand the package's check scripts so Windows never launches npm.cmd.
   const ui = join(root, "ui");
   sh([process.execPath, "node_modules/typescript/bin/tsc", "--noEmit"], ui);

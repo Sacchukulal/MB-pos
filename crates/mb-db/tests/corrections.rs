@@ -853,7 +853,7 @@ fn a_bill_taken_back_keeps_its_number_and_the_register_says_what_it_was() {
     assert_eq!(reverts[0].before_total, wrong.bill.grand_total);
     assert_eq!(kept_lines, lines);
     assert_eq!(kept_payments, payments);
-    assert_eq!(waiting, 1);
+    assert_eq!(waiting, 0, "unfinished corrections cannot be approved yet");
     assert_eq!(unfinished, vec![number.clone()]);
 
     // Billed again, fixed, under the same number.
@@ -877,6 +877,8 @@ fn a_bill_taken_back_keeps_its_number_and_the_register_says_what_it_was() {
     let right = mb_db::settle(&db, till, fixed, bill, settlement, at(6), by.clone())
         .expect("settled again");
     assert_eq!(right.bill_number.formatted, number, "the number changed");
+    assert_eq!(db.transaction(|tx| Repos::new(tx).corrections().reverts_waiting(OUTLET))
+        .expect("completed correction awaiting approval"), 1);
 
     let unfinished = db
         .transaction(|tx| Repos::new(tx).corrections().reverts_unfinished(OUTLET))
