@@ -940,7 +940,7 @@ pub fn void_bill_with_returns_on(
     approver_staff_id: Option<String>, approver_pin: Option<String>,
     returns: Option<Vec<(String, Money)>>,
 ) -> UiResult<Vec<BillRowView>> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::BillVoid)?;
     let at = now();
@@ -1164,7 +1164,7 @@ pub fn revert_bill_on(
     approver_pin: Option<String>,
 ) -> UiResult<String> {
     // One counter action at a time — see `App::begin_action`.
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::BillRevert)?;
     let at = now();
@@ -1337,7 +1337,7 @@ fn prepare_counter_for_revert(app: &App) -> UiResult<()> {
 
 /// A manager signs an edit off.
 pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::BillRevertApprove)?;
     let at = now();
@@ -1392,7 +1392,7 @@ pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
 
 /// The customer walked out.
 pub fn cancel_order_on(app: &App, order_id: String, reason: String) -> UiResult<()> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     let who = guard::require(app, Permission::OrderCancel)?;
     let at = now();
     let day = today(at);
@@ -1531,7 +1531,7 @@ pub fn change_line_checked_on(
     expected_line: Option<String>,
 ) -> UiResult<crate::billing::CartView> {
     // One counter action at a time — see `App::begin_action`.
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::correction_draft::require_edit_access(app)?;
     let mut proposed = app.with_cart(|state| Ok(state.clone()))?;
     let selected_order = proposed.order_id().map(str::to_owned);

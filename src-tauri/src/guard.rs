@@ -431,14 +431,14 @@ pub const COMMAND_ACCESS: &[(&str, Access)] = &[
     ("health", Access::Needs(Permission::ReportsView)),
     ("diagnostics_plan", Access::Needs(Permission::BackupRun)),
     ("write_diagnostics", Access::Needs(Permission::BackupRun)),
-    // Looking for an update is reading.
-    ("look_for_an_update", Access::Needs(Permission::ReportsView)),
-    ("check_for_update", Access::Needs(Permission::ReportsView)),
+    // Every signed-in staff member can keep this counter up to date.
+    ("look_for_an_update", Access::SignedIn),
+    ("check_for_update", Access::SignedIn),
     (
         "go_back_a_version",
         Access::Needs(Permission::SettingsStore),
     ),
-    ("install_update", Access::Needs(Permission::SettingsStore)),
+    ("install_update", Access::SignedIn),
     // The cloud copy. The bell is for whoever is at the counter; the pull rides on it.
     ("notices", Access::SignedIn),
     ("notices_seen", Access::SignedIn),

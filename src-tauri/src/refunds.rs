@@ -120,7 +120,7 @@ pub fn refund_batch_on(app: &App, order_id: String, amounts: Vec<(String, Money)
 }
 
 pub fn refund_batch_with_id_on(app: &App, order_id: String, amounts: Vec<(String, Money)>, reason: String, request_id: String) -> UiResult<()> {
-    let _action = app.begin_action();
+    let _action = app.begin_action()?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::BillVoid)?;
     let at = crate::flows::now();
@@ -148,7 +148,7 @@ pub fn void_and_return_bill(app: tauri::State<'_, App>, order_id: String, amount
 
 pub fn return_closed_bill_on(app: &App, order_id: String, amounts: Vec<(String, Money)>, reason: String,
     request_id: String, approver_staff_id: Option<String>, approver_pin: Option<String>) -> UiResult<()> {
-    let _action = app.begin_action();
+    let _action = app.begin_action()?;
     let who = guard::require(app, Permission::BillVoid)?;
     let offer = offer_on(app, order_id.clone())?;
     crate::corrections::approve_if_needed(app, Money::from_paise(offer.bill_total.paise), approver_staff_id, approver_pin)?;

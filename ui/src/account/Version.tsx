@@ -15,10 +15,13 @@ import {
 import { call, isUiError, subscribe } from '../ipc/call';
 import type { Pushed } from '../ipc/generated/Pushed';
 import type { UpdateState } from '../ipc/generated/UpdateState';
+import { useMay } from '../shell/permissions';
 import { Line, Lines } from './Lines';
 import { UpdateDialog, useUpdateRun } from './Update';
 
 export function Version() {
+  const may = useMay();
+  const mayGoBack = may('settings.store');
   const [view, setView] = useState<UpdateState | null>(null);
   const run = useUpdateRun();
   const [checking, setChecking] = useState(false);
@@ -119,7 +122,7 @@ export function Version() {
         </span>
       </div>
 
-      {view.previous ? (
+      {view.previous && mayGoBack ? (
         <Lines>
           <Line label="Previous version">
             <span className="mb-code">{view.previous}</span>
@@ -131,7 +134,7 @@ export function Version() {
       ) : null}
 
       <ConfirmDialog
-        open={confirmingBack}
+        open={confirmingBack && mayGoBack}
         destructive
         title={`Go back to ${view.previous ?? ''}?`}
         body="Only the program changes. Your shop's data stays as it is. Magic Bill closes and opens again on the earlier version."

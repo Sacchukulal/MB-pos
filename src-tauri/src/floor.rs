@@ -618,7 +618,7 @@ fn open_order(app: &App, id: &str) -> UiResult<mb_core::AnyOrder> {
 }
 
 pub fn move_order_on(app: &App, order_id: String, to_table: String) -> UiResult<FloorView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
     let target = TableId::new(to_table.clone());
@@ -828,7 +828,7 @@ fn merge_key(app: &App, source: &mb_core::AnyOrder, target: &mb_core::AnyOrder) 
 }
 
 pub fn preview_merge_on(app: &App, from_order: String, into_order: String) -> UiResult<MergePreview> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     let (absorbed, survivor) = merge_pair(app, &from_order, &into_order)?;
     let merged = merged_order(app, &absorbed, &survivor)?;
     Ok(MergePreview {
@@ -852,7 +852,7 @@ pub fn merge_orders_on(app: &App, from_order: String, into_order: String) -> UiR
 }
 
 pub(crate) fn merge_checked_on(app: &App, from_order: String, into_order: String, preview_key: Option<String>) -> UiResult<FloorView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
     let (absorbed, survivor) = merge_pair(app, &from_order, &into_order)?;
@@ -963,7 +963,7 @@ pub fn release_serving_table(app: tauri::State<'_, App>, order_id: String) -> Ui
 }
 
 pub fn release_serving_table_on(app: &App, order_id: String) -> UiResult<()> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     let who = guard::require(app, Permission::BillCreate)?;
     app.with_shop(|shop| shop.db.transaction(|tx| {
         let repos = mb_db::Repos::new(tx);
@@ -1001,7 +1001,7 @@ pub(crate) fn next_free_seat(open: &[mb_core::AnyOrder], table: &TableId) -> Opt
 }
 
 pub fn split_order_on(app: &App, request: SplitRequest) -> UiResult<FloorView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();
 

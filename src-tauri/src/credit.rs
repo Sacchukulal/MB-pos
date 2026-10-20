@@ -579,7 +579,7 @@ pub fn put_on_account_on(
     override_limit: bool,
 ) -> UiResult<crate::billing::CartView> {
     // One counter action at a time — see `App::begin_action`.
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::correction_draft::require_edit_access(app)?;
     let who = guard::require(app, Permission::BillCreate)?;
     let at = now();

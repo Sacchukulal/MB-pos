@@ -1,4 +1,4 @@
-/** One update, from what was found to the hand-over. Account offers it, and so does the counter. */
+/** One update, from what was found to the hand-over. Updates and the counter share it. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -37,7 +37,9 @@ export function useUpdateRun(): UpdateRun {
   useEffect(() => {
     let stop: (() => void) | undefined;
     subscribe((message: Pushed) => {
-      if (message.kind !== 'update') return;
+      // The startup offer and Updates page can both be mounted. Only the one
+      // that started this install should show its progress dialog.
+      if (message.kind !== 'update' || !installing.current) return;
       setStep((current) => current?.kind === 'closing' ? current : {
         kind: 'busy',
         version: message.version,
@@ -135,7 +137,8 @@ export function UpdateDialog({ run }: { run: UpdateRun }) {
         {step.notes ? <p>{step.notes}</p> : null}
         <p className="mb-muted">
           Magic Bill closes and opens again on the new version. Your data is not touched. Best
-          done after the last bill of the day. Later leaves it on the Account page.
+          done before the first bill or after the last bill of the day. Finish or save your
+          current bill first. Later leaves it on the Updates page.
         </p>
       </Modal>
     );
@@ -205,7 +208,7 @@ export function UpdateDialog({ run }: { run: UpdateRun }) {
 
 /**
  * The offer itself, over whatever screen is up: a version found is shown once each time the
- * counter is opened, and Later leaves it to the bell and the Account page.
+ * counter is opened, and Later leaves it to the bell and the Updates page.
  */
 export function UpdateOffer({ version }: { version: string | null }) {
   const run = useUpdateRun();

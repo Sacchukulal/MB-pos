@@ -892,7 +892,7 @@ fn a_second_action_waits_while_the_counter_is_busy() {
     crate::ipc::cart_add_on(&app, "itm_dosa".to_owned(), Some("1".to_owned()), None)
         .expect("added");
 
-    let held = app.begin_action();
+    let held = app.begin_action().expect("counter reserved");
     let reached = AtomicBool::new(false);
     let finished = AtomicBool::new(false);
 

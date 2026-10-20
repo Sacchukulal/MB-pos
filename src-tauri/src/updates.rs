@@ -390,7 +390,7 @@ pub fn health_row(state: &UpdateState) -> HealthRow {
             "Version",
             format!(
                 "You have been on version {} for {}. Check for an update on \
-                 Account — a counter left on an old version misses fixes.",
+                 Updates — a counter left on an old version misses fixes.",
                 state.running,
                 crate::words::count(i64::from(state.days_on_this_version), "day", "days"),
             ),
@@ -407,7 +407,7 @@ pub fn health_row(state: &UpdateState) -> HealthRow {
 
 /// What the counter already knows. No network, so a screen draws at once.
 pub fn known_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> {
-    crate::guard::require(app, mb_auth::Permission::ReportsView)?;
+    crate::guard::require_signed_in(app)?;
     let mut state = app.updates();
     state.previous =
         Previous::load(&crate::config::AppConfig::directory()).map(|p| p.version.to_string());
@@ -416,7 +416,7 @@ pub fn known_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> 
 
 /// Ask the shelf now. Slow, so only ever off the thread that paints.
 pub fn check_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> {
-    crate::guard::require(app, mb_auth::Permission::ReportsView)?;
+    crate::guard::require_signed_in(app)?;
     Ok(check_now(app))
 }
 
@@ -541,16 +541,25 @@ fn incoming(dir: &Path, manifest: &Manifest) -> PathBuf {
 pub(crate) struct InstallGate(AtomicBool);
 
 impl InstallGate {
+    fn busy() -> crate::words::UiError {
+        crate::words::UiError::new(
+            "update.busy",
+            "An update is already in progress. Please wait for Magic Bill to restart.",
+        )
+        .quietly()
+    }
+
+    pub(crate) fn require_idle(&self) -> crate::words::UiResult<()> {
+        if self.0.load(Ordering::Acquire) {
+            return Err(Self::busy());
+        }
+        Ok(())
+    }
+
     fn begin(&self) -> crate::words::UiResult<InstallAttempt<'_>> {
         self.0
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| {
-                crate::words::UiError::new(
-                    "update.busy",
-                    "An update is already in progress. Please wait for Magic Bill to restart.",
-                )
-                .quietly()
-            })?;
+            .map_err(|_| Self::busy())?;
         Ok(InstallAttempt {
             gate: self,
             handed_off: false,
@@ -569,6 +578,23 @@ impl Drop for InstallAttempt<'_> {
             self.gate.0.store(false, Ordering::Release);
         }
     }
+}
+
+/// Reserve an idle counter before touching an installer. Keep billing paused through
+/// download and handoff; a failed attempt releases both gates so work can continue.
+fn begin_install(
+    app: &crate::state::App,
+) -> crate::words::UiResult<(std::sync::MutexGuard<'_, ()>, InstallAttempt<'_>)> {
+    let action = app.try_begin_update()?;
+    let attempt = app.update_install.begin()?;
+    if app.with_cart(|state| state.has_local_changes())? {
+        return Err(crate::words::UiError::new(
+            "update.unsaved_bill",
+            "Finish or save the current bill and its payment before updating. Then try again from Updates.",
+        )
+        .quietly());
+    }
+    Ok((action, attempt))
 }
 
 /// Only the running version is a rollback candidate. A failed attempt may have recorded the
@@ -601,8 +627,8 @@ pub fn install_on(
     handle: Option<&tauri::AppHandle>,
 ) -> crate::words::UiResult<String> {
     use crate::words::UiError;
-    crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
-    let mut attempt = app.update_install.begin()?;
+    crate::guard::require_signed_in(app)?;
+    let (_one_at_a_time, mut attempt) = begin_install(app)?;
     let dir = crate::config::AppConfig::directory();
     let Some(manifest) = manifest_for(app) else {
         return Err(UiError::new(
@@ -797,7 +823,7 @@ pub fn go_back_on(
     handle: Option<&tauri::AppHandle>,
 ) -> crate::words::UiResult<String> {
     crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
-    let mut attempt = app.update_install.begin()?;
+    let (_one_at_a_time, mut attempt) = begin_install(app)?;
     let dir = crate::config::AppConfig::directory();
     let Some(previous) = Previous::load(&dir) else {
         return Err(crate::words::UiError::new(
@@ -839,16 +865,139 @@ pub fn go_back_a_version(
 }
 
 #[tauri::command]
-pub fn install_update(
+pub async fn install_update(
     app: tauri::State<'_, crate::state::App>,
     handle: tauri::AppHandle,
 ) -> crate::words::UiResult<String> {
-    install_on(&app, Some(&handle))
+    crate::ipc::blocking(|| install_on(&app, Some(&handle))).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sign_in_as(app: &crate::state::App, preset: mb_auth::RolePreset) {
+        let role = preset.shape();
+        app.sessions().begin(
+            mb_auth::Actor {
+                staff_id: mb_core::StaffId::new("staff_update"),
+                name: "Staff".to_owned(),
+                role_id: Some(role.id),
+                role_name: Some(role.name),
+                permissions: role.permissions,
+                max_discount_bp: role.max_discount_bp,
+                max_discount: role.max_discount,
+            },
+            crate::flows::now(),
+            false,
+        );
+    }
+
+    #[test]
+    fn every_default_role_can_check_and_start_a_normal_update() {
+        let app = crate::state::App::new(crate::config::AppConfig::default()).expect("app");
+        for preset in mb_auth::RolePreset::ALL {
+            sign_in_as(&app, *preset);
+            assert!(known_on(&app).is_ok(), "{preset:?} can read the version");
+            assert!(check_on(&app).is_ok(), "{preset:?} can check");
+            // The test has no release provider: get past authorization without launching anything.
+            assert_eq!(
+                install_on(&app, None).expect_err("no release").code,
+                "update.none"
+            );
+        }
+    }
+
+    #[test]
+    fn update_commands_require_sign_in_and_staff_cannot_roll_back() {
+        let app = crate::state::App::new(crate::config::AppConfig::default()).expect("app");
+        for preset in [mb_auth::RolePreset::Cashier, mb_auth::RolePreset::Waiter] {
+            sign_in_as(&app, preset);
+            assert_eq!(
+                go_back_on(&app, None).expect_err("rollback denied").code,
+                "auth.denied"
+            );
+            assert!(crate::guard::require(&app, mb_auth::Permission::ReportsView).is_err());
+            assert!(crate::guard::require(&app, mb_auth::Permission::SettingsStore).is_err());
+        }
+        app.sessions().end();
+        assert_eq!(known_on(&app).expect_err("locked").code, "auth.locked");
+        assert_eq!(check_on(&app).expect_err("locked").code, "auth.locked");
+        assert_eq!(
+            install_on(&app, None).expect_err("locked").code,
+            "auth.locked"
+        );
+        assert_eq!(
+            go_back_on(&app, None).expect_err("locked").code,
+            "auth.locked"
+        );
+    }
+
+    #[test]
+    fn an_update_refuses_unsaved_bills_and_receipts_without_changing_them() {
+        let scratch = crate::signin_tests::Scratch::new("update_unsaved");
+        let app = crate::licence_tests::a_trading_shop(&scratch, "shop");
+        crate::ipc::cart_add_on(&app, "itm_tea".into(), None, None).expect("tea");
+        let before = app.with_cart(|state| Ok(state.clone())).expect("cart");
+        assert_eq!(
+            install_on(&app, None).expect_err("unsaved bill").code,
+            "update.unsaved_bill"
+        );
+        assert_eq!(
+            app.with_cart(|state| Ok(state.clone())).expect("cart"),
+            before
+        );
+        crate::flows::park_open_order(&app).expect("save bill");
+        {
+            let _ready = begin_install(&app).expect("saved bill can survive a restart");
+        }
+        crate::ipc::cart_add_payment_on(&app, "Cash".into(), 100, None).expect("receipt");
+        assert_eq!(
+            install_on(&app, None).expect_err("unsaved receipt").code,
+            "update.unsaved_bill"
+        );
+        // A refusal releases the gate, so the cashier can still finish the payment.
+        assert!(app.begin_action().is_ok());
+    }
+
+    #[test]
+    fn an_update_cannot_interrupt_an_action_or_accept_work_after_handoff() {
+        let app = crate::state::App::new(crate::config::AppConfig::default()).expect("app");
+        let action = app.begin_action().expect("payment in progress");
+        assert_eq!(
+            install_on(&app, None).expect_err("busy counter").code,
+            "update.counter_busy"
+        );
+        drop(action);
+
+        let (action, attempt) = begin_install(&app).expect("idle counter");
+        assert_eq!(
+            app.begin_action().expect_err("billing paused").code,
+            "update.busy"
+        );
+        assert_eq!(
+            app.with_cart_mut(|_| Ok(())).expect_err("cart paused").code,
+            "update.busy"
+        );
+        drop(attempt); // Download failure: ordinary work can resume.
+        drop(action);
+        assert!(app.begin_action().is_ok());
+
+        let (action, mut attempt) = begin_install(&app).expect("retry");
+        attempt.handed_off = true;
+        drop(attempt);
+        drop(action);
+        assert_eq!(
+            app.begin_action().expect_err("waiting for restart").code,
+            "update.busy"
+        );
+        assert_eq!(
+            app.with_cart_mut(|_| Ok(()))
+                .expect_err("no late edits")
+                .code,
+            "update.busy"
+        );
+    }
 
     #[test]
     fn an_install_failure_allows_retry_but_handoff_stays_locked_until_exit() {
@@ -916,7 +1065,10 @@ mod tests {
             b"installed version"
         );
         assert!(current.is_file());
-        assert_eq!(std::fs::read(&pending).expect("new installer"), b"new version");
+        assert_eq!(
+            std::fs::read(&pending).expect("new installer"),
+            b"new version"
+        );
     }
 
     #[test]

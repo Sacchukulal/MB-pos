@@ -1,20 +1,26 @@
-/** The update: the same dialog, offered by the counter and by the Account page. */
+/** The update: the same dialog, offered by the counter and by the Updates page. */
 
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { Pushed } from '../src/ipc/generated/Pushed';
 
 const call = vi.fn();
+const updateListeners = new Set<(message: Pushed) => void>();
 vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
   inApp: () => false,
   isUiError: (cause: unknown) => typeof cause === 'object' && cause !== null && 'code' in cause,
-  subscribe: () => Promise.resolve(() => undefined),
+  subscribe: (listener: (message: Pushed) => void) => {
+    updateListeners.add(listener);
+    return Promise.resolve(() => { updateListeners.delete(listener); });
+  },
 }));
 
 const { UpdateOffer, useUpdateRun } = await import('../src/account/Update');
 const { Version } = await import('../src/account/Version');
 const { ToastProvider } = await import('../src/kit');
+const { MayProvider } = await import('../src/shell/permissions');
 
 const shelf = {
   available: '1.7.0',
@@ -28,6 +34,7 @@ const shelf = {
 
 beforeEach(() => {
   call.mockReset();
+  updateListeners.clear();
   call.mockImplementation((command: string) => {
     if (command === 'look_for_an_update') return Promise.resolve(shelf);
     if (command === 'install_update') return Promise.resolve('Magic Bill is closing.');
@@ -44,7 +51,7 @@ function offer(version: string | null) {
   );
 }
 
-it('offers the version the counter found, without anybody opening Account', async () => {
+it('offers the version the counter found, without anybody opening Updates', async () => {
   offer('1.7.0');
   expect(await screen.findByText('Version 1.7.0 is ready')).toBeTruthy();
   expect(screen.getByText('Faster kitchen tickets.')).toBeTruthy();
@@ -58,7 +65,7 @@ it('says nothing when there is no version waiting', async () => {
   expect(screen.queryByText(/is ready/)).toBeNull();
 });
 
-/** Later is not "never": the bell and the Account page still hold it. */
+/** Later is not "never": the bell and the Updates page still hold it. */
 it('closes on Later and does not come back on its own', async () => {
   const { rerender } = offer('1.7.0');
   fireEvent.click(await screen.findByRole('button', { name: 'Later' }));
@@ -134,13 +141,16 @@ it('allows another attempt after an installation error', async () => {
   expect(call.mock.calls.filter(([name]) => name === 'install_update')).toHaveLength(2);
 });
 
-it('installs from the Account page through the same dialog', async () => {
+it('installs from Updates without granting any business permissions', async () => {
   render(
     <ToastProvider>
-      <Version />
+      <MayProvider held={[]}>
+        <Version />
+      </MayProvider>
     </ToastProvider>,
   );
   fireEvent.click(await screen.findByRole('button', { name: /Install 1.7.0/ }));
+  expect(screen.queryByRole('button', { name: 'Go back' })).toBeNull();
   expect(await screen.findByText('Version 1.7.0 is ready')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: /Download and install/ }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('install_update'));
@@ -153,8 +163,69 @@ it('is drawn in one place', () => {
   expect(version).toContain("from './Update'");
 });
 
-/** Only somebody who may install it is asked about it. */
-it('is offered by the shell only to whoever can install it', () => {
-  const shell = readFileSync('src/shell/Shell.tsx', 'utf8');
-  expect(shell).toContain("held.includes('settings.store') ? <UpdateOffer");
+it('keeps rollback available to staff with shop-settings permission', async () => {
+  render(
+    <ToastProvider>
+      <MayProvider held={['settings.store']}>
+        <Version />
+      </MayProvider>
+    </ToastProvider>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Go back' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Go back' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('go_back_a_version'));
+});
+
+it('allows a staff member to check for updates without reports permission', async () => {
+  call.mockImplementation((command: string) => {
+    if (command === 'look_for_an_update') return Promise.resolve({ ...shelf, available: null });
+    if (command === 'check_for_update') return Promise.resolve(shelf);
+    return Promise.resolve(null);
+  });
+  render(
+    <ToastProvider>
+      <MayProvider held={[]}>
+        <Version />
+      </MayProvider>
+    </ToastProvider>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Check for updates' }));
+  expect(await screen.findByRole('dialog', { name: 'Version 1.7.0 is ready' })).toBeTruthy();
+  expect(call).toHaveBeenCalledWith('check_for_update');
+});
+
+it('explains why billing must be saved and lets staff dismiss the refusal', async () => {
+  call.mockImplementation((command: string) => command === 'install_update'
+    ? Promise.reject({ code: 'update.unsaved_bill', message: 'Finish or save the current bill before updating.' })
+    : Promise.resolve(shelf));
+  offer('1.7.0');
+  fireEvent.click(await screen.findByRole('button', { name: /Download and install/ }));
+  expect(await screen.findByText('Finish or save the current bill before updating.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('shows one progress dialog when Updates and a dismissed startup offer are both mounted', async () => {
+  let finish!: (says: string) => void;
+  const installing = new Promise<string>((resolve) => { finish = resolve; });
+  call.mockImplementation((command: string) => command === 'install_update'
+    ? installing : Promise.resolve(shelf));
+  render(
+    <ToastProvider>
+      <UpdateOffer version="1.7.0" />
+      <Version />
+    </ToastProvider>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Later' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Install 1.7.0' }));
+  fireEvent.click(screen.getByRole('button', { name: /Download and install/ }));
+  act(() => {
+    for (const listener of updateListeners) {
+      listener({ kind: 'update', version: '1.7.0', stage: 'downloading', percent: 50, bytes: 50, total: 100 });
+    }
+  });
+  expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('50');
+  await act(async () => { finish('Magic Bill is closing.'); });
+  expect(screen.getAllByRole('dialog')).toHaveLength(1);
 });

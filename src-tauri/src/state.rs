@@ -1133,9 +1133,27 @@ impl App {
 }
 
 impl App {
-    /// Read the cart. The counter does one thing at a time.
-    pub fn begin_action(&self) -> MutexGuard<'_, ()> {
-        lock(&self.action)
+    /// The counter does one thing at a time, and stops accepting work during an update.
+    pub fn begin_action(&self) -> UiResult<MutexGuard<'_, ()>> {
+        self.update_install.require_idle()?;
+        let action = lock(&self.action);
+        // An installer may have reserved the counter while this action was waiting.
+        self.update_install.require_idle()?;
+        Ok(action)
+    }
+
+    /// An update must not interrupt a bill or payment that is already being processed.
+    pub(crate) fn try_begin_update(&self) -> UiResult<MutexGuard<'_, ()>> {
+        self.update_install.require_idle()?;
+        match self.action.try_lock() {
+            Ok(action) => Ok(action),
+            Err(std::sync::TryLockError::Poisoned(error)) => Ok(error.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => Err(UiError::new(
+                "update.counter_busy",
+                "A bill or payment is being processed. Wait for it to finish, then try updating again.",
+            )
+            .quietly()),
+        }
     }
 
     pub fn with_cart<T>(&self, f: impl FnOnce(&CartState) -> UiResult<T>) -> UiResult<T> {
@@ -1167,6 +1185,7 @@ impl App {
     /// Change the cart, and get the new view back.
     pub fn with_cart_mut<T>(&self, f: impl FnOnce(&mut CartState) -> UiResult<T>) -> UiResult<T> {
         let mut state = lock(&self.cart);
+        self.update_install.require_idle()?;
         let before = state.account.service_cart.as_ref().map(|_| state.clone());
         let result = f(&mut state);
         let Some(before) = before else { return result; };

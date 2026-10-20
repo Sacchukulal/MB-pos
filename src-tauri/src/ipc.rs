@@ -897,7 +897,7 @@ pub fn current_cart(app: tauri::State<'_, App>) -> UiResult<CartView> {
 }
 
 pub fn current_cart_on(app: &App) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(app, Permission::BillCreate)?;
     app.refresh_open_cart()?;
     app.with_cart(|state| cart_view(state, &app.shop_config()))
@@ -905,7 +905,7 @@ pub fn current_cart_on(app: &App) -> UiResult<CartView> {
 
 /// Explicit conflict recovery after the cashier confirms discarding unsaved edits.
 pub fn reload_current_order_on(app: &App) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(app, Permission::BillCreate)?;
     let id = app.with_cart(|state| {
         let Some(origin) = &state.origin else { return Ok(None); };
@@ -942,7 +942,7 @@ pub fn cart_add_on(
     qty: Option<String>,
     note: Option<String>,
 ) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(app, Permission::BillCreate)?;
     crate::correction_draft::require_edit_access(app)?;
     let item = app.find_menu_item(&item_id)?;
@@ -1006,7 +1006,7 @@ pub fn cart_remove(
 
 /// New order. Unlocked resets use Self service; a counter lock keeps its chosen type.
 pub fn cart_clear_on(app: &App, keep_type: bool) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(app, Permission::BillCreate)?;
     crate::flows::park_current(app)?;
     let config = app.shop_config();
@@ -1027,7 +1027,7 @@ pub fn cart_set_order_type(
     handle: tauri::AppHandle,
     order_type: String,
 ) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(&app, Permission::BillCreate)?;
     crate::correction_draft::require_edit_access(&app)?;
     let kind = order_type_from_label(&order_type).ok_or_else(|| {
@@ -1063,7 +1063,7 @@ pub fn cart_add_payment_on(
     reference: Option<String>,
 ) -> UiResult<CartView> {
     // One counter action at a time — see `App::begin_action`.
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     take_payment(app, mode, amount_paise, reference)
 }
 
@@ -1147,7 +1147,7 @@ pub fn cart_clear_payments(
     app: tauri::State<'_, App>,
     handle: tauri::AppHandle,
 ) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(&app, Permission::BillCreate)?;
     crate::correction_draft::require_edit_access(&app)?;
     let view = app.with_cart_mut(|state| {
@@ -1164,7 +1164,7 @@ pub fn cart_cash_given(
     handle: tauri::AppHandle,
     amount: String,
 ) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(&app, Permission::BillCreate)?;
     crate::correction_draft::require_edit_access(&app)?;
     let typed = amount.trim().to_owned();
@@ -1193,7 +1193,7 @@ pub fn cart_cash_given(
 
 /// Override only this bill's frozen unit price; menu authority prevents bypassing discount limits.
 pub fn cart_set_price_on(app: &App, index: usize, price: String, expected_line: Option<String>) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(app, Permission::BillCreate)?;
     guard::require(app, Permission::MenuManage)?;
     crate::correction_draft::require_edit_access(app)?;
@@ -1246,7 +1246,7 @@ pub fn cart_set_discount_checked_on(
     line: Option<usize>,
     expected_line: Option<String>,
 ) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::correction_draft::require_edit_access(app)?;
     let who = guard::require(app, guard::discount_permission(line))?;
     refresh_for_line_edit(app, line, expected_line.as_deref())?;
@@ -1329,7 +1329,7 @@ pub fn cart_clear_discount_on(app: &App, line: Option<usize>) -> UiResult<CartVi
 }
 
 pub fn cart_clear_discount_checked_on(app: &App, line: Option<usize>, expected_line: Option<String>) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::correction_draft::require_edit_access(app)?;
     guard::require(app, guard::discount_permission(line))?;
     refresh_for_line_edit(app, line, expected_line.as_deref())?;
@@ -1500,7 +1500,7 @@ pub fn search_items_on(
 /// The cart goes to a table. Lines typed at the counter and not yet in the books go with it —
 /// onto a free table as its order, onto a busy table's bill as new items for the kitchen.
 pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(app, Permission::BillCreate)?;
     crate::flows::park_current(app)?;
     let table = TableId::new(table_id);
@@ -1573,7 +1573,7 @@ fn table_and_its_order(
 /// A second party on a table, with its own letter: the one given, or the next free one. What
 /// was typed at the counter goes with it; a parked order in the cart stays where it is.
 pub fn join_table_on(app: &App, table_id: String, seat: Option<String>) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(app, Permission::BillCreate)?;
     crate::flows::park_current(app)?;
     let table = TableId::new(table_id);
@@ -1641,7 +1641,7 @@ pub fn join_table(
 
 /// Open an order that has no table — a parcel or a self-service order on the floor.
 pub fn open_order_on(app: &App, order_id: String) -> UiResult<CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(app, Permission::BillCreate)?;
     crate::flows::park_current(app)?;
     if app.with_cart(|state| Ok(state.order_id() == Some(order_id.as_str())))? {

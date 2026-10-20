@@ -49,7 +49,7 @@ fn proposal(app: &App) -> UiResult<(AnyOrder, mb_core::Money)> {
 }
 
 pub fn preview_on(app: &App) -> UiResult<CorrectionSaveView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     guard::require(app, Permission::BillRevert)?;
     app.refresh_open_cart()?;
@@ -101,7 +101,7 @@ pub fn correction_save_preview(app: tauri::State<'_, App>) -> UiResult<Correctio
 }
 
 pub fn save_on(app: &App) -> UiResult<()> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     guard::require(app, Permission::BillRevert)?;
     let correction = app.with_cart(|state| Ok(state.bill_number.is_some() && state.account.revision > 0 && state.account.billed_into.is_none()))?;
@@ -117,7 +117,7 @@ pub fn save_bill_correction_draft(app: tauri::State<'_, App>) -> UiResult<()> {
 }
 
 pub fn discard_on(app: &App, order_id: String) -> UiResult<crate::billing::CartView> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     let who = guard::require(app, Permission::BillRevert)?;
     let id = OrderId::new(order_id);
     let local = app.with_cart(|state| Ok(state.clone()))?;

@@ -342,7 +342,7 @@ fn kitchen_ticket_allowed(app: &App) -> UiResult<()> {
 /// but the paper happens, the same as an order from a phone (`orders::apply`). That is what
 /// makes this ONE command "Print KOT" for a kitchen and "Save bill" for a counter without one.
 pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::correction_draft::require_edit_access(app)?;
     crate::guard::require(app, mb_auth::Permission::BillCreate)?;
     let paper = kitchen_ticket_allowed(app).is_ok();
@@ -449,7 +449,7 @@ pub fn print_kitchen_ticket_on(app: &App) -> UiResult<String> {
 
 /// Send the kitchen the whole order again.
 pub fn reprint_kitchen_ticket_on(app: &App) -> UiResult<String> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::guard::require(app, mb_auth::Permission::BillCreate)?;
     kitchen_ticket_allowed(app)?;
 
@@ -526,7 +526,7 @@ pub fn complete_bill_authorized_on(
     approver_pin: Option<String>,
     proposal_token: Option<String>,
 ) -> UiResult<String> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     crate::correction_draft::require_edit_access(app)?;
     let who = crate::guard::require(app, mb_auth::Permission::BillCreate)?;
     park_current(app)?;
@@ -820,7 +820,7 @@ pub(crate) fn queue_bill(
 
 /// Carry the bill to the table.
 pub fn print_open_bill_on(app: &App, order_id: String) -> UiResult<String> {
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     let who = crate::guard::require(app, mb_auth::Permission::BillCreate)?;
     let id = OrderId::new(order_id);
     if app.with_cart(|s| Ok(s.order_id() == Some(id.as_str())))? {

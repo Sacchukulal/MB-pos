@@ -58,7 +58,7 @@ pub fn apply(
     intent: &Intent,
 ) -> UiResult<Applied> {
     // Mobile edits and counter settlement share the same action boundary.
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     let at = now();
     let day = today(at);
 
@@ -1205,7 +1205,7 @@ fn phone_tables(tables: &[mb_db::repo::floor::DiningTable], sections: &[mb_db::r
 /// Take the floor's items into the cart the cashier is typing.
 pub fn take_the_floors_items_on(app: &App) -> UiResult<crate::billing::CartView> {
     // One counter action at a time — see `App::begin_action`.
-    let _one_at_a_time = app.begin_action();
+    let _one_at_a_time = app.begin_action()?;
     guard::require(app, Permission::BillCreate)?;
     app.refresh_open_cart()?;
     app.with_cart_mut(|state| {

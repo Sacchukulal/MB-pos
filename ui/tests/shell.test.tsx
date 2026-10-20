@@ -29,6 +29,7 @@ vi.mock('../src/ipc/call', () => ({
 
 /** How many people are signed in, from the shell's point of view. */
 let signedInAs: string | null = null;
+let availableUpdate: string | null = null;
 /** What the signed-in person may do — an owner's everything, unless a test says otherwise. */
 let held: readonly string[] = ['bill.create', 'menu.manage', 'staff.manage', 'reports.view'];
 
@@ -79,7 +80,20 @@ function answer(command: string): Promise<unknown> {
         licence: '',
         licenceTone: 'ok',
         needsPin: false,
+        update: availableUpdate,
       });
+    case 'look_for_an_update':
+      return Promise.resolve({
+        available: availableUpdate,
+        notes: 'Counter improvements.',
+        downloaded: false,
+        previous: '1.8.2',
+        daysOnThisVersion: 1,
+        running: '1.8.3',
+        isDevBuild: false,
+      });
+    case 'install_update':
+      return Promise.resolve('Magic Bill is closing.');
     case 'menu_items':
       // Refused while locked, exactly as Rust does it.
       return signedInAs === null
@@ -120,6 +134,7 @@ function answer(command: string): Promise<unknown> {
 
 beforeEach(() => {
   signedInAs = null;
+  availableUpdate = null;
   held = ['bill.create', 'menu.manage', 'staff.manage', 'reports.view'];
   call.mockReset();
   call.mockImplementation((command: string) => answer(command));
@@ -222,8 +237,8 @@ it('mounts the screen with a session behind it, so its data arrives', { timeout:
   expect(await screen.findByRole('option', { name: /Masala Dosa/ })).toBeTruthy();
 });
 
-/** A role with nothing ticked is a page that says so, not the billing screen. */
-it('shows a person with no screens an honest empty page instead of Billing', { timeout: 20_000 }, async () => {
+/** Updates are available even when a role has no business permissions. */
+it('opens Updates without exposing billing to a role with no permissions', { timeout: 20_000 }, async () => {
   held = [];
   show();
   await screen.findByText('Select your name');
@@ -231,10 +246,41 @@ it('shows a person with no screens an honest empty page instead of Billing', { t
   for (const digit of ['4', '8', '2', '9']) {
     fireEvent.click(await screen.findByRole('button', { name: digit }));
   }
-  await screen.findByText('No accessible screens');
+  await screen.findByRole('button', { name: 'Check for updates' });
   // And the billing screen was never mounted: not one of its commands went out.
   expect(call).not.toHaveBeenCalledWith('menu_items');
-  expect(screen.queryByRole('button', { name: /More/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Go back' })).toBeNull();
+});
+
+it('offers an update to a cashier and keeps it reachable through the bell after Later', async () => {
+  signedInAs = 'Meena';
+  held = ['bill.create'];
+  availableUpdate = '1.8.4';
+  show();
+  expect(await screen.findByRole('dialog', { name: 'Version 1.8.4 is ready' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+  fireEvent.click(screen.getByRole('button', { name: /Alerts —/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Open Updates' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Install 1.8.4' }));
+  expect(screen.queryByRole('button', { name: 'Go back' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /Download and install/ }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('install_update'));
+  expect(call).not.toHaveBeenCalledWith('account');
+  expect(call).not.toHaveBeenCalledWith('report_list');
+});
+
+it('waits for sign-in before offering an available update', async () => {
+  availableUpdate = '1.8.4';
+  held = ['bill.create'];
+  show();
+  await screen.findByText('Select your name');
+  expect(screen.queryByRole('dialog', { name: 'Version 1.8.4 is ready' })).toBeNull();
+  expect(call).not.toHaveBeenCalledWith('look_for_an_update');
+  fireEvent.click(screen.getByRole('button', { name: /Meena/ }));
+  for (const digit of ['4', '8', '2', '9']) {
+    fireEvent.click(screen.getByRole('button', { name: digit }));
+  }
+  expect(await screen.findByRole('dialog', { name: 'Version 1.8.4 is ready' })).toBeTruthy();
 });
 
 /**

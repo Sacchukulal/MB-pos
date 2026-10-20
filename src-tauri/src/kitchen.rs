@@ -722,7 +722,7 @@ pub fn print_what_nobody_drew(app: &App) -> u32 {
 pub fn print_what_nobody_drew_at(app: &App, at: Timestamp) -> u32 {
     // This runs on its own thread every five seconds, so it is the one caller that can
     // genuinely collide with a cashier.
-    let _one_at_a_time = app.begin_action();
+    let Ok(_one_at_a_time) = app.begin_action() else { return 0; };
     let config = app.shop_config();
 
     let overdue = app

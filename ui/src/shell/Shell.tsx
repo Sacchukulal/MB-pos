@@ -177,8 +177,7 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     needsAny: [...BILL_LOOKUP_PERMISSIONS, 'day.close'],
   },
   {
-    // In the bar, after Reports: the owner opens it to check the plan, take a backup, or
-    // update. Staff never see it.
+    // In the bar, after Reports: account and licence access stays separate from updates.
     id: 'account',
     daily: true,
     label: 'Account',
@@ -214,7 +213,6 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     label: 'Updates',
     icon: 'download',
     render: () => <Page><Version /></Page>,
-    needs: 'reports.view',
   },
   {
     id: 'history',
@@ -558,7 +556,7 @@ export function Shell() {
 
   /** The counter's own alerts — conditions that hold until they are fixed. */
   const own: Omit<Alert, 'seen'>[] = [];
-  // The shelf is read after each licence check; the bell says so, and Account installs it.
+  // The bell opens Updates, which every signed-in staff member can use.
   const waiting = update ?? status?.update ?? null;
   if (waiting) {
     own.push({
@@ -567,8 +565,8 @@ export function Shell() {
       icon: 'download',
       title: 'Update ready',
       says: `Version ${waiting} is ready to install.`,
-      goTo: 'account',
-      goLabel: 'Open Account',
+      goTo: 'updates',
+      goLabel: 'Open Updates',
     });
   }
   if (status?.licence) {
@@ -759,10 +757,10 @@ export function Shell() {
       {/* What the phones asked the counter to settle — over whichever screen is up. */}
       {!locked ? <SettleDesk /> : null}
       {/*
-        A new version, offered once each time the counter is opened, to whoever can install it.
-        Later leaves it to the bell and the Account page.
+        A new version, offered to every signed-in staff member.
+        Later leaves it to the bell and the Updates page.
       */}
-      {!locked && held.includes('settings.store') ? <UpdateOffer version={waiting} /> : null}
+      {!locked ? <UpdateOffer version={waiting} /> : null}
       {!locked && dayState && dayState.pending.length > 0 && !gateWaived ? (
         <DayGate
           state={dayState}
