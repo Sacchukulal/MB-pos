@@ -91,6 +91,21 @@ it('edits a unit price on this bill through a separate command', async () => {
   expect(call.mock.calls.some(([command]) => command === 'save_menu_item')).toBe(false);
 });
 
+it('shows the parcel-inclusive rate while editing only the original item price', async () => {
+  cart.orderType = 'Parcel';
+  cart.lines[0]!.displayUnitPrice = { paise: 17000n, text: '170.00' };
+  cart.lines[0]!.amount = { paise: 34000n, text: '340.00' };
+  await show();
+  const button = screen.getByRole('button', { name: 'Edit unit price for Masala Dosa' });
+  expect(button).toHaveTextContent('340.00');
+  expect(button.title).toContain('170.00');
+  fireEvent.click(button);
+  const input = screen.getByRole('textbox', { name: 'Unit price for Masala Dosa' });
+  expect(input).toHaveValue('160.00');
+  fireEvent.blur(input);
+  expect(call.mock.calls.some(([name]) => name === 'cart_set_price')).toBe(false);
+});
+
 it('saves an inline price on blur using the original line token', async () => {
   await show();
   fireEvent.click(screen.getByRole('button', { name: 'Edit unit price for Masala Dosa' }));

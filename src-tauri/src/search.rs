@@ -99,6 +99,7 @@ mod tests {
 
     fn item(name: &str) -> MenuItem {
         MenuItem {
+            parcel_charge: Money::ZERO,
             course: None,
             id: ItemId::new(name.to_lowercase().replace(' ', "_")),
             category_id: None,

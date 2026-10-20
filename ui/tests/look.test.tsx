@@ -247,7 +247,15 @@ describe('the top navigation', () => {
   it('names the current screen on the More button when it came from More', () => {
     expect(splitScreens(SHIPPED_SCREENS, 'billing').elsewhere).toBeNull();
     expect(splitScreens(SHIPPED_SCREENS, 'stock').elsewhere?.label).toBe('Stock');
-    expect(splitScreens(SHIPPED_SCREENS, 'menu').elsewhere?.label).toBe('Menu');
+    expect(splitScreens(SHIPPED_SCREENS, 'devices').elsewhere?.label).toBe('Devices');
+  });
+
+  it('keeps device tools in More and management pages inside Settings', () => {
+    const { inMore } = splitScreens(SHIPPED_SCREENS, 'billing');
+    const ids = inMore.map((screen) => screen.id);
+    expect(ids).toEqual(expect.arrayContaining(['devices', 'tills', 'updates']));
+    expect(ids).not.toContain('menu');
+    expect(ids).not.toContain('staff');
   });
 
   /** Every destination is reachable and none is in both places. */

@@ -28,6 +28,7 @@ pub struct MenuItem {
     pub category_id: Option<CategoryId>,
     pub name: String,
     pub unit_price: Money,
+    pub parcel_charge: Money,
     pub tax_class_id: TaxClassId,
     /// The item's own say on whether its price contains the tax. `None` = the slab, then the
     /// shop, decide.
@@ -64,6 +65,7 @@ impl MenuItem {
             tax.rate,
         )
         .with_tax(tax);
+        snapshot.parcel_charge = self.parcel_charge;
         if let Some(hsn) = &self.hsn {
             snapshot = snapshot.with_hsn(hsn.clone());
         }
@@ -169,11 +171,12 @@ impl<'a> MenuRepo<'a> {
         self.tx.execute(
             "INSERT INTO items (id, outlet_id, category_id, name, unit_price, tax_class_id, price_basis,
                                 hsn, cost_price, short_code, prep_minutes, course,
-                                is_open_price, is_available, sort_order, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
+                                is_open_price, is_available, sort_order, created_at, updated_at, parcel_charge)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16, ?17)
              ON CONFLICT (id) DO UPDATE SET category_id   = excluded.category_id,
                                             name          = excluded.name,
                                             unit_price    = excluded.unit_price,
+                                            parcel_charge = excluded.parcel_charge,
                                             tax_class_id  = excluded.tax_class_id,
                                             price_basis   = excluded.price_basis,
                                             hsn           = excluded.hsn,
@@ -202,6 +205,7 @@ impl<'a> MenuRepo<'a> {
                 encode::bool_to_sql(item.is_available),
                 item.sort_order,
                 encode::timestamp_to_sql(at),
+                encode::money_to_sql(item.parcel_charge),
             ],
         )?;
         OutboxRepo::new(self.tx).enqueue(outlet, "items", item.id.as_str(), Op::Upsert, at)
@@ -219,12 +223,12 @@ impl<'a> MenuRepo<'a> {
         let sql = if available_only {
             "SELECT id, category_id, name, unit_price, tax_class_id, price_basis, hsn,
                     cost_price, short_code, prep_minutes, course, is_open_price, is_available,
-                    sort_order
+                    sort_order, parcel_charge
                FROM items WHERE outlet_id = ?1 AND is_deleted = ?2 AND is_available = 1 ORDER BY sort_order, name"
         } else {
             "SELECT id, category_id, name, unit_price, tax_class_id, price_basis, hsn,
                     cost_price, short_code, prep_minutes, course, is_open_price, is_available,
-                    sort_order
+                    sort_order, parcel_charge
                FROM items WHERE outlet_id = ?1 AND is_deleted = ?2 ORDER BY is_available DESC, sort_order, name"
         };
         let mut stmt = self.tx.prepare_cached(sql)?;
@@ -244,6 +248,7 @@ impl<'a> MenuRepo<'a> {
                 is_open_price: row.get(11)?,
                 is_available: row.get(12)?,
                 sort_order: row.get(13)?,
+                parcel_charge: row.get(14)?,
             })
         })?;
 
@@ -255,6 +260,7 @@ impl<'a> MenuRepo<'a> {
                 category_id: row.category_id.map(CategoryId::new),
                 name: row.name,
                 unit_price: encode::money_from_sql(row.unit_price),
+                parcel_charge: encode::money_from_sql(row.parcel_charge),
                 tax_class_id: TaxClassId::new(row.tax_class_id),
                 price_basis: encode::price_basis_opt_from_sql(row.price_basis.as_deref())?,
                 hsn: row.hsn,
@@ -387,6 +393,7 @@ struct ItemRow {
     category_id: Option<String>,
     name: String,
     unit_price: i64,
+    parcel_charge: i64,
     tax_class_id: String,
     price_basis: Option<String>,
     hsn: Option<String>,

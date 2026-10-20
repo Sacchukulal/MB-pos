@@ -1095,7 +1095,7 @@ pub const CATALOG: &[Entry] = &[
         Billing,
         Row,
         "Packing charge",
-        "Added to parcel and self-service bills. Zero means you do not charge it.",
+        "Flat charge for self-service bills only. For Parcel, set each item's parcel charge in Settings > Menu. Zero means no flat charge.",
         ["packing", "parcel", "box", "charge"],
         0..=100_000,
         billing.packing_charge
@@ -1125,6 +1125,20 @@ pub const CATALOG: &[Entry] = &[
         "",
         ["delivery", "gst", "tax"],
         billing.delivery_charge_tax
+    ),
+    flag!(
+        "billing.parcel_charge_separate_screen", Billing, Row,
+        "Show parcel charges separately on the billing screen",
+        "Untick to include parcel charges in the displayed item amounts. The payable total stays the same.",
+        ["parcel", "packing", "separate", "screen"],
+        billing.parcel_charge_separate_screen
+    ),
+    flag!(
+        "receipt.parcel_charge_separate", Billing, Row,
+        "Show parcel charges separately on the printed receipt",
+        "Untick to include parcel charges in the printed item amounts. The payable total stays the same.",
+        ["parcel", "packing", "separate", "receipt"],
+        receipt.parcel_charge_separate
     ),
     // The bill.
     pick!(
@@ -2297,6 +2311,8 @@ const TOPICS: &[(&str, &str)] = &[
     ("billing.idle_lock_minutes", "At the counter"),
     ("billing.service_charge", "Charges you add"),
     ("billing.packing_charge", "Charges you add"),
+    ("billing.parcel_charge_separate_screen", "Parcel charge display"),
+    ("receipt.parcel_charge_separate", "Parcel charge display"),
     ("billing.delivery_charge", "Charges you add"),
     ("store.registration", "Registration"),
     ("store.gstin", "Registration"),

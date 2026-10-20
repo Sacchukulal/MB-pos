@@ -214,6 +214,7 @@ fn seed_masters(db: &Db) {
 fn menu() -> Vec<MenuItem> {
     vec![
         MenuItem {
+            parcel_charge: mb_core::Money::ZERO,
             id: ItemId::new("itm_dosa"),
             category_id: Some(CategoryId::new("cat_food")),
             name: "Masala Dosa".to_owned(),
@@ -230,6 +231,7 @@ fn menu() -> Vec<MenuItem> {
             sort_order: 0,
         },
         MenuItem {
+            parcel_charge: mb_core::Money::ZERO,
             id: ItemId::new("itm_water"),
             category_id: Some(CategoryId::new("cat_food")),
             name: "Water".to_owned(),
@@ -247,6 +249,7 @@ fn menu() -> Vec<MenuItem> {
             sort_order: 1,
         },
         MenuItem {
+            parcel_charge: mb_core::Money::ZERO,
             id: ItemId::new("itm_beer"),
             category_id: Some(CategoryId::new("cat_bar")),
             name: "Beer".to_owned(),
@@ -263,6 +266,7 @@ fn menu() -> Vec<MenuItem> {
             sort_order: 2,
         },
         MenuItem {
+            parcel_charge: mb_core::Money::ZERO,
             id: ItemId::new("itm_sweets"),
             category_id: Some(CategoryId::new("cat_food")),
             name: "Mysore Pak (by weight)".to_owned(),

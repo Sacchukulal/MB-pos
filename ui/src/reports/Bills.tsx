@@ -314,7 +314,8 @@ export function Bills({ onGoTo, initialOrderId, periods = [] }: {
             <Badge tone={TONES[b.state] ?? 'neutral'}>{b.stateWord}</Badge>
             {b.returned ? <Badge tone="warn">Returned</Badge> : null}
             {b.edited ? <Badge tone="accent">Edited</Badge> : null}
-            {b.correctionOpen ? <Badge tone="accent">Editing</Badge> : b.approval === 'waiting' ? <Badge tone="warn">Needs approval</Badge> : null}
+            {b.correctionOpen ? <Badge tone="accent">Editing</Badge> : null}
+            {b.approval === 'waiting' ? <Badge tone="warn">Pending approval</Badge> : null}
             {!b.correctionOpen && b.approval === 'approved' ? <Badge tone="ok">Approved</Badge> : null}
           </span>
           {b.voidReason ? <span className="mb-bills__second">{b.voidReason}</span> : null}
@@ -510,7 +511,8 @@ function BillDialog({
 
   const row = detail?.row;
   const bill = detail?.bill;
-  const waiting = detail?.edits.filter((edit) => !edit.approvedAt) ?? [];
+  const waiting = detail?.edits.filter((edit, index) => !edit.approvedAt && !edit.discardedAt
+    && (!detail.row.correctionOpen || index + 1 < detail.edits.length)) ?? [];
 
   return (
     <Modal
@@ -560,7 +562,7 @@ function BillDialog({
           {row.correctionOpen ? <p className="mb-muted">An edit is still open. Choose Resume bill, then Complete bill or Discard changes in Billing.</p> : null}
           {detail.edits.map((edit, index) => (
             <div className="mb-stack mb-stack--gap-inline" key={edit.id}>
-              <Notice tone={edit.approvedAt ? 'ok' : row.state !== 'settled' || row.returned ? 'info' : 'warn'}>
+              <Notice tone={edit.discardedAt ? 'info' : edit.approvedAt ? 'ok' : row.state !== 'settled' || row.returned ? 'info' : 'warn'}>
                 <span className="mb-stack mb-stack--gap-inline">
                   <strong>
                     Taken back by {edit.by}, {edit.at}: {edit.reason}
@@ -574,7 +576,9 @@ function BillDialog({
                     ))}
                   </ul>
                   <span>
-                    {edit.approvedAt
+                    {edit.discardedAt
+                      ? `Changes discarded by ${edit.discardedBy ?? ''}, ${edit.discardedAt}. No approval required.`
+                      : edit.approvedAt
                       ? `Approved by ${edit.approvedBy ?? ''}, ${edit.approvedAt}`
                       : row.state !== 'settled' || row.returned ? 'Bill cancelled or returned; no edit approval required.'
                       : row.correctionOpen && index === detail.edits.length - 1 ? 'Edit in progress — complete the bill to finish.' : 'Waiting for approval'}

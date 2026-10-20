@@ -17,6 +17,10 @@ import type { SettingsView } from '../src/ipc/generated/SettingsView';
 import type { SettingView } from '../src/ipc/generated/SettingView';
 import type { PreviewLine } from '../src/ipc/generated/PreviewLine';
 import { Field } from '../src/settings/Form';
+import { MayProvider } from '../src/shell/permissions';
+
+vi.mock('../src/menu/Menu', () => ({ Menu: () => <h2>Menu management</h2> }));
+vi.mock('../src/auth/Staff', () => ({ Staff: () => <h2>Staff management</h2> }));
 
 function line(
   text: string,
@@ -201,6 +205,50 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the settings screen', () => {
+  it.each([
+    ['menu.manage', 'Menu', 'Staff'],
+    ['attendance.mark', 'Staff', 'Menu'],
+  ])('keeps management access for %s without settings permissions', async (permission, visible, hidden) => {
+    call.mockImplementation(() => Promise.reject({ code: 'auth.denied' }));
+    render(<ToastProvider><MayProvider held={[permission]}><Settings /></MayProvider></ToastProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: visible }));
+    expect(await screen.findByRole('heading', { name: `${visible} management` })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: hidden })).toBeNull();
+    expect(call).not.toHaveBeenCalledWith('settings_all');
+    expect(screen.queryByRole('searchbox')).toBeNull();
+  });
+
+  it('moves Devices out of the settings rail while keeping its editable form in More', async () => {
+    const devices = {
+      code: 'devices', label: 'Devices', canEdit: true,
+      settings: [setting('devices.scale_port', 'Scale port', 'words', 'COM1')],
+    };
+    const withDevices = { ...view, groups: [...view.groups, devices] };
+    call.mockImplementation((name: string) => {
+      if (name === 'settings_all') return Promise.resolve(withDevices);
+      if (name === 'device_manager') return Promise.resolve({ devices: [], says: 'No devices connected.' });
+      if (name === 'save_settings') return Promise.resolve({ changed: [], settings: withDevices });
+      return Promise.resolve(null);
+    });
+    const settings = draw();
+    await screen.findByLabelText('Shop name');
+    for (const label of ['Devices', 'Tills', 'Updates']) {
+      expect(screen.queryByRole('button', { name: label })).toBeNull();
+    }
+    settings.unmount();
+
+    render(<ToastProvider><Settings onlySection="devices" /></ToastProvider>);
+    const port = await screen.findByLabelText('Scale port');
+    expect(screen.queryByRole('navigation', { name: 'Settings sections' })).toBeNull();
+    expect(screen.queryByLabelText('Shop name')).toBeNull();
+    expect(await screen.findByText('Connected devices')).toBeTruthy();
+    fireEvent.change(port, { target: { value: 'COM3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('save_settings', {
+      edits: [{ key: 'devices.scale_port', value: 'COM3' }],
+    }));
+  });
+
   it('draws whatever the catalogue sent, in the control it asked for', async () => {
     draw();
     expect(await screen.findByLabelText('Shop name')).toHaveValue('Anna Kuteera');

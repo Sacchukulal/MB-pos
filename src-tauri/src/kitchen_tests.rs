@@ -108,6 +108,7 @@ fn seed(app: &App) {
                     repos.menu().save_item(
                         OUTLET,
                         &MenuItem {
+                            parcel_charge: mb_core::Money::ZERO,
                             id: ItemId::new(id),
                             category_id: Some(CategoryId::new(category)),
                             name: name.to_owned(),

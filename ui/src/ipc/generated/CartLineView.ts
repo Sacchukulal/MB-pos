@@ -5,19 +5,23 @@ export type CartLineView = { index: number, itemId?: string, editToken?: string,
 /**
  * Written as a shopkeeper writes it: "2", "0.5", "1.333".
  */
-qty: string, 
+qty: string,
 /**
  * "5%", "18%", "Non-GST", "Exempt" — a label, never a number to compute with.
  */
-rateLabel: string, unitPrice: MoneyView, gross: MoneyView, 
+rateLabel: string, unitPrice: MoneyView,
+/**
+ * The displayed rate including parcel packing; editing still uses the food price.
+ */
+displayUnitPrice?: MoneyView, gross: MoneyView,
 /**
  * Money off this line from both directions: its own discount and its share of the bill's.
  */
-discount: MoneyView, 
+discount: MoneyView,
 /**
  * This line's own discount alone, so the screen knows there is one to take off.
  */
-lineDiscount: MoneyView, 
+lineDiscount: MoneyView,
 /**
  * What this line adds to the bill, tax included.
  */

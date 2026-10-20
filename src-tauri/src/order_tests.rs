@@ -28,6 +28,7 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
             repos.menu().save_item(
                 OUTLET,
                 &mb_db::repo::menu::MenuItem {
+                    parcel_charge: mb_core::Money::ZERO,
                     id: mb_core::ItemId::new(id),
                     category_id: None,
                     name: name.to_owned(),
@@ -889,6 +890,12 @@ fn the_phone_and_the_counter_agree_on_the_total() {
     config.billing.packing_charge = mb_core::Money::from_paise(1_000);
     config.billing.packing_charge_tax = "tax_food_5".to_owned();
     app.publish_shop_config(config.clone());
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        let mut item = repos.menu().find_item(&mb_core::ItemId::new("itm_dosa"))?.expect("dosa");
+        item.parcel_charge = mb_core::Money::from_paise(500);
+        repos.menu().save_item(crate::state::OUTLET, &item, crate::flows::now())
+    }).map_err(|error| crate::words::from_db(&error))).expect("item packing charge");
 
     let order = open_one(&app, None);
     let out = go(

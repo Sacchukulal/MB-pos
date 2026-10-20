@@ -544,12 +544,13 @@ impl<'a> OrderRepo<'a> {
                                           tax_rate_bp, tax_kind, tax_basis, hsn, category_id, qty,
                                           note, course, prep_minutes,
                                           discount_kind, discount_value, discount_reason,
-                                          discount_by, was_discount_capped)
+                                          discount_by, was_discount_capped, parcel_charge)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?19, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                         ?16, ?17, ?18, 0)
+                         ?16, ?17, ?18, 0, ?20)
                  ON CONFLICT(id) DO UPDATE SET
                     seq = excluded.seq, item_id = excluded.item_id, name = excluded.name,
                     unit_price = excluded.unit_price, tax_rate_bp = excluded.tax_rate_bp,
+                    parcel_charge = excluded.parcel_charge,
                     tax_kind = excluded.tax_kind, tax_basis = excluded.tax_basis,
                     hsn = excluded.hsn, category_id = excluded.category_id, qty = excluded.qty,
                     note = excluded.note, course = excluded.course, prep_minutes = excluded.prep_minutes,
@@ -578,6 +579,7 @@ impl<'a> OrderRepo<'a> {
                     discount.and_then(|d| d.reason.clone()),
                     discount.and_then(|d| d.authorised_by.as_ref().map(|s| s.as_str().to_owned())),
                     encode::price_basis_to_sql(line.snapshot.tax.basis),
+                    encode::money_to_sql(line.snapshot.parcel_charge),
                 ],
             )?;
 
@@ -908,6 +910,7 @@ impl<'a> OrderRepo<'a> {
             // disk is what `kitchen::send` fires from, so losing them here would silently
             // switch off every course and every timer after a restart.
             snapshot.course = line.course.clone();
+            snapshot.parcel_charge = encode::money_from_sql(line.parcel_charge);
             snapshot.prep_minutes = line.prep_minutes.and_then(|m| u32::try_from(m).ok());
 
             let mut line_discount = None;
@@ -943,7 +946,7 @@ impl<'a> OrderRepo<'a> {
         let mut stmt = self.tx.prepare_cached(
             "SELECT id, seq, item_id, name, unit_price, tax_rate_bp, tax_kind, hsn,
                     category_id, qty, note, course, prep_minutes,
-                    discount_kind, discount_value, discount_reason, discount_by, tax_basis
+                    discount_kind, discount_value, discount_reason, discount_by, tax_basis, parcel_charge
                FROM order_lines WHERE order_id = ?1 AND seq >= 0 ORDER BY seq",
         )?;
         let rows = stmt.query_map([order_id], |row| {
@@ -956,6 +959,7 @@ impl<'a> OrderRepo<'a> {
                 tax_rate_bp: row.get(5)?,
                 tax_kind: row.get(6)?,
                 tax_basis: row.get(17)?,
+                parcel_charge: row.get(18)?,
                 hsn: row.get(7)?,
                 category_id: row.get(8)?,
                 qty: row.get(9)?,
@@ -1469,6 +1473,7 @@ struct LineRow {
     item_id: String,
     name: String,
     unit_price: i64,
+    parcel_charge: i64,
     tax_rate_bp: i64,
     tax_kind: String,
     tax_basis: String,

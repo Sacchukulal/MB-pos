@@ -482,6 +482,7 @@ fn a_bill_opened_by_one_person_and_settled_by_another_records_both() {
     let mut cart = Cart::new();
     cart.add(
         ItemSnapshot {
+            parcel_charge: mb_core::Money::ZERO,
             item_id: mb_core::ItemId::new("itm_dosa"),
             name: "Masala Dosa".to_owned(),
             unit_price: Money::from_paise(12_000),

@@ -16,6 +16,12 @@ export const BILL_LOOKUP_PERMISSIONS = [
   'reports.view', 'bill.revert', 'bill.revert.approve', 'bill.void', 'bill.reprint',
 ] as const;
 
+/** Mirrors guard::STAFF_PERMISSIONS, including attendance and payroll access. */
+export const STAFF_PERMISSIONS = [
+  'staff.manage', 'attendance.mark', 'attendance.correct',
+  'leave.approve', 'salary.view', 'salary.manage',
+] as const;
+
 export function MayProvider({
   held,
   children,

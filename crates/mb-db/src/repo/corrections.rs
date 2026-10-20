@@ -60,6 +60,8 @@ pub struct RevertRow {
     pub before_settled_by: Option<StaffId>,
     pub approved_at: Option<Timestamp>,
     pub approved_by: Option<StaffId>,
+    pub discarded_at: Option<Timestamp>,
+    pub discarded_by: Option<StaffId>,
 }
 
 /// One line of the bill as it was before a revert.
@@ -433,8 +435,8 @@ impl<'a> CorrectionsRepo<'a> {
         self.tx.execute(
             "INSERT INTO bill_reverts (id, outlet_id, order_id, business_day, reason,
                                        reverted_at, reverted_by, before_total,
-                                       before_settled_at, before_settled_by, approved_at, approved_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                       before_settled_at, before_settled_by, approved_at, approved_by, discarded_at, discarded_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             rusqlite::params![
                 revert.id,
                 outlet,
@@ -448,6 +450,8 @@ impl<'a> CorrectionsRepo<'a> {
                 revert.before_settled_by.as_ref().map(StaffId::as_str),
                 revert.approved_at.map(encode::timestamp_to_sql),
                 revert.approved_by.as_ref().map(StaffId::as_str),
+                revert.discarded_at.map(encode::timestamp_to_sql),
+                revert.discarded_by.as_ref().map(StaffId::as_str),
             ],
         )?;
         for (seq, line) in lines.iter().enumerate() {
@@ -499,7 +503,7 @@ impl<'a> CorrectionsRepo<'a> {
     ) -> Result<RevertRow, DbError> {
         let changed = self.tx.execute(
             "UPDATE bill_reverts SET approved_at = ?2, approved_by = ?3
-              WHERE id = ?1 AND approved_at IS NULL",
+              WHERE id = ?1 AND approved_at IS NULL AND discarded_at IS NULL",
             rusqlite::params![id, encode::timestamp_to_sql(at), by.as_str()],
         )?;
         if changed == 0 {
@@ -507,15 +511,40 @@ impl<'a> CorrectionsRepo<'a> {
                 "this revert has already been approved, or there is no such revert",
             ));
         }
-        self.reverts_where("id = ?1", rusqlite::params![id])?
+        let row = self.reverts_where("id = ?1", rusqlite::params![id])?
             .pop()
-            .ok_or_else(|| DbError::invariant("the revert vanished while it was being approved"))
+            .ok_or_else(|| DbError::invariant("the revert vanished while it was being approved"))?;
+        self.publish_revert_change(&row, at)?;
+        Ok(row)
+    }
+
+    /// Keep the abandoned attempt in history without inventing a reviewer.
+    pub fn discard_revert(&self, id: &str, by: &StaffId, at: Timestamp) -> Result<(), DbError> {
+        let changed = self.tx.execute(
+            "UPDATE bill_reverts SET discarded_at = ?2, discarded_by = ?3
+             WHERE id = ?1 AND approved_at IS NULL AND discarded_at IS NULL",
+            rusqlite::params![id, encode::timestamp_to_sql(at), by.as_str()],
+        )?;
+        if changed != 1 {
+            return Err(DbError::invariant("This correction is already approved or discarded."));
+        }
+        let row = self.reverts_where("id = ?1", rusqlite::params![id])?
+            .pop().ok_or_else(|| DbError::invariant("The correction no longer exists."))?;
+        self.publish_revert_change(&row, at)
+    }
+
+    fn publish_revert_change(&self, row: &RevertRow, at: Timestamp) -> Result<(), DbError> {
+        let outlet: String = self.tx.query_row(
+            "SELECT outlet_id FROM bill_reverts WHERE id = ?1", [&row.id], |r| r.get(0),
+        )?;
+        OutboxRepo::new(self.tx).enqueue(&outlet, "bill_reverts", &row.id, Op::Upsert, at)?;
+        self.mark_bill_day_dirty(&outlet, &row.order_id, at)
     }
 
     /// Every time this bill was taken back, oldest first.
     pub fn reverts_of(&self, order_id: &OrderId) -> Result<Vec<RevertRow>, DbError> {
         self.reverts_where(
-            "order_id = ?1 ORDER BY reverted_at",
+            "order_id = ?1 ORDER BY reverted_at, rowid",
             rusqlite::params![order_id.as_str()],
         )
     }
@@ -563,10 +592,12 @@ impl<'a> CorrectionsRepo<'a> {
     pub fn reverts_waiting(&self, outlet: &str) -> Result<i64, DbError> {
         Ok(self.tx.query_row(
             "SELECT COUNT(*) FROM bill_reverts r JOIN orders o ON o.id = r.order_id
-             WHERE r.outlet_id = ?1 AND r.approved_at IS NULL
+             WHERE r.outlet_id = ?1 AND r.approved_at IS NULL AND r.discarded_at IS NULL
                AND o.state = 'settled'
                AND NOT EXISTS (SELECT 1 FROM bill_returns returned WHERE returned.order_id = o.id)
-               AND NOT EXISTS (SELECT 1 FROM order_edits e WHERE e.order_id = o.id)",
+               AND (NOT EXISTS (SELECT 1 FROM order_edits e WHERE e.order_id = o.id)
+                    OR r.rowid != (SELECT latest.rowid FROM bill_reverts latest
+                                  WHERE latest.order_id = o.id ORDER BY latest.reverted_at DESC, latest.rowid DESC LIMIT 1))",
             [outlet],
             |row| row.get(0),
         )?)
@@ -597,7 +628,8 @@ impl<'a> CorrectionsRepo<'a> {
     ) -> Result<Vec<RevertRow>, DbError> {
         let sql = format!(
             "SELECT id, order_id, business_day, reason, reverted_at, reverted_by,
-                    before_total, before_settled_at, before_settled_by, approved_at, approved_by
+                    before_total, before_settled_at, before_settled_by, approved_at, approved_by,
+                    discarded_at, discarded_by
                FROM bill_reverts WHERE {predicate}"
         );
         let mut stmt = self.tx.prepare(&sql)?;
@@ -614,6 +646,8 @@ impl<'a> CorrectionsRepo<'a> {
                 row.get::<_, Option<String>>(8)?,
                 row.get::<_, Option<i64>>(9)?,
                 row.get::<_, Option<String>>(10)?,
+                row.get::<_, Option<i64>>(11)?,
+                row.get::<_, Option<String>>(12)?,
             ))
         })?;
         let mut out = Vec::new();
@@ -630,6 +664,8 @@ impl<'a> CorrectionsRepo<'a> {
                 settled_by,
                 approved_at,
                 approved_by,
+                discarded_at,
+                discarded_by,
             ) = row?;
             out.push(RevertRow {
                 id,
@@ -643,6 +679,8 @@ impl<'a> CorrectionsRepo<'a> {
                 before_settled_by: settled_by.map(StaffId::new),
                 approved_at: approved_at.map(encode::timestamp_from_sql),
                 approved_by: approved_by.map(StaffId::new),
+                discarded_at: discarded_at.map(encode::timestamp_from_sql),
+                discarded_by: discarded_by.map(StaffId::new),
             });
         }
         Ok(out)

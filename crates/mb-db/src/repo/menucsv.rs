@@ -28,6 +28,7 @@ const COLUMNS: &[&str] = &[
     SHORT_CODE,
     COST,
     AVAILABLE,
+    PARCEL_CHARGE,
     ID,
 ];
 
@@ -157,6 +158,7 @@ impl<'a> MenuCsvRepo<'a> {
                     .map(|c| c.name.clone())
             });
             let price = item.unit_price.to_plain_string();
+            let parcel_charge = item.parcel_charge.to_plain_string();
             let tax = classes
                 .iter()
                 .find(|c| c.id == item.tax_class_id)
@@ -180,6 +182,7 @@ impl<'a> MenuCsvRepo<'a> {
                     item.short_code.as_deref(),
                     cost.as_deref(),
                     Some(available),
+                    Some(parcel_charge.as_str()),
                     Some(item.id.as_str()),
                 ]
                 .into_iter(),
@@ -433,11 +436,19 @@ impl<'a> MenuCsvRepo<'a> {
                 }
             };
 
+            let parcel_charge = match money(cell(header.of(PARCEL_CHARGE)), None, "parcel charge") {
+                Ok(value) => value.unwrap_or_else(|| found.map_or(Money::ZERO, |item| item.parcel_charge)),
+                Err(why) => {
+                    plan.refused.push((line, why));
+                    continue;
+                }
+            };
             let item = MenuItem {
                 id: item_id,
                 category_id: category.as_ref().map(|c| c.id.clone()),
                 name,
                 unit_price: price,
+                parcel_charge,
                 tax_class_id: class,
                 price_basis,
                 hsn: cell(header.of(HSN)).or_else(|| found.and_then(|i| i.hsn.clone())),
@@ -651,6 +662,7 @@ const ID: &str = "id";
 const NAME: &str = "name";
 const CATEGORY: &str = "category";
 const PRICE: &str = "price";
+const PARCEL_CHARGE: &str = "parcel charge";
 const PRICE_PAISE: &str = "price paise";
 const COST: &str = "cost";
 const COST_PAISE: &str = "cost paise";
@@ -706,6 +718,7 @@ impl Header {
                 NAME,
                 CATEGORY,
                 PRICE,
+                PARCEL_CHARGE,
                 PRICE_PAISE,
                 COST,
                 COST_PAISE,

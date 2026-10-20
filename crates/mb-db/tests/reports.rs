@@ -25,6 +25,7 @@ fn day(n: i32) -> BusinessDay {
 
 fn dosa() -> ItemSnapshot {
     ItemSnapshot {
+        parcel_charge: mb_core::Money::ZERO,
         item_id: mb_core::ItemId::new("itm_dosa"),
         name: "Masala Dosa".to_owned(),
         unit_price: Money::from_paise(10_000),
@@ -39,6 +40,7 @@ fn dosa() -> ItemSnapshot {
 
 fn water() -> ItemSnapshot {
     ItemSnapshot {
+        parcel_charge: mb_core::Money::ZERO,
         item_id: mb_core::ItemId::new("itm_water"),
         name: "Water".to_owned(),
         unit_price: Money::from_paise(2_000),

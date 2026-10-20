@@ -235,6 +235,7 @@ mod tests {
             repos.menu().save_item(
                 OUTLET,
                 &mb_db::repo::menu::MenuItem {
+                    parcel_charge: mb_core::Money::ZERO,
                     id: mb_core::ItemId::new("itm_dosa"),
                     category_id: None,
                     name: "Masala Dosa".to_owned(),

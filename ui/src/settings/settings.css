@@ -31,6 +31,14 @@
   grid-template-columns: var(--rail-collapsed) minmax(0, 1fr);
 }
 
+.mb-settings--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mb-settings__rail--management {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .mb-settings__fields:has([data-setting='store.address']) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }

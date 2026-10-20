@@ -78,6 +78,16 @@ pub struct BillContext<'a> {
 
 /// Build the document for one bill.
 pub fn bill_document(metrics: &Metrics, ctx: &BillContext<'_>) -> Result<Document, PrintError> {
+    let display;
+    let context;
+    let ctx = if ctx.settings.parcel_charge_separate {
+        ctx
+    } else {
+        display = ctx.bill.display_with_parcel_in_items()
+            .map_err(|error| PrintError::invalid(error.to_string()))?;
+        context = BillContext { bill: &display, ..ctx.clone() };
+        &context
+    };
     let s = ctx.settings;
     let mut doc = Document::new(metrics.paper());
 

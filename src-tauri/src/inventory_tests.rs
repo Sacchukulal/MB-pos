@@ -23,6 +23,7 @@ fn a_shop(scratch: &Scratch) -> App {
         Repos::new(tx).menu().save_item(
             OUTLET,
             &mb_db::repo::menu::MenuItem {
+                parcel_charge: mb_core::Money::ZERO,
                 id: mb_core::ItemId::new("itm_dosa"),
                 category_id: None,
                 name: "Masala Dosa".to_owned(),
@@ -505,6 +506,7 @@ fn demo_stock() {
                     repos.menu().save_item(
                         OUTLET,
                         &mb_db::repo::menu::MenuItem {
+                            parcel_charge: mb_core::Money::ZERO,
                             id: mb_core::ItemId::new(id),
                             category_id: None,
                             name: name.to_owned(),

@@ -158,6 +158,16 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0023_net_receipts",
         sql: include_str!("migrations/0023_net_receipts.sql"),
     },
+    Migration {
+        version: 24,
+        name: "0024_discarded_corrections",
+        sql: include_str!("migrations/0024_discarded_corrections.sql"),
+    },
+    Migration {
+        version: 25,
+        name: "0025_item_parcel_charges",
+        sql: include_str!("migrations/0025_item_parcel_charges.sql"),
+    },
 ];
 
 /// The highest version this build understands.

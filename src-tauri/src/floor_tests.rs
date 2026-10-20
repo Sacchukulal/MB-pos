@@ -74,6 +74,7 @@ fn a_shop_with_a_room(scratch: &Scratch) -> App {
             repos.menu().save_item(
                 OUTLET,
                 &mb_db::repo::menu::MenuItem {
+                    parcel_charge: mb_core::Money::ZERO,
                     id: mb_core::ItemId::new(id),
                     category_id: None,
                     name: name.to_owned(),

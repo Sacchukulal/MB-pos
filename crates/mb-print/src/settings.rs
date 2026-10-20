@@ -235,6 +235,8 @@ impl Default for Sections {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptSettings {
+    #[serde(default = "yes")]
+    pub parcel_charge_separate: bool,
     pub pattern: Pattern,
     pub row_height: RowHeight,
     pub show: Show,
@@ -261,6 +263,7 @@ pub struct ReceiptSettings {
 impl Default for ReceiptSettings {
     fn default() -> Self {
         ReceiptSettings {
+            parcel_charge_separate: true,
             pattern: Pattern::Dashed,
             row_height: RowHeight::Standard,
             show: Show::default(),

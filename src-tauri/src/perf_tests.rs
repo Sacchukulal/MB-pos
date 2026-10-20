@@ -38,6 +38,7 @@ fn a_shop_with_a_menu(app: &App, count: usize) {
                     repos.menu().save_item(
                         OUTLET,
                         &mb_db::repo::menu::MenuItem {
+                            parcel_charge: mb_core::Money::ZERO,
                             id: mb_core::ItemId::new(format!("itm_{n}")),
                             category_id: None,
                             // Names that actually rank against each other: some start with the

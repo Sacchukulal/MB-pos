@@ -35,6 +35,7 @@ fn main() {
             repos.menu().save_item(
                 "outlet_default",
                 &mb_db::repo::menu::MenuItem {
+                    parcel_charge: mb_core::Money::ZERO,
                     id: mb_core::ItemId::new(item),
                     category_id: None,
                     name: label.to_owned(),

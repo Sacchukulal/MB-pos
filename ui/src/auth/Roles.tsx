@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { Button, Checkbox, Icon, Input, Modal, MoneyInput, useToast } from '../kit';
+import { Button, Checkbox, freshId, Icon, Input, Modal, MoneyInput, Toolbar, useToast } from '../kit';
 import { call, isUiError } from '../ipc/call';
 import type { PermissionGroupView } from '../ipc/generated/PermissionGroupView';
 import type { RoleView } from '../ipc/generated/RoleView';
@@ -11,6 +11,7 @@ export function Roles() {
   const [roles, setRoles] = useState<readonly RoleView[]>([]);
   const [groups, setGroups] = useState<readonly PermissionGroupView[]>([]);
   const [editing, setEditing] = useState<RoleView | null>(null);
+  const [ready, setReady] = useState(false);
   const toast = useToast();
 
   useEffect(() => {
@@ -20,6 +21,7 @@ export function Roles() {
         // The sections, their order and their words are Rust's; the database says which boxes
         // exist, so the screen can only ever offer a permission there is a row for.
         setGroups(await call('list_permissions'));
+        setReady(true);
       } catch (cause) {
         if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
       }
@@ -32,6 +34,26 @@ export function Roles() {
 
   return (
     <>
+      <Toolbar
+        end={
+          <Button
+            variant="primary"
+            disabled={!ready}
+            onClick={() => setEditing({
+              id: freshId('role'),
+              name: '',
+              isBuiltin: false,
+              isOwner: false,
+              permissions: [],
+              maxDiscountPercent: '0%',
+              maxDiscount: null,
+              maxDiscountRupees: '0',
+            })}
+          >
+            Add role
+          </Button>
+        }
+      />
       <div className="mb-roles">
         {roles.map((role) => (
           <div key={role.id} className="mb-roles__role">
@@ -57,6 +79,7 @@ export function Roles() {
       {editing ? (
         <EditRole
           role={editing}
+          isNew={!roles.some((role) => role.id === editing.id)}
           groups={groups}
           onClose={() => setEditing(null)}
           onSaved={(saved) => {
@@ -85,11 +108,13 @@ function describe(role: RoleView, offered: ReadonlySet<string>): string {
 
 function EditRole({
   role,
+  isNew,
   groups,
   onClose,
   onSaved,
 }: {
   role: RoleView;
+  isNew: boolean;
   groups: readonly PermissionGroupView[];
   onClose: () => void;
   onSaved: (roles: readonly RoleView[]) => void;
@@ -119,7 +144,7 @@ function EditRole({
       const saved = await call('save_role', {
         role: {
           ...role,
-          name,
+          name: name.trim(),
           permissions: [...granted],
           maxDiscountPercent: percent.trim() === '' ? null : percent,
           maxDiscountRupees: rupees.trim() === '' ? null : rupees,
@@ -136,7 +161,7 @@ function EditRole({
   return (
     <Modal
       open
-      title={role.name}
+      title={isNew ? 'Add role' : role.name}
       note="Select individual permissions or a whole section. Help explains any additional effects."
       onClose={onClose}
       wide

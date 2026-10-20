@@ -28,6 +28,7 @@ fn day() -> BusinessDay {
 
 fn tea() -> ItemSnapshot {
     ItemSnapshot {
+        parcel_charge: mb_core::Money::ZERO,
         item_id: mb_core::ItemId::new("itm_dosa"),
         name: "Masala Dosa".to_owned(),
         unit_price: Money::from_paise(10_000),
@@ -793,6 +794,8 @@ fn a_bill_taken_back_keeps_its_number_and_the_register_says_what_it_was() {
         before_settled_by: Some(by.clone()),
         approved_at: None,
         approved_by: None,
+        discarded_at: None,
+        discarded_by: None,
     };
     let lines = vec![RevertLine {
         name: "Masala Dosa".to_owned(),
@@ -888,6 +891,15 @@ fn a_bill_taken_back_keeps_its_number_and_the_register_says_what_it_was() {
         "billed again, yet still listed as unfinished"
     );
 
+    // The draft and day file may already be uploaded before a later review.
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let pending = repos.outbox().pending_in(Some("bill_reverts"), 100)?;
+        repos.outbox().mark_synced(&pending.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), at(8))?;
+        tx.execute("UPDATE archive_days SET uploaded_at = ?1 WHERE outlet_id = ?2 AND business_day = ?3",
+            rusqlite::params![at(8).millis(), OUTLET, day().days_since_epoch()])?;
+        Ok(())
+    }).expect("previously uploaded");
     // Signed off once; a second signature is refused.
     let approved = db
         .transaction(|tx| {
@@ -898,6 +910,14 @@ fn a_bill_taken_back_keeps_its_number_and_the_register_says_what_it_was() {
         .expect("approved");
     assert_eq!(approved.approved_by, Some(by.clone()));
     assert_eq!(approved.approved_at, Some(at(9)));
+    db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let pending = repos.outbox().pending_in(Some("bill_reverts"), 100)?;
+        assert!(pending.iter().any(|r| r.row_id == "rvt_1" && r.created_at == at(9)));
+        let ledger = repos.archive().ledger(OUTLET, day())?.expect("day ledger");
+        assert_eq!(ledger.dirty_at, Some(at(9)));
+        Ok(())
+    }).expect("approval travels to the cloud and dirties the day file");
     let again = db.transaction(|tx| {
         Repos::new(tx)
             .corrections()

@@ -93,7 +93,7 @@ it('replaces a stale refund form with a closeable explanation if another refund 
   expect(screen.getByRole('button', { name: 'Close' })).toBeEnabled();
 });
 
-it('shows an unfinished correction as Editing instead of asking for approval', async () => {
+it('keeps earlier pending approval visible while another correction is being edited', async () => {
   const implementation = call.getMockImplementation()!;
   const view = await implementation('bills');
   view.rows[0].correctionOpen = true;
@@ -102,7 +102,33 @@ it('shows an unfinished correction as Editing instead of asking for approval', a
   render(<ToastProvider><Bills /></ToastProvider>);
   await screen.findByRole('button', { name: 'Resume bill' });
   expect(screen.getByText('Editing')).toBeTruthy();
-  expect(screen.queryByText('Needs approval')).toBeNull();
+  expect(screen.getByText('Pending approval')).toBeTruthy();
+});
+
+it('approves only completed pending edits, excluding discarded and unfinished drafts', async () => {
+  const implementation = call.getMockImplementation()!;
+  call.mockImplementation(async (command: string, args: unknown) => {
+    const value = await implementation(command, args);
+    if (command === 'bill_detail') {
+      value.canApprove = true;
+      value.row.correctionOpen = true;
+      value.edits = ['completed', 'discarded', 'draft'].map((id) => ({
+        id, by: 'Cashier', at: 'Today', reason: 'Wrong items', beforeTotal: money(9000),
+        changes: [], beforeLines: [], approvedAt: null,
+        discardedAt: id === 'discarded' ? 'Today' : null, discardedBy: 'Cashier',
+      }));
+    }
+    return value;
+  });
+  render(<ToastProvider><Bills /></ToastProvider>);
+  fireEvent.click(await screen.findByText('A/7'));
+  const approve = await screen.findByRole('button', { name: 'Approve' });
+  expect(screen.getByText(/Changes discarded by Cashier/)).toBeTruthy();
+  fireEvent.click(approve);
+  await waitFor(() => expect(approve).toBeEnabled());
+  expect(call.mock.calls.filter(([name]) => name === 'approve_revert')).toEqual([
+    ['approve_revert', { revertId: 'completed' }],
+  ]);
 });
 
 it('opens the existing reprint confirmation directly without opening the bill or actions menu', async () => {

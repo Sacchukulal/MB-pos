@@ -33,6 +33,7 @@ pub(crate) fn a_trading_shop(scratch: &Scratch, name: &str) -> App {
                 Repos::new(tx).menu().save_item(
                     OUTLET,
                     &mb_db::repo::menu::MenuItem {
+                        parcel_charge: mb_core::Money::ZERO,
                         id: mb_core::ItemId::new("itm_tea"),
                         category_id: None,
                         name: "Masala Tea".to_owned(),

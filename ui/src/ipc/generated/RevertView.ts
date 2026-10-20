@@ -13,4 +13,4 @@ beforeLines: Array<BeforeLineView>, beforeTotal: MoneyView, beforePaidBy: string
 /**
  * What is different since, one line each.
  */
-changes: Array<string>, approvedBy: string | null, approvedAt: string | null, };
+changes: Array<string>, approvedBy: string | null, approvedAt: string | null, discardedAt: string | null, discardedBy: string | null, };

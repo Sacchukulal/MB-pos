@@ -12,6 +12,41 @@ fn shop(scratch: &Scratch) -> App {
 }
 
 #[test]
+fn parcel_packing_is_frozen_on_saved_bills_and_reduced_with_returned_items() {
+    let scratch = Scratch::new("parcel_return");
+    let app = a_trading_shop(&scratch);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        let mut item = repos.menu().find_item(&mb_core::ItemId::new("itm_tea"))?.expect("tea");
+        item.parcel_charge = mb_core::Money::from_paise(200);
+        repos.menu().save_item(crate::state::OUTLET, &item, crate::flows::now())
+    }).map_err(|error| crate::words::from_db(&error))).expect("packing price");
+    order_teas(&app, 2);
+    app.with_cart_mut(|state| { state.set_order_type(mb_core::OrderType::Parcel); Ok(()) }).expect("parcel");
+    crate::flows::complete_bill_on(&app, Some("Cash".into())).expect("issued");
+    let row = crate::corrections::list_bills_on(&app).expect("bills").remove(0);
+    let issued = crate::flows::find_order(&app, &mb_core::OrderId::new(&row.order_id)).expect("read").expect("saved");
+    let AnyOrder::Settled(original) = &issued else { panic!("issued bill") };
+    assert_eq!(original.bill.charges[0].amount.paise(), 400);
+    assert_eq!(original.core.cart.lines()[0].snapshot.parcel_charge.paise(), 200);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        let mut item = repos.menu().find_item(&mb_core::ItemId::new("itm_tea"))?.expect("tea");
+        item.parcel_charge = mb_core::Money::from_paise(900);
+        repos.menu().save_item(crate::state::OUTLET, &item, crate::flows::now())
+    }).map_err(|error| crate::words::from_db(&error))).expect("new menu charge");
+    crate::corrections::revert_bill_on(&app, row.order_id.clone(), "Return one tea".into(), None, None).expect("reopen");
+    app.with_cart_mut(|state| { state.cart.set_qty(0, Qty::ONE).expect("one returned"); Ok(()) }).expect("reduce");
+    let reduced = app.with_cart(|state| state.bill(&app.shop_config())).expect("corrected");
+    assert_eq!(reduced.charges[0].amount.paise(), 200, "original parcel price is retained");
+    assert!(reduced.grand_total < original.bill.grand_total);
+    crate::flows::complete_bill_with_return_on(&app, None, Some("Cash".into())).expect("complete with return");
+    let saved = crate::flows::find_order(&app, &mb_core::OrderId::new(&row.order_id)).expect("read").expect("saved");
+    let AnyOrder::Settled(saved) = saved else { panic!("settled correction") };
+    assert_eq!(saved.bill, reduced);
+}
+
+#[test]
 fn approval_policy_exempts_owner_and_only_offers_available_other_managers() {
     use crate::signin_tests::hire;
     use mb_auth::RolePreset;
@@ -35,7 +70,7 @@ fn approval_policy_exempts_owner_and_only_offers_available_other_managers() {
     crate::ipc::login_on(&app, "staff_owner".into(), "2468".into()).expect("owner login");
     let preview = crate::correction_draft::preview_on(&app).expect("owner preview");
     assert!(!preview.needs_approval);
-    assert_eq!(preview.approvers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["manager"]);
+    assert!(preview.approvers.is_empty(), "corrections are reviewed in Reports");
     crate::flows::complete_bill_on(&app, Some("Cash".to_owned())).expect("owner completes without second manager");
     assert_eq!(crate::corrections::bills_on(&app, Default::default()).expect("approved").waiting, 0);
 
@@ -43,10 +78,8 @@ fn approval_policy_exempts_owner_and_only_offers_available_other_managers() {
     let bills = crate::corrections::bills_on(&app, Default::default()).expect("manager choices");
     assert_eq!(bills.approvers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["staff_owner"]);
     crate::corrections::revert_bill_on(&app, row.order_id.clone(), "Correct items".into(), None, None).expect("manager edit");
-    assert!(crate::correction_draft::preview_on(&app).expect("manager preview").needs_approval);
-    assert!(crate::correction_draft::authorize_on(&app, None, None).is_err());
-    assert!(crate::correction_draft::authorize_on(&app, Some("manager".into()), Some("3579".into())).is_err());
-    crate::correction_draft::authorize_on(&app, Some("staff_owner".into()), Some("2468".into())).expect("another manager approves");
+    assert!(!crate::correction_draft::preview_on(&app).expect("manager preview").needs_approval);
+    crate::correction_draft::authorize_on(&app, None, None).expect("no PIN needed to save a correction");
     crate::correction_draft::discard_on(&app, row.order_id.clone()).expect("discard draft");
     crate::ipc::login_on(&app, "staff_owner".into(), "2468".into()).expect("owner login");
     crate::corrections::void_bill_on(&app, row.order_id, "Wrong items".into(), None, None).expect("owner cancels without approval");

@@ -462,7 +462,7 @@ pub fn bill_for(
 ) -> UiResult<Bill> {
     // A charge belongs to the ORDER TYPE: switching a table to a parcel drops the service
     // charge and adds the packing one. Its tax comes from the book, like an item's.
-    let charges = config
+    let mut charges = config
         .billing
         .charges_for(order_type, &config.tax)
         .map_err(|e| {
@@ -473,6 +473,22 @@ pub fn bill_for(
             )
             .with_detail(e.to_string())
         })?;
+    if order_type == OrderType::Parcel {
+        let mut parcel = Money::ZERO;
+        for line in cart.lines() {
+            if line.snapshot.parcel_charge.is_negative() {
+                return Err(UiError::new("bill.parcel_charge", "An item's parcel charge cannot be negative."));
+            }
+            parcel = parcel.add(line.qty.extend(line.snapshot.parcel_charge).map_err(money_error)?)
+                .map_err(money_error)?;
+        }
+        if !parcel.is_zero() {
+            let tax = config.tax.spec_for(&mb_core::TaxClassId::new(&config.billing.packing_charge_tax), None)
+                .map_err(|error| UiError::new("bill.charge_slab", "Choose a valid packing-charge tax slab under Settings > Billing.")
+                    .with_detail(error.to_string()))?;
+            charges.push(mb_core::Charge::flat(mb_core::ChargeKind::Packing, "Parcel charges", parcel, tax.rate).with_tax(tax));
+        }
+    }
     let mut input = BillInput::new(cart, registration_of(config))
         .with_order_type(order_type)
         .with_rounding(config.billing.rounding)
@@ -556,6 +572,10 @@ pub struct CartLineView {
     /// "5%", "18%", "Non-GST", "Exempt" — a label, never a number to compute with.
     pub rate_label: String,
     pub unit_price: MoneyView,
+    /// The displayed rate including parcel packing; editing still uses the food price.
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_unit_price: Option<MoneyView>,
     pub gross: MoneyView,
     /// Money off this line from both directions: its own discount and its share of the bill's.
     pub discount: MoneyView,
@@ -730,6 +750,7 @@ pub(crate) fn bill_lines(bill: &Bill) -> Vec<CartLineView> {
             qty: billed.qty.to_string(),
             rate_label: rate_label(billed.tax),
             unit_price: billed.snapshot.unit_price.into(),
+            display_unit_price: None,
             gross: billed.gross.into(),
             discount: billed
                 .line_discount
@@ -763,9 +784,17 @@ pub(crate) fn payment_views(settlement: &Settlement) -> Vec<PaymentView> {
 
 pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiResult<CartView> {
     let bill = state.bill(config)?;
-    let mut lines = bill_lines(&bill);
-    for (view, line) in lines.iter_mut().zip(state.cart.lines()) {
+    let display = if config.billing.parcel_charge_separate_screen {
+        bill.clone()
+    } else {
+        bill.display_with_parcel_in_items().map_err(money_error)?
+    };
+    let mut lines = bill_lines(&display);
+    for ((view, line), original) in lines.iter_mut().zip(state.cart.lines()).zip(&bill.lines) {
         view.edit_token = Some(line_edit_token(state, line));
+        view.display_unit_price = Some(view.unit_price.clone());
+        view.unit_price = original.snapshot.unit_price.into();
+        view.gross = original.gross.into();
     }
 
     let paid = state.settlement.total_paid().map_err(money_error)?;
@@ -783,7 +812,7 @@ pub fn cart_view(state: &CartState, config: &crate::settings::ShopConfig) -> UiR
     Ok(CartView {
         is_correction: state.bill_number.is_some() && state.account.revision > 0 && state.account.billed_into.is_none(),
         lines,
-        bill: bill_view(&bill)?,
+        bill: bill_view(&display)?,
         order_type: order_type_label(state.order_type).to_owned(),
         table: state
             .table()
@@ -851,12 +880,12 @@ pub(crate) fn bill_view(bill: &Bill) -> UiResult<BillView> {
             .iter()
             .map(|charge| ChargeView {
                 name: charge.name.clone(),
-                amount: charge.gross_including_tax.into(),
+                amount: charge.amount.into(),
                 rate_label: rate_label(charge.tax),
             })
             .collect(),
         tax_rows,
-        tax_total: bill.tax_total().map_err(money_error)?.into(),
+        tax_total: bill.gst_added.total().and_then(|gst| gst.add(bill.vat_added.into_money())).map_err(money_error)?.into(),
         non_gst_value: bill.non_gst_value.into(),
         exempt_value: bill.exempt_value.into(),
         round_off: bill.round_off.into(),

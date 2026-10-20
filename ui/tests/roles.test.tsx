@@ -66,7 +66,10 @@ beforeEach(() => {
       case 'list_permissions':
         return Promise.resolve(GROUPS);
       case 'save_role':
-        return Promise.resolve([OWNER, args?.role]);
+        return Promise.resolve([
+          ...[OWNER, CASHIER].filter((role) => role.id !== args?.role?.id),
+          args?.role,
+        ]);
       default:
         return Promise.resolve(null);
     }
@@ -140,4 +143,51 @@ it('ticks a whole section at once, and one box at a time', async () => {
       }),
     }),
   );
+});
+
+it('creates a custom role with the existing permission editor and then allows editing it', async () => {
+  show();
+  await screen.findByText('Cashier');
+  const add = screen.getByRole('button', { name: 'Add role' });
+  await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(add);
+  const dialog = await screen.findByRole('dialog', { name: 'Add role' });
+  const save = within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
+  expect((within(dialog).getByLabelText('Percentage discount limit (%)') as HTMLInputElement).value).toBe('0');
+  expect(within(dialog).getAllByRole('checkbox').every((box) => !(box as HTMLInputElement).checked)).toBe(true);
+
+  fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: '  Supervisor  ' } });
+  fireEvent.click(within(dialog).getByRole('checkbox', { name: 'See reports' }));
+  fireEvent.click(save);
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(call).toHaveBeenCalledWith('save_role', {
+    role: expect.objectContaining({
+      id: expect.stringMatching(/^role_/),
+      name: 'Supervisor',
+      isBuiltin: false,
+      isOwner: false,
+      permissions: ['reports.view'],
+      maxDiscountPercent: '0',
+      maxDiscountRupees: '0',
+    }),
+  });
+  expect(screen.getByText('Cashier')).toBeTruthy();
+  const row = screen.getByText('Supervisor').closest('.mb-roles__role') as HTMLElement;
+  fireEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+  const editor = await screen.findByRole('dialog', { name: 'Supervisor' });
+  expect((within(editor).getByRole('checkbox', { name: 'See reports' }) as HTMLInputElement).checked).toBe(true);
+});
+
+it('cancels a new role without saving it', async () => {
+  show();
+  await screen.findByText('Cashier');
+  const add = screen.getByRole('button', { name: 'Add role' });
+  await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(add);
+  const dialog = await screen.findByRole('dialog', { name: 'Add role' });
+  fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Cancelled' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(call.mock.calls.some(([command]) => command === 'save_role')).toBe(false);
 });

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Button, Input, onlyAmount, useReport } from '../kit';
+import { Button, MoneyInput, useReport } from '../kit';
 import { call } from '../ipc/call';
 import type { CartLineView } from '../ipc/generated/CartLineView';
 import type { CartView } from '../ipc/generated/CartView';
@@ -27,10 +27,10 @@ export function LinePrice({ line, overridden, onSaved }: {
     finally { saving.current = false; setBusy(false); setEdit(null); }
   };
   return <div className="mb-cartline__amount" onClick={(event) => event.stopPropagation()}>
-    {edit ? <Input autoFocus inputMode="decimal" className="mb-cartline__price-input"
+    {edit ? <MoneyInput autoFocus prefix="" className="mb-cartline__price-input"
       aria-label={`Unit price for ${line.name}`} value={edit.price} disabled={busy}
       onFocus={(event) => event.target.select()}
-      onChange={(event) => setEdit({ ...edit, price: onlyAmount(event.target.value) })}
+      onChange={(price) => setEdit({ ...edit, price })}
       onBlur={() => void save()}
       onKeyDown={(event) => {
         event.stopPropagation();
@@ -41,7 +41,7 @@ export function LinePrice({ line, overridden, onSaved }: {
         }
       }} />
       : <Button variant="quiet" size="sm" aria-label={`Edit unit price for ${line.name}`}
-        title={`${line.qty} × ${line.unitPrice.text} — edit price for this bill`}
+        title={`${line.qty} × ${(line.displayUnitPrice ?? line.unitPrice).text} — edit item price for this bill`}
         onClick={() => setEdit({ line, price: line.unitPrice.text })}>
         {line.amount.text}{overridden ? ' *' : ''}
       </Button>}

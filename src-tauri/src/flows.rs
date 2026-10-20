@@ -845,6 +845,7 @@ pub fn print_open_bill_on(app: &App, order_id: String) -> UiResult<String> {
     };
     if open.core.billing.revision > 0 {
         crate::licensing::gate(app, mb_license::Feature::Reports)?;
+        crate::guard::require(app, mb_auth::Permission::BillRevert)?;
     }
     if open.core.cart.is_empty() {
         return Err(

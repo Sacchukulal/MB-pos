@@ -40,6 +40,9 @@ pub struct ItemSnapshot {
     pub item_id: ItemId,
     pub name: String,
     pub unit_price: Money,
+    /// Per unit packing amount, frozen when this item is added to the order.
+    #[serde(default, skip_serializing_if = "zero_parcel_charge")]
+    pub parcel_charge: Money,
     /// The whole tax question, frozen — kind, rate and pricing basis.
     pub tax: TaxSpec,
     /// The HSN/SAC code printed on the bill. Every optional field here is left off the wire
@@ -72,6 +75,7 @@ impl ItemSnapshot {
             item_id,
             name: name.into(),
             unit_price,
+            parcel_charge: Money::ZERO,
             tax: TaxSpec {
                 kind: TaxKind::Gst,
                 rate: tax_rate,
@@ -113,6 +117,10 @@ impl ItemSnapshot {
     }
 }
 
+fn zero_parcel_charge(value: &Money) -> bool {
+    value.is_zero()
+}
+
 /// A change to a line: "extra cheese", "no onion", "less spicy".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Modifier {
@@ -136,6 +144,19 @@ impl Modifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn older_snapshots_default_to_no_parcel_charge_and_keep_their_wire_shape() {
+        let old = r#"{"item_id":"tea","name":"Tea","unit_price":2000,"tax":{"kind":"gst","rate":500,"basis":"exclusive"}}"#;
+        let snapshot: ItemSnapshot = serde_json::from_str(old).expect("old snapshot");
+        assert_eq!(snapshot.parcel_charge, Money::ZERO);
+        let json = serde_json::to_value(&snapshot).expect("wire");
+        assert!(json.get("parcel_charge").is_none());
+        let mut charged = snapshot;
+        charged.parcel_charge = Money::from_paise(200);
+        let json = serde_json::to_string(&charged).expect("wire");
+        assert_eq!(serde_json::from_str::<ItemSnapshot>(&json).expect("round trip"), charged);
+    }
 
     #[test]
     fn a_snapshot_does_not_change_when_the_menu_does() {

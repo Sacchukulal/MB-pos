@@ -680,6 +680,53 @@ fn the_starting_roles_are_seeded_once_and_never_put_back() {
     assert_eq!(steward.max_discount_percent.as_deref(), Some("2.5%"));
 }
 
+#[test]
+fn a_custom_role_can_be_created_assigned_and_reopened() {
+    let scratch = Scratch::new("custom_role");
+    {
+        let app = a_shop(&scratch);
+        hire(&app, "staff_owner", "Owner", RolePreset::Owner, "2468");
+        let mut role = crate::ipc::list_roles_on(&app)
+            .expect("roles")
+            .into_iter()
+            .find(|r| r.id == RolePreset::Waiter.id())
+            .expect("template");
+        role.id = "role_custom_test".to_owned();
+        role.is_builtin = false;
+        role.name = "   ".to_owned();
+        assert!(save_role_on(&app, role.clone()).is_err(), "blank name accepted");
+        role.name = "  Supervisor  ".to_owned();
+        role.permissions = vec![Permission::ReportsView.code().to_owned()];
+        let roles = save_role_on(&app, role).expect("create custom role");
+        assert_eq!(roles.len(), 5);
+        let saved = roles.iter().find(|r| r.id == "role_custom_test").expect("new role");
+        assert_eq!(saved.name, "Supervisor");
+        assert!(!saved.is_builtin);
+        assert!(!saved.is_owner);
+        save_staff_member_on(
+            &app,
+            StaffEdit::new("staff_custom", "Supervisor", &saved.id, "1357"),
+        ).expect("assign custom role");
+    }
+    let app = a_shop(&scratch);
+    login_on(&app, "staff_owner".to_owned(), "2468".to_owned()).expect("owner signs in");
+    let roles = crate::ipc::list_roles_on(&app).expect("reopened roles");
+    assert_eq!(roles.len(), 5);
+    let saved = roles.iter().find(|r| r.id == "role_custom_test").expect("persisted role");
+    assert_eq!(saved.permissions, vec![Permission::ReportsView.code().to_owned()]);
+    assert_eq!(saved.max_discount_percent.as_deref(), Some("0%"));
+    app.with_shop(|shop| {
+        shop.db.transaction(|tx| {
+            let staff = Repos::new(tx).people().find_staff(OUTLET, "staff_custom")?.expect("staff");
+            assert_eq!(staff.role_id.as_deref(), Some("role_custom_test"));
+            assert!(staff.permissions.has(Permission::ReportsView));
+            assert!(!staff.permissions.has(Permission::BillCreate));
+            Ok(())
+        }).expect("persisted staff permissions");
+        Ok(())
+    }).expect("shop");
+}
+
 /// A person with no role is somebody who can sign in and do nothing, which looks like a broken
 /// app rather than a locked one.
 #[test]
@@ -737,6 +784,7 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
                 Repos::new(tx).menu().save_item(
                     OUTLET,
                     &mb_db::repo::menu::MenuItem {
+                        parcel_charge: mb_core::Money::ZERO,
                         id: mb_core::ItemId::new("itm_tea"),
                         category_id: None,
                         name: "Masala Tea".to_owned(),
@@ -770,6 +818,7 @@ fn the_bill_that_prints_carries_the_real_cashier_and_survives_an_empty_shop() {
     let mut cart = Cart::new();
     cart.add(
         ItemSnapshot {
+            parcel_charge: mb_core::Money::ZERO,
             item_id: mb_core::ItemId::new("itm_tea"),
             name: "Masala Tea".to_owned(),
             unit_price: Money::from_paise(2_500),
@@ -862,6 +911,7 @@ pub(crate) fn a_trading_shop(scratch: &Scratch) -> App {
                 Repos::new(tx).menu().save_item(
                     OUTLET,
                     &mb_db::repo::menu::MenuItem {
+                        parcel_charge: mb_core::Money::ZERO,
                         id: mb_core::ItemId::new("itm_tea"),
                         category_id: None,
                         name: "Masala Tea".to_owned(),

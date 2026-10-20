@@ -1507,6 +1507,7 @@ pub fn open_table_on(app: &App, table_id: String) -> UiResult<CartView> {
     let (label, found) = table_and_its_order(app, &table)?;
     if found.as_ref().is_some_and(|order| order.core().billing.revision > 0) {
         crate::licensing::gate(app, mb_license::Feature::Reports)?;
+        guard::require(app, Permission::BillRevert)?;
     }
     if found.as_ref().is_some_and(|o| o.core().billing.billed_into.is_some()) {
         return Err(UiError::new("order.combined", "This table belongs to a combined bill; release it after the guests leave."));
@@ -1661,6 +1662,7 @@ pub fn open_order_on(app: &App, order_id: String) -> UiResult<CartView> {
     }
     if order.core().billing.revision > 0 {
         crate::licensing::gate(app, mb_license::Feature::Reports)?;
+        guard::require(app, Permission::BillRevert)?;
     }
     let label = order
         .core()
@@ -2103,6 +2105,9 @@ fn role_view(role: &RoleShape) -> RoleView {
 
 pub fn save_role_on(app: &App, role: RoleView) -> UiResult<Vec<RoleView>> {
     let who = guard::require(app, Permission::StaffManage)?;
+    let Some(name) = given(&role.name) else {
+        return Err(UiError::new("role.name", "A role needs a name."));
+    };
     let at = crate::flows::now();
     let day = crate::flows::today(at);
 
@@ -2135,7 +2140,7 @@ pub fn save_role_on(app: &App, role: RoleView) -> UiResult<Vec<RoleView>> {
 
     let shape = RoleShape {
         id: role.id.clone(),
-        name: role.name.clone(),
+        name: name.to_owned(),
         is_builtin: role.is_builtin,
         permissions,
         max_discount_bp,

@@ -22,6 +22,31 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
     app
 }
 
+#[test]
+fn parcel_display_ticks_are_independent_and_survive_reloading_settings() {
+    use crate::settings::ipc::{SettingEdit, save_on};
+    let scratch = Scratch::new("parcel_ticks");
+    let app = a_shop(&scratch, "parcel_ticks");
+    save_on(&app, vec![SettingEdit {
+        key: "billing.parcel_charge_separate_screen".into(), value: "0".into(),
+    }]).expect("hide on screen");
+    app.reload_shop_config();
+    assert!(!app.shop_config().billing.parcel_charge_separate_screen);
+    assert!(app.shop_config().receipt.parcel_charge_separate);
+    save_on(&app, vec![SettingEdit {
+        key: "receipt.parcel_charge_separate".into(), value: "0".into(),
+    }]).expect("hide on receipt");
+    app.reload_shop_config();
+    assert!(!app.shop_config().billing.parcel_charge_separate_screen);
+    assert!(!app.shop_config().receipt.parcel_charge_separate);
+    save_on(&app, vec![SettingEdit {
+        key: "billing.parcel_charge_separate_screen".into(), value: "1".into(),
+    }]).expect("show on screen only");
+    app.reload_shop_config();
+    assert!(app.shop_config().billing.parcel_charge_separate_screen);
+    assert!(!app.shop_config().receipt.parcel_charge_separate);
+}
+
 // Every setting changes the paper.
 
 /// A value for this entry that is different from the one it holds.

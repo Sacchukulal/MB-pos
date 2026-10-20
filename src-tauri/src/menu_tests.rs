@@ -35,6 +35,7 @@ fn a_shop_with_a_menu(scratch: &Scratch) -> App {
             repos.menu().save_item(
                 OUTLET,
                 &mb_db::repo::menu::MenuItem {
+                    parcel_charge: mb_core::Money::ZERO,
                     id: ItemId::new(id),
                     category_id: None,
                     name: name.to_owned(),
@@ -72,6 +73,135 @@ fn price_of(app: &App, id: &str) -> String {
         .text
 }
 
+fn parcel_edit(amount: Option<&str>) -> MenuEdit {
+    MenuEdit {
+        id: "itm_tea".into(), name: "Tea".into(), category_id: None,
+        price: "20".into(), parcel_charge: amount.map(str::to_owned),
+        tax_class_id: None, price_basis: None, hsn: None, short_code: None,
+        cost: None, is_open_price: false, is_available: true, course: None, prep_minutes: None,
+    }
+}
+
+#[test]
+fn parcel_charges_are_saved_validated_and_frozen_when_items_are_added() {
+    let scratch = Scratch::new("item_parcel");
+    let app = a_shop_with_a_menu(&scratch);
+    let saved = save_item_on(&app, parcel_edit(Some("2.50"))).expect("save packing");
+    assert_eq!(saved.iter().find(|r| r.id == "itm_tea").expect("tea").parcel_charge.paise, 250);
+    for invalid in ["-1", "1.234", "abc", "999999999999999999999"] {
+        assert!(save_item_on(&app, parcel_edit(Some(invalid))).is_err(), "{invalid}");
+    }
+    save_item_on(&app, parcel_edit(None)).expect("older client preserves charge");
+    app.with_cart_mut(|state| { state.set_order_type(mb_core::OrderType::Parcel); Ok(()) }).expect("parcel");
+    let cart = crate::ipc::cart_add_on(&app, "itm_tea".into(), Some("3".into()), None).expect("three teas");
+    assert_eq!(cart.bill.charges[0].amount.paise, 750);
+    save_item_on(&app, parcel_edit(Some("9"))).expect("tomorrow's price");
+    let original = app.with_cart(|state| crate::billing::cart_view(state, &app.shop_config())).expect("still original");
+    assert_eq!(original.bill.charges[0].amount.paise, 750);
+    let added = crate::ipc::cart_add_on(&app, "itm_tea".into(), None, None).expect("another at new packing price");
+    assert_eq!(added.lines.len(), 2, "different frozen charges do not merge");
+    assert_eq!(added.bill.charges[0].amount.paise, 1650);
+}
+
+#[test]
+fn parcel_charges_survive_menu_spreadsheet_export_and_partial_imports() {
+    let scratch = Scratch::new("parcel_csv");
+    let app = a_shop_with_a_menu(&scratch);
+    save_item_on(&app, parcel_edit(Some("2.50"))).expect("packing");
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = Repos::new(tx);
+        let csv = repos.menu_csv().export(OUTLET, false)?;
+        assert!(csv.lines().next().expect("header").contains("parcel charge"));
+        let plan = repos.menu_csv().plan(OUTLET, &csv, mb_db::repo::ImportMode::Update)?;
+        assert!(plan.is_empty(), "export/import keeps every field: {plan:?}");
+        let partial = repos.menu_csv().plan(OUTLET, "name,price\nTea,25\n", mb_db::repo::ImportMode::Update)?;
+        assert_eq!(partial.updated_items[0].parcel_charge.paise(), 250);
+        let explicit = repos.menu_csv().plan(OUTLET, "name,parcel charge\nTea,3.50\n", mb_db::repo::ImportMode::Update)?;
+        assert_eq!(explicit.updated_items[0].parcel_charge.paise(), 350);
+        let invalid = repos.menu_csv().plan(OUTLET, "name,parcel charge\nTea,-2\n", mb_db::repo::ImportMode::Update)?;
+        assert!(!invalid.is_clean());
+        Ok(())
+    }).map_err(|error| crate::words::from_db(&error))).expect("spreadsheet round trip");
+}
+
+#[test]
+fn parcel_charge_display_and_order_type_switches_never_double_charge() {
+    let scratch = Scratch::new("parcel_display");
+    let app = a_shop_with_a_menu(&scratch);
+    save_item_on(&app, parcel_edit(Some("2"))).expect("tea packing");
+    let mut config = app.shop_config();
+    config.store.gstin = "29ABCDE1234F1Z5".to_owned();
+    config.store.state_code = "29".to_owned();
+    config.billing.packing_charge = Money::from_paise(10_000);
+    config.billing.rounding = mb_core::RoundingMode::None;
+    app.publish_shop_config(config.clone());
+    app.with_cart_mut(|state| { state.set_order_type(mb_core::OrderType::Parcel); Ok(()) }).expect("parcel");
+    let separate = crate::ipc::cart_add_on(&app, "itm_tea".into(), Some("3".into()), None).expect("three teas");
+    assert_eq!(separate.bill.subtotal.paise, 6000);
+    assert_eq!(separate.bill.charges.len(), 1);
+    assert_eq!(separate.bill.charges[0].amount.paise, 600);
+    assert_eq!(separate.bill.grand_total.paise, 6930);
+    assert_eq!(separate.bill.tax_total.paise, 330);
+
+    config.billing.parcel_charge_separate_screen = false;
+    let combined = app.with_cart(|state| crate::billing::cart_view(state, &config)).expect("combined");
+    assert_eq!(combined.bill.grand_total, separate.bill.grand_total);
+    assert!(combined.bill.charges.is_empty());
+    assert_eq!(combined.bill.subtotal.paise, 6600);
+    assert_eq!(combined.lines[0].amount.paise, 6600);
+    assert_eq!(combined.lines[0].unit_price.paise, 2000, "editing must still use the food price");
+    assert_eq!(combined.lines[0].display_unit_price.as_ref().expect("display rate").paise, 2200);
+    assert_eq!(combined.bill.subtotal.paise + combined.bill.tax_total.paise, combined.bill.grand_total.paise);
+
+    for kind in [mb_core::OrderType::DineIn, mb_core::OrderType::Delivery] {
+        app.with_cart_mut(|state| { state.set_order_type(kind); Ok(()) }).expect("type");
+        let view = app.with_cart(|state| crate::billing::cart_view(state, &config)).expect("no parcel");
+        assert!(view.bill.charges.is_empty());
+        assert_eq!(view.bill.grand_total.paise, 6300);
+    }
+    app.with_cart_mut(|state| {
+        state.set_order_type(mb_core::OrderType::SelfService); Ok(())
+    }).expect("self service");
+    let view = app.with_cart(|state| crate::billing::cart_view(state, &config)).expect("flat fee retained");
+    assert_eq!(view.bill.charges[0].amount.paise, 10_000);
+    app.with_cart_mut(|state| {
+        state.set_order_type(mb_core::OrderType::Parcel);
+        state.cart.set_qty(0, mb_core::Qty::parse("0.5").expect("half")).expect("quantity");
+        Ok(())
+    }).expect("half parcel");
+    let view = app.with_cart(|state| crate::billing::cart_view(state, &config)).expect("fractional");
+    assert_eq!(view.lines[0].amount.paise, 1100);
+    app.with_cart_mut(|state| {
+        state.cart.set_qty(0, mb_core::Qty::ZERO).expect("remove"); Ok(())
+    }).expect("empty");
+    let view = app.with_cart(|state| crate::billing::cart_view(state, &config)).expect("empty bill");
+    assert_eq!(view.bill.grand_total.paise, 0);
+}
+
+#[test]
+fn parcel_bill_sums_each_items_own_charge_and_skips_zero_charge_items() {
+    let scratch = Scratch::new("mixed_parcel");
+    let app = a_shop_with_a_menu(&scratch);
+    save_item_on(&app, parcel_edit(Some("2"))).expect("tea");
+    let mut dosa = parcel_edit(Some("10"));
+    dosa.id = "itm_dosa".into();
+    dosa.name = "Masala dosa".into();
+    dosa.price = "120".into();
+    save_item_on(&app, dosa).expect("dosa");
+    app.with_cart_mut(|state| { state.set_order_type(mb_core::OrderType::Parcel); Ok(()) }).expect("parcel");
+    crate::ipc::cart_add_on(&app, "itm_dosa".into(), Some("2".into()), None).expect("two dosa");
+    crate::ipc::cart_add_on(&app, "itm_tea".into(), Some("3".into()), None).expect("three tea");
+    let separate = crate::ipc::cart_add_on(&app, "itm_water".into(), None, None).expect("water has no packing");
+    assert_eq!(separate.bill.charges[0].amount.paise, 2600);
+    let mut config = app.shop_config();
+    config.billing.parcel_charge_separate_screen = false;
+    let combined = app.with_cart(|state| crate::billing::cart_view(state, &config)).expect("included");
+    assert_eq!(combined.lines[0].amount.paise, 26000);
+    assert_eq!(combined.lines[1].amount.paise, 6600);
+    assert_eq!(combined.lines[2].amount.paise, 2000);
+    assert_eq!(combined.bill.grand_total, separate.bill.grand_total);
+}
+
 #[test]
 fn bill_price_override_recalculates_without_changing_menu_and_rejects_stale_edits() {
     let scratch = Scratch::new("bill_price_override");
@@ -94,6 +224,7 @@ fn new_menu_items_reject_normalised_duplicate_names() {
     let scratch = Scratch::new("duplicate_menu_name");
     let app = a_shop_with_a_menu(&scratch);
     let edit = MenuEdit {
+        parcel_charge: None,
         id: "itm_duplicate".into(), name: "  MASALA   dosa  ".into(), category_id: None,
         price: "10".into(), tax_class_id: None, price_basis: None, hsn: None,
         short_code: None, cost: None, is_open_price: false, is_available: true,
@@ -311,6 +442,7 @@ fn an_hsn_of_three_digits_is_refused() {
     let app = a_shop_with_a_menu(&scratch);
 
     let edit = |hsn: &str| MenuEdit {
+        parcel_charge: None,
         id: "itm_tea".to_owned(),
         name: "Tea".to_owned(),
         category_id: None,
@@ -706,6 +838,7 @@ fn the_cost_column_is_only_for_those_who_may_see_it() {
         .into_iter()
         .find(|r| r.id == "itm_dosa")
         .map(|r| crate::menu::MenuEdit {
+            parcel_charge: None,
             id: r.id,
             name: r.name,
             category_id: r.category_id,
@@ -943,6 +1076,7 @@ fn a_combo_shares_its_price_across_two_different_tax_rates() {
     save_item_on(
         &app,
         MenuEdit {
+            parcel_charge: None,
             id: "itm_water".to_owned(),
             name: "Water bottle".to_owned(),
             category_id: None,

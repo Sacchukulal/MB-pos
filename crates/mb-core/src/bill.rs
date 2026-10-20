@@ -179,6 +179,35 @@ pub struct Bill {
 }
 
 impl Bill {
+    /// A rendering copy only. Never save or recompute this copy: accounting keeps packing
+    /// as its own charge and tax slab even when the customer sees it within item amounts.
+    pub fn display_with_parcel_in_items(&self) -> std::result::Result<Self, MoneyError> {
+        let mut display = self.clone();
+        if self.order_type != OrderType::Parcel {
+            return Ok(display);
+        }
+        let weights = self.lines.iter().map(|line| line.qty.extend(line.snapshot.parcel_charge))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        // Old bills with a flat packing charge have no item allocation. Keep those intact.
+        if Money::try_sum(weights.iter().copied())?.is_zero() {
+            return Ok(display);
+        }
+        let packing = Money::try_sum(self.charges.iter()
+            .filter(|charge| charge.kind == crate::charge::ChargeKind::Packing)
+            .map(|charge| charge.amount))?;
+        let shares = discount::spread(packing, &weights)?;
+        for (line, share) in display.lines.iter_mut().zip(shares) {
+            line.snapshot.unit_price = line.snapshot.unit_price.add(
+                share.mul_ratio(1_000, line.qty.thousandths())?)?;
+            line.gross = line.gross.add(share)?;
+            line.net = line.net.add(share)?;
+        }
+        display.subtotal = display.subtotal.add(packing)?;
+        display.total_charges = display.total_charges.sub(packing)?;
+        display.charges.retain(|charge| charge.kind != crate::charge::ChargeKind::Packing);
+        Ok(display)
+    }
+
     /// Every tax on this bill as one figure.
     pub fn tax_total(&self) -> std::result::Result<Money, MoneyError> {
         self.total_gst.total()?.add(self.total_vat.into_money())

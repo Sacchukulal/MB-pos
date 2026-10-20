@@ -225,12 +225,16 @@ fn verified_backup_counts_and_restores_return_headers_and_frozen_lines() {
 #[test]
 fn backup_before_historical_returns_still_verifies_and_migrates_on_restore() {
     let scratch = Scratch::new("before-return-schema-backup"); let db = scratch.open(); masters(&db);
-    // Isolated legacy fixture: remove precisely the schema introduced by 22. Migration23
-    // only projects receipt data, so this empty shop now has the schema of a pre22 backup.
+    // Isolated legacy fixture: remove the schema added since 21. Migration23 only projects
+    // receipt data; later added columns must also leave before replaying those migrations.
     db.transaction(|tx| {
         tx.execute_batch("DROP VIEW report_sale_payments; DROP VIEW report_bill_lines;
             DROP VIEW report_order_lines; DROP VIEW report_sale_bills; DROP VIEW report_sale_orders;
             DROP TABLE bill_return_lines; DROP TABLE bill_returns;
+            ALTER TABLE bill_reverts DROP COLUMN discarded_at;
+            ALTER TABLE bill_reverts DROP COLUMN discarded_by;
+            ALTER TABLE items DROP COLUMN parcel_charge;
+            ALTER TABLE order_lines DROP COLUMN parcel_charge;
             DELETE FROM schema_version WHERE version >= 22;")?;
         Ok(())
     }).expect("legacy fixture schema");

@@ -30,6 +30,7 @@ fn a_shop_on_the_ladder(scratch: &Scratch, name: &str) -> App {
             repos.menu().save_item(
                 OUTLET,
                 &mb_db::repo::menu::MenuItem {
+                    parcel_charge: mb_core::Money::ZERO,
                     id: ItemId::new(id),
                     category_id: None,
                     name: name.to_owned(),
@@ -68,6 +69,7 @@ fn a_shop_on_the_ladder(scratch: &Scratch, name: &str) -> App {
 
 fn edit(id: &str, name: &str, category: &str) -> MenuEdit {
     MenuEdit {
+        parcel_charge: None,
         id: id.to_owned(),
         name: name.to_owned(),
         category_id: Some(category.to_owned()),

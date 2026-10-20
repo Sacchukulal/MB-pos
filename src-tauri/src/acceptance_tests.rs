@@ -43,6 +43,7 @@ fn a_shop_at(scratch: &Scratch, path: &std::path::Path) -> App {
             repos.menu().save_item(
                 OUTLET,
                 &mb_db::repo::menu::MenuItem {
+                    parcel_charge: mb_core::Money::ZERO,
                     id: mb_core::ItemId::new(*id),
                     category_id: None,
                     name: (*item_name).to_owned(),

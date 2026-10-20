@@ -36,6 +36,7 @@ pub struct MenuRowView {
     pub name: String,
     pub category_id: Option<String>,
     pub price: MoneyView,
+    pub parcel_charge: MoneyView,
     pub tax_class_id: String,
     /// `shop`, `inclusive` or `exclusive` — the item's own say on its price.
     pub price_basis: String,
@@ -68,6 +69,10 @@ pub struct MenuEdit {
     pub category_id: Option<String>,
     /// Typed by a person: "120", "120.50".
     pub price: String,
+    /// None preserves the saved charge for older clients; new items start at zero.
+    #[serde(default)]
+    #[ts(optional)]
+    pub parcel_charge: Option<String>,
     /// None = keep the item's slab; for a new item, the category's starting slab.
     pub tax_class_id: Option<String>,
     /// `shop`, `inclusive` or `exclusive`; None = keep what the item has.
@@ -153,6 +158,7 @@ fn rows_on(app: &App, deleted: bool) -> UiResult<Vec<MenuRowView>> {
                         name: item.name.clone(),
                         category_id: item.category_id.as_ref().map(|c| c.as_str().to_owned()),
                         price: MoneyView::from(item.unit_price),
+                        parcel_charge: item.parcel_charge.into(),
                         tax_class_id: item.tax_class_id.as_str().to_owned(),
                         price_basis: crate::tax::basis_word(item.price_basis).to_owned(),
                         rate: crate::tax::item_words(
@@ -204,6 +210,11 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
     }
     check_hsn(edit.hsn.as_deref())?;
     let price = parse_money(&edit.price, "price")?;
+    let parcel_charge = edit.parcel_charge.as_deref()
+        .map(|value| parse_money(value, "parcel charge")).transpose()?;
+    if parcel_charge.is_some_and(Money::is_negative) {
+        return Err(UiError::new("menu.parcel_charge", "The parcel charge must be zero or more."));
+    }
     let cost = match edit
         .cost
         .as_deref()
@@ -286,6 +297,7 @@ pub fn save_item_on(app: &App, edit: MenuEdit) -> UiResult<Vec<MenuRowView>> {
                     category_id: edit.category_id.clone().map(CategoryId::new),
                     name: edit.name.trim().to_owned(),
                     unit_price: price,
+                    parcel_charge: parcel_charge.unwrap_or_else(|| before.as_ref().map_or(Money::ZERO, |item| item.parcel_charge)),
                     tax_class_id,
                     price_basis,
                     hsn: edit.hsn.clone().filter(|h| !h.trim().is_empty()),

@@ -865,7 +865,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
               iconOnly
               title="Add menu items"
               aria-label="Add menu items"
-              onClick={() => onGoTo('menu')}
+              onClick={() => onGoTo('settings/menu')}
               icon={<Icon name="plus" size="sm" />}
             />
           ) : null}
@@ -946,7 +946,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
               says="Add your menu, your tables and your printer."
               action={
                 <div className="mb-billing__setup">
-                  <Button variant="primary" onClick={() => onGoTo('menu')}>
+                  <Button variant="primary" onClick={() => onGoTo('settings/menu')}>
                     <Icon name="book" size="sm" />
                     Add your menu
                   </Button>
@@ -1098,7 +1098,7 @@ export function Billing({ onGoTo }: { onGoTo: (screen: string) => void }) {
                 <span className="mb-cartline__name">{line.name}</span>
                 {may('menu.manage') ? <LinePrice line={line} onSaved={setCart}
                   overridden={menu.some((item) => item.id === line.itemId && item.price.paise !== line.unitPrice.paise)} />
-                  : <span className="mb-cartline__amount" title={`${line.qty} × ${line.unitPrice.text}`}>{line.amount.text}</span>}
+                  : <span className="mb-cartline__amount" title={`${line.qty} × ${(line.displayUnitPrice ?? line.unitPrice).text}`}>{line.amount.text}</span>}
                 {more ? (
                   <div className="mb-cartline__about">
                     {/* How the money was reached, the extras on it, and any money off. */}

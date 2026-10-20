@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { beatsFor, Button, EmptyState, Hint, Icon, Logo, Modal, plural, useToast, type IconName } from '../kit';
+import { beatsFor, Button, EmptyState, Hint, Icon, Logo, Modal, Page, plural, useToast, type IconName } from '../kit';
 import { call, inApp, isUiError, subscribe } from '../ipc/call';
 import type { AppStatus } from '../ipc/generated/AppStatus';
 import type { LockState } from '../ipc/generated/LockState';
@@ -18,7 +18,7 @@ import { FirstRun } from '../setup/FirstRun';
 import { AlertsPanel, alertKey, loudest, type Alert } from './Alerts';
 import { DayGate } from './DayGate';
 import { More } from './More';
-import { BILL_LOOKUP_PERMISSIONS, MayProvider } from './permissions';
+import { BILL_LOOKUP_PERMISSIONS, MayProvider, STAFF_PERMISSIONS } from './permissions';
 import { Billing } from '../billing/Billing';
 import { KeyboardShortcuts } from '../billing/Keys';
 import { SettleDesk } from '../billing/SettleDesk';
@@ -26,7 +26,6 @@ import { Health } from '../health/Health';
 import { Kitchen } from '../kitchen/Kitchen';
 import { Gallery } from '../gallery/Gallery';
 import { Lock } from '../auth/Lock';
-import { Staff } from '../auth/Staff';
 import { Audit } from '../auth/Audit';
 import { Credit } from '../credit/Credit';
 import { Expenses } from '../expenses/Expenses';
@@ -34,11 +33,12 @@ import { Stock } from '../stock/Stock';
 import { Buying } from '../buying/Buying';
 import { Floor } from '../floor/Floor';
 import { Delivery } from '../delivery/Delivery';
-import { Menu } from '../menu/Menu';
 import { Phones } from '../phones/Phones';
 import { Reports } from '../reports/Reports';
 import { DashboardPage } from '../reports/Dashboard';
 import { Settings } from '../settings/Settings';
+import { Tills } from '../settings/Tills';
+import { Version } from '../account/Version';
 
 import './shell.css';
 import '../auth/auth.css';
@@ -193,30 +193,28 @@ export const SHIPPED_SCREENS: readonly Screen[] = [
     label: 'Settings',
     icon: 'settings',
     render: (_go, sub) => <Settings initial={sub} />,
-    needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run'],
+    needsAny: ['settings.store', 'settings.tax', 'settings.printer', 'backup.run', 'menu.manage', ...STAFF_PERMISSIONS],
   },
   {
-    id: 'menu',
-    label: 'Menu',
-    icon: 'book',
-    render: () => <Menu />,
-    needs: 'menu.manage',
+    id: 'devices',
+    label: 'Devices',
+    icon: 'plug',
+    render: () => <Settings onlySection="devices" />,
+    needs: 'settings.printer',
   },
   {
-    id: 'staff',
-    label: 'Staff',
-    icon: 'users',
-    render: () => <Staff />,
-    // Attendance, leave and pay live here too, so every one of those jobs opens it — the same
-    // list as Rust's `STAFF_PERMISSIONS`. The tabs inside hide what the person may not do.
-    needsAny: [
-      'staff.manage',
-      'attendance.mark',
-      'attendance.correct',
-      'leave.approve',
-      'salary.view',
-      'salary.manage',
-    ],
+    id: 'tills',
+    label: 'Tills',
+    icon: 'monitor',
+    render: () => <Page><Tills /></Page>,
+    needs: 'reports.view',
+  },
+  {
+    id: 'updates',
+    label: 'Updates',
+    icon: 'download',
+    render: () => <Page><Version /></Page>,
+    needs: 'reports.view',
   },
   {
     id: 'history',
@@ -269,6 +267,11 @@ export function Shell() {
   const [lastMore, setLastMore] = useState<string | null>(null);
   const setScreen = useCallback((id: string) => {
     if (id === 'print-queue') { setQueueOpen(true); return; }
+    // Keep existing shortcuts working after moving these destinations.
+    if (id === 'menu' || id === 'staff') id = `settings/${id}`;
+    if (['settings/devices', 'settings/tills', 'settings/updates'].includes(id)) {
+      id = id.slice('settings/'.length);
+    }
     const slash = id.indexOf('/');
     setSub(slash < 0 ? null : id.slice(slash + 1));
     setScreenOnly(slash < 0 ? id : id.slice(0, slash));

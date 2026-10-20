@@ -689,6 +689,7 @@ function EditItem({
   const [name, setName] = useState(row.name);
   // The price arrives preformatted from Rust and goes back as text.
   const [price, setPrice] = useState(row.price.text);
+  const [parcelCharge, setParcelCharge] = useState(row.parcelCharge?.text ?? '0.00');
   const [cost, setCost] = useState(row.cost?.text ?? '');
   const [categoryId, setCategoryId] = useState(row.categoryId ?? '');
   const [hsn, setHsn] = useState(row.hsn ?? '');
@@ -707,6 +708,7 @@ function EditItem({
         name,
         categoryId: categoryId === '' ? null : categoryId,
         price,
+        parcelCharge,
         taxClassId: null,
         priceBasis: null,
         hsn: hsn.trim() === '' ? null : hsn.trim(),
@@ -746,6 +748,12 @@ function EditItem({
           />
         </div>
         <p className="mb-menu__tax">GST {row.rate}</p>
+        <MoneyInput
+          label="Parcel charge per unit"
+          hint="Added automatically for each unit on Parcel orders. Zero means no parcel charge. Tax follows the packing-charge setting."
+          value={parcelCharge}
+          onChange={setParcelCharge}
+        />
         <div className="mb-menu__pair">
           <Input
             label="Short code"

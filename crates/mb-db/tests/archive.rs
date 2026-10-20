@@ -247,6 +247,8 @@ fn every_line_of_a_day_file_restores_the_same_bills_refunds_and_reverts() {
                 before_settled_by: Some(settled.settled_by.clone()),
                 approved_at: None,
                 approved_by: None,
+                discarded_at: None,
+                discarded_by: None,
             },
             &[RevertLine {
                 name: "Tea".to_owned(),

@@ -169,6 +169,27 @@ it('does not offer the dashboard logo to a cashier without reports permission', 
   expect(call).not.toHaveBeenCalledWith('report_list');
 });
 
+it.each(['menu.manage', 'attendance.mark', 'salary.view'])(
+  'keeps Settings reachable with only %s',
+  async (permission) => {
+    signedInAs = 'Meena';
+    held = [permission];
+    call.mockImplementation((command: string) => {
+      if (command === 'settings_all') return Promise.reject({ code: 'auth.denied' });
+      if (['menu_categories', 'menu_rows', 'menu_deleted_rows', 'employees'].includes(command)) {
+        return Promise.resolve([]);
+      }
+      return answer(command);
+    });
+    show();
+    expect(await screen.findByRole('button', { name: 'Settings' })).toBeTruthy();
+    expect(await screen.findByRole('button', {
+      name: permission === 'menu.manage' ? 'Menu' : 'Staff',
+    })).toBeTruthy();
+    expect(call).not.toHaveBeenCalledWith('settings_all');
+  },
+);
+
 /** A shop with thirty people has thirty names on the lock screen, and the card still fits. */
 it('scrolls the names inside the card rather than running off the window', async () => {
   const { container } = show();

@@ -28,6 +28,7 @@ const dosa: MenuRowView = {
   name: 'Masala dosa',
   categoryId: null,
   price: money(12_000, '120.00'),
+  parcelCharge: money(1_000, '10.00'),
   taxClassId: 'tax_food_5',
   priceBasis: 'shop',
   rate: '5% · added on top',
@@ -229,6 +230,19 @@ describe('the menu screen', () => {
       </ToastProvider>,
     );
   }
+
+  it('edits the item parcel charge as money and sends it with the item', async () => {
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    const parcel = within(dialog).getByLabelText('Parcel charge per unit');
+    expect(parcel).toHaveValue('10.00');
+    fireEvent.change(parcel, { target: { value: '12.50' } });
+    fireEvent.submit(parcel.closest('form')!);
+    await waitFor(() => expect(call).toHaveBeenCalledWith('save_menu_item', {
+      edit: expect.objectContaining({ id: 'itm_dosa', parcelCharge: '12.50', price: '120.00' }),
+    }));
+  });
 
   it('adds items with short codes and keeps the form ready for the next item', async () => {
     open([]);

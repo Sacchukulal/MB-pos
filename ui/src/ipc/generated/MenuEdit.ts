@@ -3,23 +3,27 @@
 /**
  * What the screen sends back when something is edited.
  */
-export type MenuEdit = { id: string, name: string, categoryId: string | null, 
+export type MenuEdit = { id: string, name: string, categoryId: string | null,
 /**
  * Typed by a person: "120", "120.50".
  */
-price: string, 
+price: string,
+/**
+ * None preserves the saved charge for older clients; new items start at zero.
+ */
+parcelCharge?: string,
 /**
  * None = keep the item's slab; for a new item, the category's starting slab.
  */
-taxClassId: string | null, 
+taxClassId: string | null,
 /**
  * `shop`, `inclusive` or `exclusive`; None = keep what the item has.
  */
-priceBasis: string | null, hsn: string | null, shortCode: string | null, cost: string | null, isOpenPrice: boolean, isAvailable: boolean, 
+priceBasis: string | null, hsn: string | null, shortCode: string | null, cost: string | null, isOpenPrice: boolean, isAvailable: boolean,
 /**
  * The course.
  */
-course: string | null, 
+course: string | null,
 /**
  * Minutes, typed by a person and parsed in Rust.
  */

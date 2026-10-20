@@ -30,21 +30,20 @@ import type { SettingsView } from '../ipc/generated/SettingsView';
 import { Receipt } from '../preview/Receipt';
 import { Appearance } from './Appearance';
 import { Devices } from './Devices';
+import { Menu } from '../menu/Menu';
+import { Staff } from '../auth/Staff';
+import { STAFF_PERMISSIONS, useMay } from '../shell/permissions';
 import { Field, Section, editsList, withEdit, type Edits } from './Form';
 import { Numbering } from './Numbering';
-import { Version } from '../account/Version';
 import { Printers } from './Printers';
 import { Tax } from './Tax';
-import { Tills } from './Tills';
 
 /** Sections that carry a screen as well as (or instead of) a form. */
 const OWN_SCREEN: Record<string, () => ReactNode> = {
   printers: () => <Printers />,
-  updates: () => <Version />,
   tax: () => <Tax />,
   numbering: () => <Numbering />,
   appearance: () => <Appearance />,
-  tills: () => <Tills />,
   // The list of what is plugged in, under the settings that drive each device.
   devices: () => <Devices />,
 };
@@ -52,13 +51,10 @@ const OWN_SCREEN: Record<string, () => ReactNode> = {
 /** Sections whose own screen draws their settings, so the generic form stays away. */
 const DRAWS_OWN_SETTINGS = new Set(['tax']);
 
-/** Sections that are not settings. */
+/** Management pages accessible from Settings, with their original permissions. */
 const EXTRA_SECTIONS = [
-  // A till is a row, not a setting.
-  { code: 'tills', label: 'Tills', canEdit: true, settings: [] },
-  // The version this counter runs and the one on the shelf (owner, 2026-09-13: "so that
-  // they can do updates" from Settings).
-  { code: 'updates', label: 'Updates', canEdit: true, settings: [] },
+  { code: 'menu', label: 'Menu', canEdit: true, settings: [], needsAny: ['menu.manage'] },
+  { code: 'staff', label: 'Staff', canEdit: true, settings: [], needsAny: STAFF_PERMISSIONS },
 ];
 
 /** Which sections show the paper beside them. */
@@ -66,11 +62,17 @@ const SHOWS_PAPER = new Set(['receipt', 'kitchen']);
 const SECTION_ICONS: Record<string, IconName> = {
   store: 'book', tax: 'tag', receipt: 'receipt', kitchen: 'flame',
   printers: 'printer', numbering: 'file', billing: 'cash', appearance: 'sun',
-  devices: 'plug', tills: 'monitor', updates: 'download',
+  devices: 'plug', menu: 'book', staff: 'users',
 };
 
 /** `initial` opens a section straight away — Billing's printer button lands on Printers. */
-export function Settings({ initial }: { initial?: string | null } = {}) {
+export function Settings({ initial, onlySection }: {
+  initial?: string | null;
+  /** Render the device configuration in More without a second navigation rail. */
+  onlySection?: 'devices';
+} = {}) {
+  const may = useMay();
+  const canReadSettings = ['settings.store', 'settings.tax', 'settings.printer', 'backup.run', 'stock.adjust'].some(may);
   const [collapsed, setCollapsed] = useRailState('settings');
   const searchBox = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<SettingsView | null>(null);
@@ -93,6 +95,11 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
   }, [group, matches]);
 
   useEffect(() => {
+    // Menu and Staff keep their own permissions; their users need not read shop settings.
+    if (!canReadSettings) {
+      setView({ hasShop: true, trouble: null, groups: [] });
+      return;
+    }
     if (!inApp()) return;
     call('settings_all')
       .then(setView)
@@ -100,7 +107,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
         if (isUiError(cause)) toast.show('danger', cause.message, cause.detail ?? undefined);
       });
     // `toast` is stable for the life of the provider.
-  }, [toast]);
+  }, [toast, canReadSettings]);
 
   const dirty = Object.keys(edits).length > 0;
 
@@ -132,7 +139,12 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
     [],
   );
 
-  const groups = [...(view?.groups ?? []), ...EXTRA_SECTIONS];
+  const groups = onlySection
+    ? (view?.groups ?? []).filter((section) => section.code === onlySection)
+    : [
+        ...(view?.groups ?? []).filter((section) => section.code !== 'devices'),
+        ...EXTRA_SECTIONS.filter((section) => section.needsAny.some(may)),
+      ];
   const active = groups.find((g) => g.code === group) ?? groups[0];
   const showsPaper = active !== undefined && SHOWS_PAPER.has(active.code) && matches === null;
 
@@ -248,10 +260,10 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
     active !== undefined && active.settings.length > 0 && !DRAWS_OWN_SETTINGS.has(active.code);
 
   return (
-    <div className={cx('mb-settings', collapsed && 'mb-settings--collapsed')}>
-      <div className={cx('mb-settings__rail', 'mb-navrail', collapsed && 'mb-navrail--collapsed')}>
+    <div className={cx('mb-settings', !onlySection && collapsed && 'mb-settings--collapsed', onlySection && 'mb-settings--single')}>
+      {!onlySection && <div className={cx('mb-settings__rail', 'mb-navrail', collapsed && 'mb-navrail--collapsed', !canReadSettings && 'mb-settings__rail--management')}>
         <RailToggle collapsed={collapsed} onChange={setCollapsed} label="Settings menu" />
-        {collapsed ? <Button variant="quiet" iconOnly title="Search settings" onClick={() => {
+        {canReadSettings && (collapsed ? <Button variant="quiet" iconOnly title="Search settings" onClick={() => {
           setCollapsed(false);
           requestAnimationFrame(() => searchBox.current?.focus());
         }}><Icon name="search" /></Button> :
@@ -261,7 +273,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
           value={query}
           placeholder="Search every setting"
           onChange={(event) => onSearch(event.currentTarget.value)}
-        />}
+        />)}
         {/* Only the sections scroll. */}
         <Scroller inset className="mb-settings__sections">
           <Rail label="Settings sections">
@@ -278,15 +290,17 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
             ))}
           </Rail>
         </Scroller>
-      </div>
+      </div>}
 
       {/* Two columns, two scrollbars. */}
       <div className={cx('mb-settings__panes', showsPaper && 'mb-settings__panes--paper')}>
         {/* Back to the top when the section changes: the body would keep the last scroll. */}
+        {matches === null && active?.code === 'menu' ? <Menu /> :
+         matches === null && active?.code === 'staff' ? <Staff /> :
         <Scroller className="mb-settings__body" ref={body}>
           {matches ? (
             <Found
-              view={view}
+              view={{ ...view, groups }}
               matches={matches}
               edits={edits}
               onChange={onChange}
@@ -321,7 +335,7 @@ export function Settings({ initial }: { initial?: string | null } = {}) {
               hint="You do not have permission to change any of this shop's settings."
             />
           )}
-        </Scroller>
+        </Scroller>}
 
         {showsPaper ? <Paper preview={paper} kitchen={active?.code === 'kitchen'} /> : null}
       </div>

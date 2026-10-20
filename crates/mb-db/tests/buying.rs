@@ -1058,6 +1058,7 @@ fn settle_one(db: &Db, id: &str, qty: i64) -> mb_core::SettledOrder {
     };
 
     let snapshot = ItemSnapshot {
+        parcel_charge: mb_core::Money::ZERO,
         item_id: ItemId::new("itm_dosa"),
         name: "Masala Dosa".to_owned(),
         unit_price: Money::from_paise(10_000),

@@ -258,6 +258,7 @@ The live menu. **An order never joins back to this table to print a line** —
 | category_id | TEXT | yes | |
 | name | TEXT | no | |
 | unit_price | INTEGER | no | Paise. |
+| parcel_charge | INTEGER | no | **0025.** Per-unit charge in paise for Parcel orders. Nonnegative, default 0; frozen into the order when added. |
 | tax_class_id | TEXT | no | **The slab the owner chose** (P13, made the only copy at 0008). The rate, the kind and the pricing default are read from the slab every time; nothing here can disagree with it. Past bills are untouched by a slab change, because a line froze its own copy (crown jewel 4, D52). |
 | price_basis | TEXT | yes | **0008.** The item's own say: `exclusive` / `inclusive`, or NULL to follow the slab and then the shop. An MRP water bottle on the 18% slab is inclusive by law while the slab is not. |
 | hsn | TEXT | yes | Scope 2.5. Absent for non-GST and below-threshold shops. |
@@ -589,6 +590,7 @@ constraint bites on history, not on housekeeping.
 | variant_id | TEXT | yes | Scope 6.1. |
 | name | TEXT | no | Snapshot. |
 | unit_price | INTEGER | no | Snapshot, paise. |
+| parcel_charge | INTEGER | no | **0025.** Frozen per-unit parcel charge in paise. Nonnegative, default 0 for historical lines. |
 | tax_rate_bp | INTEGER | no | Snapshot. |
 | tax_kind | TEXT | no | Snapshot. |
 | tax_basis | TEXT | no | Snapshot. |
@@ -888,6 +890,8 @@ once; each time is a row.
 | before_settled_by | TEXT | yes | Who had taken the money. |
 | approved_at | INTEGER | yes | Null until a manager signs it off. |
 | approved_by | TEXT | yes | |
+| discarded_at | INTEGER | yes | **0024.** When an unchanged correction draft was discarded, without approving a completed correction. |
+| discarded_by | TEXT | yes | **0024.** Staff member who discarded the draft. |
 
 ### bill_revert_lines
 

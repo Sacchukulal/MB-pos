@@ -154,6 +154,8 @@ pub struct RevertView {
     pub changes: Vec<String>,
     pub approved_by: Option<String>,
     pub approved_at: Option<String>,
+    pub discarded_at: Option<String>,
+    pub discarded_by: Option<String>,
 }
 
 /// One bill, opened.
@@ -448,7 +450,9 @@ fn with_the_register(
     let reverts = repos.corrections().reverts_of(id)?;
     if !reverts.is_empty() {
         row.edited = true;
-        row.approval = if row.correction_open || row.state != "settled" || row.returned { None } else { Some(if reverts.iter().all(|r| r.approved_at.is_some()) {
+        let completed = &reverts[..reverts.len() - usize::from(row.correction_open)];
+        let reviewable: Vec<_> = completed.iter().filter(|r| r.discarded_at.is_none()).collect();
+        row.approval = if reviewable.is_empty() || row.state != "settled" || row.returned { None } else { Some(if reviewable.iter().all(|r| r.approved_at.is_some()) {
             "approved".to_owned()
         } else {
             "waiting".to_owned()
@@ -691,6 +695,9 @@ pub fn bill_detail_on(app: &App, order_id: String) -> UiResult<BillDetailView> {
                     if let (Some(at), Some(by)) = (row.approved_at, &row.approved_by) {
                         note(at, names.of(by), "Edit approved".to_owned());
                     }
+                    if let (Some(at), Some(by)) = (row.discarded_at, &row.discarded_by) {
+                        note(at, names.of(by), "Changes discarded; issued bill unchanged".to_owned());
+                    }
                 }
 
                 history.sort_by_key(|(at, _)| at.millis());
@@ -711,8 +718,8 @@ pub fn bill_detail_on(app: &App, order_id: String) -> UiResult<BillDetailView> {
                     history: history.into_iter().map(|(_, h)| h).collect(),
                     can_approve: who.must(Permission::BillRevertApprove).is_ok()
                         && row.state == "settled" && !row.returned
-                        && !pending_edit
-                        && edits.iter().any(|e| e.approved_at.is_none()),
+                        && edits.iter().enumerate().any(|(index, e)| e.approved_at.is_none()
+                            && e.discarded_at.is_none() && (!pending_edit || index + 1 < edits.len())),
                     can_refund: who.can(Permission::BillVoid)
                         && repos.corrections().refundable_payments(&id)?.iter().any(|(_, amount)| amount.is_positive()),
                     edits,
@@ -775,7 +782,9 @@ fn edits_of(
                 !pending_edit && !matches!(order, AnyOrder::Open(_) | AnyOrder::Draft(_)),
             ),
         };
-        let changes = if billed_again {
+        let changes = if revert.discarded_at.is_some() {
+            vec!["Changes discarded; issued bill unchanged".to_owned()]
+        } else if billed_again {
             changes_between(&was, &is, revert.before_total, after_total, order)
         } else {
             vec!["Not billed again yet".to_owned()]
@@ -800,6 +809,8 @@ fn edits_of(
             changes,
             approved_by: revert.approved_by.as_ref().map(|by| names.of(by)),
             approved_at: revert.approved_at.map(words::when),
+            discarded_at: revert.discarded_at.map(words::when),
+            discarded_by: revert.discarded_by.as_ref().map(|by| names.of(by)),
         });
     }
     Ok(out)
@@ -1100,7 +1111,7 @@ pub(crate) fn approve_if_needed(app: &App, total: Money, approver_staff_id: Opti
     verify_approver_on(app, &staff_id, &pin)
 }
 
-/// Validate the same manager credential for voids and final corrected-bill saves.
+/// Validate a manager credential for voids and full returns.
 pub(crate) fn verify_approver_on(app: &App, staff_id: &str, pin: &str) -> UiResult<()> {
     let pin = mb_auth::Pin::parse(pin)
         .map_err(|e| UiError::new("auth.pin_shape", format!("{e}.")).with_detail(e.to_string()))?;
@@ -1255,6 +1266,8 @@ pub fn revert_bill_on(
                         before_settled_by: Some(before_settled_by.clone()),
                         approved_at: None,
                         approved_by: None,
+                        discarded_at: None,
+                        discarded_by: None,
                     },
                     &before_lines,
                     &before_payments,
@@ -1324,6 +1337,7 @@ fn prepare_counter_for_revert(app: &App) -> UiResult<()> {
 
 /// A manager signs an edit off.
 pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
+    let _one_at_a_time = app.begin_action();
     crate::licensing::gate(app, mb_license::Feature::Reports)?;
     let who = guard::require(app, Permission::BillRevertApprove)?;
     let at = now();
@@ -1342,7 +1356,8 @@ pub fn approve_revert_on(app: &App, revert_id: String) -> UiResult<()> {
                 }
                 // This check shares the approval transaction, so a refusal rolls the
                 // signature back too. The issued sale remains visible during correction.
-                if repos.orders().find_working(&row.order_id)? != repos.orders().find(&row.order_id)? {
+                if repos.orders().find_working(&row.order_id)? != repos.orders().find(&row.order_id)?
+                    && repos.corrections().reverts_of(&row.order_id)?.last().is_some_and(|latest| latest.id == row.id) {
                     return Err(mb_db::DbError::invariant("Complete the corrected bill before approving its changes."));
                 }
                 let number = repos

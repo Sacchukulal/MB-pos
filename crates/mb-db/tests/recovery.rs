@@ -713,6 +713,7 @@ fn t8_and_t9_export_import_round_trip_survives_nasty_text() {
 
 fn shop_item() -> mb_db::repo::menu::MenuItem {
     mb_db::repo::menu::MenuItem {
+        parcel_charge: mb_core::Money::ZERO,
         id: ItemId::new("itm_nasty"),
         category_id: None,
         name: String::new(),
