@@ -30,6 +30,7 @@ pub struct BillInput<'a> {
     pub bill_discount: Option<DiscountEntry>,
     /// Service, packing, delivery — each with its own tax rate.
     pub charges: &'a [Charge],
+    pub parcel_charge_per_item: Option<bool>,
     pub place_of_supply: PlaceOfSupply,
     /// Who this shop is.
     pub registration: Registration,
@@ -52,6 +53,7 @@ impl<'a> BillInput<'a> {
             cart,
             bill_discount: None,
             charges: NO_CHARGES,
+            parcel_charge_per_item: None,
             place_of_supply: PlaceOfSupply::Intra,
             registration,
             state_tax: StateTax::Sgst,
@@ -69,6 +71,12 @@ impl<'a> BillInput<'a> {
     #[must_use]
     pub fn with_charges(mut self, charges: &'a [Charge]) -> Self {
         self.charges = charges;
+        self
+    }
+
+    #[must_use]
+    pub fn with_parcel_charge_per_item(mut self, per_item: bool) -> Self {
+        self.parcel_charge_per_item = Some(per_item);
         self
     }
 
@@ -136,6 +144,10 @@ pub struct Bill {
     pub bill_discount: Option<DiscountEntry>,
     /// Computed and taxed like lines, and in the same `summary`.
     pub charges: Vec<BillCharge>,
+    /// Frozen calculation method; absent on historical bills. A flat fee must never be
+    /// folded into item prices merely because the menu also holds per-item amounts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parcel_charge_per_item: Option<bool>,
     pub summary: TaxSummary,
     /// Sum of line gross, before any discount.
     pub subtotal: Money,
@@ -183,7 +195,10 @@ impl Bill {
     /// as its own charge and tax slab even when the customer sees it within item amounts.
     pub fn display_with_parcel_in_items(&self) -> std::result::Result<Self, MoneyError> {
         let mut display = self.clone();
-        if self.order_type != OrderType::Parcel {
+        if self.parcel_charge_per_item == Some(false)
+            || !matches!(self.order_type, OrderType::Parcel | OrderType::Delivery)
+            || (self.order_type == OrderType::Delivery && self.parcel_charge_per_item != Some(true))
+        {
             return Ok(display);
         }
         let weights = self.lines.iter().map(|line| line.qty.extend(line.snapshot.parcel_charge))
@@ -394,6 +409,7 @@ pub fn compute_bill(input: BillInput<'_>) -> Result<Bill> {
         lines: computed,
         bill_discount: input.bill_discount.clone(),
         charges: bill_charges,
+        parcel_charge_per_item: input.parcel_charge_per_item,
         non_gst_value: summary.non_gst_value,
         exempt_value: summary.exempt_value,
         untaxed_value: summary.untaxed_value,

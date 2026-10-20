@@ -507,3 +507,7 @@
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
+.mb-settings__parcel-help {
+  color: var(--text-muted);
+  margin-bottom: var(--space-3);
+}

@@ -5,7 +5,7 @@ use mb_print::doc::Pattern;
 use mb_print::settings::{BillDesign, LogoPosition, QrMode, RowHeight, TicketFormat};
 
 use super::value::{Choice, Invalid, Kind, Shape, Value};
-use super::{ShopConfig, Storage};
+use super::{ParcelChargeMethod, ShopConfig, Storage};
 
 /// Which screen a setting appears on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -136,6 +136,12 @@ pub struct Entry {
 
 /// An empty stored value, which for a choice means "not chosen yet".
 const NOT_CHOSEN: &str = "";
+
+const PARCEL_METHODS: &[Choice] = &[
+    Choice { value: "off", label: "Off" },
+    Choice { value: "per_item", label: "Per item" },
+    Choice { value: "per_bill", label: "Per bill" },
+];
 
 /// What the number inside a scale's label means.
 const LABEL_VALUES: &[Choice] = &[
@@ -1091,24 +1097,6 @@ pub const CATALOG: &[Entry] = &[
         billing.service_charge_tax
     ),
     cash!(
-        "billing.packing_charge",
-        Billing,
-        Row,
-        "Packing charge",
-        "Flat charge for self-service bills only. For Parcel, set each item's parcel charge in Settings > Menu. Zero means no flat charge.",
-        ["packing", "parcel", "box", "charge"],
-        0..=100_000,
-        billing.packing_charge
-    ),
-    slab!(
-        "billing.packing_charge_tax",
-        Billing,
-        "Tax on the packing charge",
-        "",
-        ["packing", "gst", "tax"],
-        billing.packing_charge_tax
-    ),
-    cash!(
         "billing.delivery_charge",
         Billing,
         Row,
@@ -1126,17 +1114,40 @@ pub const CATALOG: &[Entry] = &[
         ["delivery", "gst", "tax"],
         billing.delivery_charge_tax
     ),
+    pick!(
+        "billing.parcel_charge_method", Billing, Row, "Charge method",
+        "Choose one method for Parcel orders. Off ignores all parcel amounts. Per item uses each item's charge times quantity. Per bill uses one fixed amount.",
+        ["parcel", "packing", "method", "off", "item", "bill"],
+        PARCEL_METHODS, ParcelChargeMethod::code, ParcelChargeMethod::from_code,
+        billing.parcel_charge_method
+    ),
+    cash!(
+        "billing.packing_charge", Billing, Row, "Parcel charge per bill",
+        "Charged once per non-empty bill in Per bill mode. Item parcel amounts are ignored.",
+        ["packing", "parcel", "box", "charge", "flat", "fixed"],
+        0..=100_000, billing.packing_charge
+    ),
+    slab!(
+        "billing.packing_charge_tax", Billing, "Tax on parcel charges",
+        "Used by the selected parcel-charge method.",
+        ["packing", "parcel", "gst", "tax"], billing.packing_charge_tax
+    ),
+    flag!(
+        "billing.parcel_charge_delivery", Billing, Row, "Also apply to Delivery orders",
+        "Apply the selected packing method to Delivery as well as Parcel. The delivery fee remains a separate charge.",
+        ["parcel", "packing", "delivery"], billing.parcel_charge_delivery
+    ),
     flag!(
         "billing.parcel_charge_separate_screen", Billing, Row,
         "Show parcel charges separately on the billing screen",
-        "Untick to include parcel charges in the displayed item amounts. The payable total stays the same.",
+        "In Per item mode, untick to include parcel charges in displayed item amounts. Per bill charges always stay separate. The payable total stays the same.",
         ["parcel", "packing", "separate", "screen"],
         billing.parcel_charge_separate_screen
     ),
     flag!(
         "receipt.parcel_charge_separate", Billing, Row,
         "Show parcel charges separately on the printed receipt",
-        "Untick to include parcel charges in the printed item amounts. The payable total stays the same.",
+        "In Per item mode, untick to include parcel charges in printed item amounts. Per bill charges always stay separate. The payable total stays the same.",
         ["parcel", "packing", "separate", "receipt"],
         receipt.parcel_charge_separate
     ),
@@ -2310,9 +2321,9 @@ const TOPICS: &[(&str, &str)] = &[
     ("billing.tables_on_counter", "At the counter"),
     ("billing.idle_lock_minutes", "At the counter"),
     ("billing.service_charge", "Charges you add"),
-    ("billing.packing_charge", "Charges you add"),
-    ("billing.parcel_charge_separate_screen", "Parcel charge display"),
-    ("receipt.parcel_charge_separate", "Parcel charge display"),
+    ("billing.packing_charge", "Parcel / packing charges"),
+    ("billing.parcel_charge", "Parcel / packing charges"),
+    ("receipt.parcel_charge_separate", "Parcel / packing charges"),
     ("billing.delivery_charge", "Charges you add"),
     ("store.registration", "Registration"),
     ("store.gstin", "Registration"),
@@ -2347,7 +2358,6 @@ const ROWS: &[(&str, &str)] = &[
     ("kitchen.items.", "Item list"),
     ("kitchen.column_names.", "Column names"),
     ("billing.service_charge", "Service charge"),
-    ("billing.packing_charge", "Packing charge"),
     ("billing.delivery_charge", "Delivery charge"),
 ];
 

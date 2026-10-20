@@ -1,6 +1,6 @@
 /** The update: the same dialog, offered by the counter and by the Account page. */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -12,7 +12,7 @@ vi.mock('../src/ipc/call', () => ({
   subscribe: () => Promise.resolve(() => undefined),
 }));
 
-const { UpdateOffer } = await import('../src/account/Update');
+const { UpdateOffer, useUpdateRun } = await import('../src/account/Update');
 const { Version } = await import('../src/account/Version');
 const { ToastProvider } = await import('../src/kit');
 
@@ -83,6 +83,55 @@ it('offers a newer version that arrives while the counter is open', async () => 
     </ToastProvider>,
   );
   expect(await screen.findByText('Version 1.7.1 is ready')).toBeTruthy();
+});
+
+it('keeps a newer offer from replacing an update in progress or its installer handoff', async () => {
+  let finish!: (says: string) => void;
+  const installing = new Promise<string>((resolve) => { finish = resolve; });
+  call.mockImplementation((command: string) => command === 'install_update'
+    ? installing : Promise.resolve(shelf));
+  const { rerender } = offer('1.8.2');
+  fireEvent.click(await screen.findByRole('button', { name: /Download and install/ }));
+  expect(screen.getByRole('dialog', { name: 'Updating to 1.8.2' })).toBeTruthy();
+
+  rerender(<ToastProvider><UpdateOffer version="1.8.3" /></ToastProvider>);
+  await waitFor(() => expect(call.mock.calls.filter(([name]) => name === 'look_for_an_update')).toHaveLength(2));
+  expect(screen.queryByRole('button', { name: /Download and install/ })).toBeNull();
+  expect(screen.getByRole('progressbar')).toBeTruthy();
+
+  await act(async () => { finish('Magic Bill is closing.'); });
+  rerender(<ToastProvider><UpdateOffer version="1.8.4" /></ToastProvider>);
+  await waitFor(() => expect(call.mock.calls.filter(([name]) => name === 'look_for_an_update')).toHaveLength(3));
+  expect(screen.getByRole('dialog', { name: 'Installing' })).toBeTruthy();
+  expect(call.mock.calls.filter(([name]) => name === 'install_update')).toHaveLength(1);
+});
+
+it('rejects repeated install and rollback clicks until restart', async () => {
+  const { result } = renderHook(() => useUpdateRun());
+  await act(async () => {
+    result.current.install('1.8.3');
+    result.current.install('1.8.3');
+    result.current.goBack('1.8.0');
+  });
+  expect(call.mock.calls.filter(([name]) => name === 'install_update')).toHaveLength(1);
+  expect(call).not.toHaveBeenCalledWith('go_back_a_version');
+  act(() => {
+    result.current.close();
+    result.current.offer('1.8.4', '', false);
+    result.current.install('1.8.4');
+  });
+  expect(result.current.step?.kind).toBe('closing');
+  expect(call.mock.calls.filter(([name]) => name === 'install_update')).toHaveLength(1);
+});
+
+it('allows another attempt after an installation error', async () => {
+  call.mockRejectedValueOnce({ code: 'update.missing', message: 'Download it again.' });
+  const { result } = renderHook(() => useUpdateRun());
+  await act(async () => { result.current.install('1.8.3'); });
+  expect(result.current.step?.kind).toBe('failed');
+  await act(async () => { result.current.install('1.8.3'); });
+  expect(result.current.step?.kind).toBe('closing');
+  expect(call.mock.calls.filter(([name]) => name === 'install_update')).toHaveLength(2);
 });
 
 it('installs from the Account page through the same dialog', async () => {

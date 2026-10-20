@@ -27,7 +27,7 @@ export function LinePrice({ line, overridden, onSaved }: {
     finally { saving.current = false; setBusy(false); setEdit(null); }
   };
   return <div className="mb-cartline__amount" onClick={(event) => event.stopPropagation()}>
-    {edit ? <MoneyInput autoFocus prefix="" className="mb-cartline__price-input"
+    {edit ? <MoneyInput autoFocus prefix={undefined} className="mb-cartline__price-input"
       aria-label={`Unit price for ${line.name}`} value={edit.price} disabled={busy}
       onFocus={(event) => event.target.select()}
       onChange={(price) => setEdit({ ...edit, price })}

@@ -12,15 +12,50 @@ fn shop(scratch: &Scratch) -> App {
 }
 
 #[test]
+fn saved_fixed_parcel_charge_keeps_its_method_when_shop_settings_change() {
+    let scratch = Scratch::new("fixed_parcel_saved");
+    let app = a_trading_shop(&scratch);
+    app.with_shop(|shop| shop.db.transaction(|tx| {
+        let repos = mb_db::Repos::new(tx);
+        let mut item = repos.menu().find_item(&mb_core::ItemId::new("itm_tea"))?.expect("tea");
+        item.parcel_charge = mb_core::Money::from_paise(500);
+        repos.menu().save_item(crate::state::OUTLET, &item, crate::flows::now())?;
+        repos.settings().set(crate::state::OUTLET, "billing.parcel_charge_method", &"per_bill".to_owned(), crate::flows::now(), None)?;
+        repos.settings().set(crate::state::OUTLET, "billing.packing_charge", &mb_core::Money::from_paise(1500), crate::flows::now(), None)
+    }).map_err(|error| crate::words::from_db(&error))).expect("fixed packing");
+    app.reload_shop_config();
+    order_teas(&app, 2);
+    app.with_cart_mut(|state| { state.set_order_type(mb_core::OrderType::Parcel); Ok(()) }).expect("parcel");
+    crate::flows::complete_bill_on(&app, Some("Cash".into())).expect("issued");
+    let row = crate::corrections::list_bills_on(&app).expect("bills").remove(0);
+    let read = || {
+        let saved = crate::flows::find_order(&app, &mb_core::OrderId::new(&row.order_id)).expect("read").expect("saved");
+        let AnyOrder::Settled(saved) = saved else { panic!("settled") };
+        saved.bill
+    };
+    let original = read();
+    assert_eq!(original.parcel_charge_per_item, Some(false));
+    assert_eq!(original.charges[0].amount.paise(), 1500);
+    crate::settings::ipc::save_on(&app, vec![crate::settings::ipc::SettingEdit {
+        key: "billing.parcel_charge_method".into(), value: "per_item".into(),
+    }]).expect("change shop method");
+    app.reload_shop_config();
+    assert_eq!(read(), original);
+    assert_eq!(read().display_with_parcel_in_items().expect("reprint"), original);
+}
+
+#[test]
 fn parcel_packing_is_frozen_on_saved_bills_and_reduced_with_returned_items() {
     let scratch = Scratch::new("parcel_return");
     let app = a_trading_shop(&scratch);
     app.with_shop(|shop| shop.db.transaction(|tx| {
         let repos = mb_db::Repos::new(tx);
+        repos.settings().set(crate::state::OUTLET, "billing.parcel_charge_method", &"per_item".to_owned(), crate::flows::now(), None)?;
         let mut item = repos.menu().find_item(&mb_core::ItemId::new("itm_tea"))?.expect("tea");
         item.parcel_charge = mb_core::Money::from_paise(200);
         repos.menu().save_item(crate::state::OUTLET, &item, crate::flows::now())
     }).map_err(|error| crate::words::from_db(&error))).expect("packing price");
+    app.reload_shop_config();
     order_teas(&app, 2);
     app.with_cart_mut(|state| { state.set_order_type(mb_core::OrderType::Parcel); Ok(()) }).expect("parcel");
     crate::flows::complete_bill_on(&app, Some("Cash".into())).expect("issued");

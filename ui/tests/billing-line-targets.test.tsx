@@ -154,7 +154,17 @@ it('creates an unknown search item using Menu save and adds one to the cart', as
   expect(price).toHaveFocus();
   fireEvent.change(price, { target: { value: '80' } });
   price.focus();
-  await userEvent.setup().keyboard('{Enter}');
+  const user = userEvent.setup();
+  await user.keyboard('{Enter}');
+  const category = within(dialog).getByRole('combobox', { name: 'Category' });
+  expect(category).toHaveFocus();
+  expect(call.mock.calls.some(([command]) => command === 'save_menu_item' || command === 'cart_add')).toBe(false);
+  await user.keyboard('{Enter}{Home}{Enter}');
+  expect(category).toHaveValue('');
+  expect(call.mock.calls.some(([command]) => command === 'save_menu_item' || command === 'cart_add')).toBe(false);
+  await user.keyboard('{Enter}{End}{Enter}');
+  expect(category).toHaveValue('cat_food');
+  await user.click(within(dialog).getByRole('button', { name: 'Save & add to bill' }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('cart_add', expect.objectContaining({ qty: '1', note: null })));
   const saves = call.mock.calls.filter(([command]) => command === 'save_menu_item');
   expect(saves).toHaveLength(1);

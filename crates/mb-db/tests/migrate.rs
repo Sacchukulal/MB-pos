@@ -19,6 +19,31 @@ fn every_version() -> Vec<u32> {
 }
 
 #[test]
+fn parcel_method_upgrade_preserves_item_charges_without_activating_flat_fees() {
+    for item_charge in [0, 500] {
+        let scratch = Scratch::new("parcel_method_upgrade");
+        let mut conn = Connection::open(scratch.db_path()).expect("open");
+        conn.execute_batch("CREATE TABLE schema_version (
+            version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL,
+            applied_at INTEGER NOT NULL, run_ms INTEGER NOT NULL) STRICT;").expect("ledger");
+        for migration in MIGRATIONS.iter().filter(|m| m.version < 26) {
+            run_single(&mut conn, migration).expect("previous schema");
+        }
+        conn.execute("INSERT INTO items (id, outlet_id, name, unit_price, tax_class_id, created_at, updated_at, parcel_charge)
+            VALUES ('tea', 'outlet_default', 'Tea', 2000, 'tax_food_5', 1, 1, ?1)", [item_charge]).expect("item");
+        conn.execute_batch("INSERT INTO settings (outlet_id, key, value, value_type, updated_at)
+            VALUES ('outlet_default', 'billing.packing_charge', '1500', 'money', 1);").expect("old flat fee");
+        migrate::apply_all(&mut conn).expect("upgrade");
+        let mode: String = conn.query_row("SELECT COALESCE((SELECT value FROM settings WHERE key = 'billing.parcel_charge_method'), 'off')",
+            [], |row| row.get(0)).expect("method");
+        assert_eq!(mode, if item_charge > 0 { "per_item" } else { "off" });
+        let flat: String = conn.query_row("SELECT value FROM settings WHERE key = 'billing.packing_charge'",
+            [], |row| row.get(0)).expect("amount retained");
+        assert_eq!(flat, "1500");
+    }
+}
+
+#[test]
 fn menu_deletion_upgrade_does_not_guess_why_an_item_was_unavailable() {
     let scratch = Scratch::new("menu_deletion_upgrade");
     let mut conn = Connection::open(scratch.db_path()).expect("open");

@@ -1,6 +1,6 @@
 /** One update, from what was found to the hand-over. Account offers it, and so does the counter. */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button, Icon, Modal, Spinner } from '../kit';
 import { call, isUiError, subscribe } from '../ipc/call';
@@ -31,13 +31,14 @@ function megabytes(bytes: number): string {
 /** The steps and the calls that move between them — the whole update, in one place. */
 export function useUpdateRun(): UpdateRun {
   const [step, setStep] = useState<UpdateStep | null>(null);
+  const installing = useRef(false);
 
   // Rust says how far the download has got; the dialog draws it.
   useEffect(() => {
     let stop: (() => void) | undefined;
     subscribe((message: Pushed) => {
       if (message.kind !== 'update') return;
-      setStep({
+      setStep((current) => current?.kind === 'closing' ? current : {
         kind: 'busy',
         version: message.version,
         stage: message.stage,
@@ -54,16 +55,22 @@ export function useUpdateRun(): UpdateRun {
   }, []);
 
   const offer = useCallback((version: string, notes: string, downloaded: boolean) => {
-    setStep({ kind: 'found', version, notes, downloaded });
+    setStep((current) => current?.kind === 'busy' || current?.kind === 'closing'
+      ? current : { kind: 'found', version, notes, downloaded });
   }, []);
 
-  const close = useCallback(() => setStep(null), []);
+  const close = useCallback(() => {
+    setStep((current) => current?.kind === 'busy' || current?.kind === 'closing' ? current : null);
+  }, []);
 
   const install = useCallback((version: string) => {
+    if (installing.current) return;
+    installing.current = true;
     setStep({ kind: 'busy', version, stage: 'downloading', percent: 0, bytes: 0, total: 0 });
     call('install_update')
       .then((says) => setStep({ kind: 'closing', says }))
       .catch((cause: unknown) => {
+        installing.current = false;
         setStep({
           kind: 'failed',
           says: isUiError(cause) ? cause.message : 'The update could not be installed.',
@@ -72,10 +79,13 @@ export function useUpdateRun(): UpdateRun {
   }, []);
 
   const goBack = useCallback((version: string) => {
+    if (installing.current) return;
+    installing.current = true;
     setStep({ kind: 'busy', version, stage: 'installing', percent: 100, bytes: 0, total: 0 });
     call('go_back_a_version')
       .then((says) => setStep({ kind: 'closing', says }))
       .catch((cause: unknown) => {
+        installing.current = false;
         setStep({
           kind: 'failed',
           says: isUiError(cause) ? cause.message : 'The earlier version could not be started.',

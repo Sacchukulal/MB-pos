@@ -76,6 +76,8 @@ pub struct App {
     entitlement: std::sync::RwLock<(mb_license::Entitlement, mb_core::BusinessDay)>,
     /// What the counter knows about updates.
     updates: Mutex<crate::updates::UpdateState>,
+    /// One installer handoff for this process, including the delay before it exits.
+    pub(crate) update_install: crate::updates::InstallGate,
     /// Which till this machine is.
     terminal_id: String,
     /// The window, once there is one, so a shop opened later is watched too.
@@ -144,6 +146,7 @@ impl App {
                 is_dev_build: !crate::updates::is_a_release_build(),
                 ..crate::updates::UpdateState::default()
             }),
+            update_install: crate::updates::InstallGate::default(),
             terminal_id: crate::terminals::me(&AppConfig::directory()).terminal_id,
             window: Mutex::new(None),
             link: std::sync::RwLock::new(link),

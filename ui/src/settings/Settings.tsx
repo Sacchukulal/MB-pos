@@ -325,7 +325,8 @@ export function Settings({ initial, onlySection }: {
               }
             >
               <div className="mb-sections">
-                {hasForm ? <Section section={active} edits={edits} onChange={onChange} /> : null}
+                {hasForm ? <Section section={active} edits={edits} onChange={onChange}
+                  onOpenMenu={may('menu.manage') ? () => go('menu') : undefined} /> : null}
                 {OWN_SCREEN[active.code]?.()}
               </div>
             </Panel>

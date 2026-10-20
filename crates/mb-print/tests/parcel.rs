@@ -50,6 +50,30 @@ fn parcel_receipts_fold_charges_into_items_without_changing_tax_discounts_or_tot
 }
 
 #[test]
+fn fixed_parcel_fee_stays_separate_even_when_items_have_parcel_amounts() {
+    let mut cart = Cart::new();
+    let mut item = ItemSnapshot::new(ItemId::new("tea"), "Tea", Money::from_paise(2000), TaxRate::ZERO);
+    item.parcel_charge = Money::from_paise(500);
+    cart.add(item, Qty::from_whole(2).expect("qty"), None, vec![]).expect("add");
+    let charges = [Charge::flat(ChargeKind::Packing, "Parcel charges", Money::from_paise(1500), TaxRate::ZERO)];
+    let bill = compute_bill(BillInput::new(&cart, Registration::Unregistered)
+        .with_order_type(OrderType::Parcel).with_charges(&charges)
+        .with_parcel_charge_per_item(false)).expect("bill");
+    assert_eq!(bill.display_with_parcel_in_items().expect("display"), bill);
+    let mut fixture = common::Fixture::new();
+    fixture.bill = bill;
+    fixture.settings.parcel_charge_separate = false;
+    let doc = mb_print::template::bill_document(&common::metrics(PaperKind::Mm80), &fixture.context(Copy::Original)).expect("document");
+    let laid = layout(&doc).expect("layout");
+    let text = laid.lines.iter().filter_map(|line| match &line.content {
+        LaidContent::Text { text } => Some(text.as_str()), _ => None,
+    }).collect::<Vec<_>>().join("\n");
+    assert!(text.contains("Parcel charges"));
+    assert!(text.contains("15.00"));
+    assert!(text.contains("55.00"));
+}
+
+#[test]
 fn historical_flat_packing_bills_keep_their_saved_charge() {
     let mut fixture = common::Fixture::new();
     fixture.bill.order_type = OrderType::Parcel;

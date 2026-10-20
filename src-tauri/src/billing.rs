@@ -460,8 +460,7 @@ pub fn bill_for(
     bill_discount: Option<DiscountEntry>,
     config: &crate::settings::ShopConfig,
 ) -> UiResult<Bill> {
-    // A charge belongs to the ORDER TYPE: switching a table to a parcel drops the service
-    // charge and adds the packing one. Its tax comes from the book, like an item's.
+    // Service and delivery fees have their own scope. Packing uses exactly one chosen method.
     let mut charges = config
         .billing
         .charges_for(order_type, &config.tax)
@@ -473,18 +472,27 @@ pub fn bill_for(
             )
             .with_detail(e.to_string())
         })?;
-    if order_type == OrderType::Parcel {
-        let mut parcel = Money::ZERO;
-        for line in cart.lines() {
-            if line.snapshot.parcel_charge.is_negative() {
-                return Err(UiError::new("bill.parcel_charge", "An item's parcel charge cannot be negative."));
+    use crate::settings::ParcelChargeMethod;
+    let per_item = config.billing.parcel_charge_method == ParcelChargeMethod::PerItem;
+    if !cart.is_empty() && config.billing.parcel_applies_to(order_type) {
+        let parcel = match config.billing.parcel_charge_method {
+            ParcelChargeMethod::Off => Money::ZERO,
+            ParcelChargeMethod::PerBill => config.billing.packing_charge,
+            ParcelChargeMethod::PerItem => {
+                let mut amount = Money::ZERO;
+                for line in cart.lines() {
+                    if line.snapshot.parcel_charge.is_negative() {
+                        return Err(UiError::new("bill.parcel_charge", "An item's parcel charge cannot be negative."));
+                    }
+                    amount = amount.add(line.qty.extend(line.snapshot.parcel_charge).map_err(money_error)?)
+                        .map_err(money_error)?;
+                }
+                amount
             }
-            parcel = parcel.add(line.qty.extend(line.snapshot.parcel_charge).map_err(money_error)?)
-                .map_err(money_error)?;
-        }
+        };
         if !parcel.is_zero() {
             let tax = config.tax.spec_for(&mb_core::TaxClassId::new(&config.billing.packing_charge_tax), None)
-                .map_err(|error| UiError::new("bill.charge_slab", "Choose a valid packing-charge tax slab under Settings > Billing.")
+                .map_err(|error| UiError::new("bill.charge_slab", "Choose a valid parcel-charge tax slab under Settings > Billing.")
                     .with_detail(error.to_string()))?;
             charges.push(mb_core::Charge::flat(mb_core::ChargeKind::Packing, "Parcel charges", parcel, tax.rate).with_tax(tax));
         }
@@ -492,6 +500,7 @@ pub fn bill_for(
     let mut input = BillInput::new(cart, registration_of(config))
         .with_order_type(order_type)
         .with_rounding(config.billing.rounding)
+        .with_parcel_charge_per_item(per_item)
         .with_charges(&charges);
     if let Some(discount) = bill_discount {
         input = input.with_bill_discount(discount);

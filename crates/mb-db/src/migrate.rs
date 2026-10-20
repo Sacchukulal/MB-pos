@@ -168,6 +168,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0025_item_parcel_charges",
         sql: include_str!("migrations/0025_item_parcel_charges.sql"),
     },
+    Migration {
+        version: 26,
+        name: "0026_parcel_charge_method",
+        sql: include_str!("migrations/0026_parcel_charge_method.sql"),
+    },
 ];
 
 /// The highest version this build understands.

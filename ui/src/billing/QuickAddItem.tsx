@@ -82,7 +82,13 @@ export function QuickAddItem({ initialName, onClose, onAdded, onMenu }: {
     </>}>
     <form onSubmit={(event) => { event.preventDefault(); if (ready && (!existing || existing.isAvailable)) void save(Boolean(existing)); }}>
     <Input label="Item name" value={name} disabled={busy || Boolean(savedId)} onChange={(event) => { setName(event.target.value); setExisting(null); }} />
-    <MoneyInput ref={priceBox} label="Price" autoFocus value={price} disabled={busy || Boolean(savedId)} onChange={setPrice} />
+    <MoneyInput ref={priceBox} label="Price" autoFocus value={price} disabled={busy || Boolean(savedId)} onChange={setPrice}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) event.currentTarget.form?.querySelector<HTMLSelectElement>('select')?.focus();
+      }} />
     <Select label="Category" value={category} disabled={busy || Boolean(savedId)} onChange={(event) => setCategory(event.target.value)}
       options={[{ value: '', label: 'No category' }, ...categories.map((row) => ({ value: row.id, label: row.name }))]} />
     <p>{tax ? !tax.chargesGst ? 'Default tax: no GST charged' : `Default tax: ${slab?.rate ?? tax.shopRate + '%'} · ${slab?.priceWords ?? tax.shopBasis}` : 'Loading default tax…'}</p>

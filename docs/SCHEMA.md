@@ -643,6 +643,7 @@ a year-long report over ~75,000 bills 2.5 seconds, which recomputation is not.
 | bill_discount_value | INTEGER | yes | |
 | bill_discount_reason | TEXT | yes | |
 | bill_discount_by | TEXT | yes | |
+| parcel_charge_basis | TEXT | no | **0026.** `per_item` permits folding packing into item amounts; `per_bill` keeps it separate (also used when Off adds no charge). `legacy` preserves historical receipt behaviour. |
 | total_taxable | INTEGER | no | |
 | total_cgst | INTEGER | no | |
 | total_sgst | INTEGER | no | |

@@ -27,6 +27,7 @@ fn a_shop_with_a_menu(scratch: &Scratch) -> App {
 
     db.transaction(|tx| {
         let repos = Repos::new(tx);
+        repos.settings().set(OUTLET, "billing.parcel_charge_method", &"per_item".to_owned(), crate::flows::now(), None)?;
         for (id, name, paise, class) in [
             ("itm_tea", "Tea", 2000_i64, "tax_food_5"),
             ("itm_dosa", "Masala dosa", 12000, "tax_food_5"),
@@ -125,6 +126,52 @@ fn parcel_charges_survive_menu_spreadsheet_export_and_partial_imports() {
 }
 
 #[test]
+fn parcel_methods_are_exclusive_and_delivery_is_opt_in() {
+    use crate::settings::ParcelChargeMethod::{Off, PerBill, PerItem};
+    use mb_core::{ChargeKind, OrderType, Qty, RoundingMode};
+    let scratch = Scratch::new("parcel_methods");
+    let app = a_shop_with_a_menu(&scratch);
+    save_item_on(&app, parcel_edit(Some("5"))).expect("item charge");
+    crate::ipc::cart_add_on(&app, "itm_tea".into(), Some("2".into()), None).expect("two items");
+    let mut config = app.shop_config();
+    config.billing.packing_charge = Money::from_paise(1500);
+    config.billing.delivery_charge = Money::from_paise(3000);
+    config.billing.rounding = RoundingMode::None;
+    for (method, expected) in [(Off, 0), (PerItem, 1000), (PerBill, 1500)] {
+        config.billing.parcel_charge_method = method;
+        for delivery in [false, true] {
+            config.billing.parcel_charge_delivery = delivery;
+            for kind in [OrderType::Parcel, OrderType::Delivery, OrderType::SelfService, OrderType::DineIn] {
+                let bill = app.with_cart(|state| crate::billing::bill_for(&state.cart, kind, None, &config)).expect("bill");
+                let packing: Vec<_> = bill.charges.iter().filter(|c| c.kind == ChargeKind::Packing).collect();
+                let wanted = if kind == OrderType::Parcel || (kind == OrderType::Delivery && delivery) { expected } else { 0 };
+                assert_eq!(packing.len(), usize::from(wanted > 0), "{method:?} {kind:?} {delivery}");
+                assert_eq!(packing.first().map_or(0, |c| c.amount.paise()), wanted);
+                let shown = bill.display_with_parcel_in_items().expect("display");
+                assert_eq!(shown.grand_total, bill.grand_total);
+                assert_eq!(shown.summary, bill.summary);
+                if method == PerBill { assert_eq!(shown, bill, "flat charges stay separate"); }
+                if method == PerItem && wanted > 0 {
+                    assert!(shown.charges.iter().all(|c| c.kind != ChargeKind::Packing));
+                }
+                if kind == OrderType::Delivery {
+                    assert_eq!(bill.charges.iter().find(|c| c.kind == ChargeKind::Delivery).expect("delivery fee").amount.paise(), 3000);
+                }
+            }
+        }
+    }
+    config.billing.parcel_charge_method = PerBill;
+    config.billing.packing_charge = Money::ZERO;
+    let zero = app.with_cart(|state| crate::billing::bill_for(&state.cart, OrderType::Parcel, None, &config)).expect("zero fixed");
+    assert!(zero.charges.is_empty(), "zero fixed amount never falls back to item fees");
+    config.billing.packing_charge = Money::from_paise(1500);
+    app.with_cart_mut(|state| { state.cart.set_qty(0, Qty::ZERO).expect("remove"); Ok(()) }).expect("empty");
+    let empty = app.with_cart(|state| crate::billing::bill_for(&state.cart, OrderType::Parcel, None, &config)).expect("empty bill");
+    assert!(empty.charges.is_empty());
+    assert_eq!(empty.grand_total, Money::ZERO);
+}
+
+#[test]
 fn parcel_charge_display_and_order_type_switches_never_double_charge() {
     let scratch = Scratch::new("parcel_display");
     let app = a_shop_with_a_menu(&scratch);
@@ -162,8 +209,8 @@ fn parcel_charge_display_and_order_type_switches_never_double_charge() {
     app.with_cart_mut(|state| {
         state.set_order_type(mb_core::OrderType::SelfService); Ok(())
     }).expect("self service");
-    let view = app.with_cart(|state| crate::billing::cart_view(state, &config)).expect("flat fee retained");
-    assert_eq!(view.bill.charges[0].amount.paise, 10_000);
+    let view = app.with_cart(|state| crate::billing::cart_view(state, &config)).expect("self service");
+    assert!(view.bill.charges.is_empty(), "self service must not add packing");
     app.with_cart_mut(|state| {
         state.set_order_type(mb_core::OrderType::Parcel);
         state.cart.set_qty(0, mb_core::Qty::parse("0.5").expect("half")).expect("quantity");

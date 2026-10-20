@@ -1,6 +1,7 @@
 //! A shop must be able to go back.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -535,6 +536,64 @@ fn incoming(dir: &Path, manifest: &Manifest) -> PathBuf {
         .join(format!("MagicBill-{}.exe", manifest.version))
 }
 
+/// A second request must not touch downloads while an installer is being prepared or launched.
+#[derive(Debug, Default)]
+pub(crate) struct InstallGate(AtomicBool);
+
+impl InstallGate {
+    fn begin(&self) -> crate::words::UiResult<InstallAttempt<'_>> {
+        self.0
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| {
+                crate::words::UiError::new(
+                    "update.busy",
+                    "An update is already in progress. Please wait for Magic Bill to restart.",
+                )
+                .quietly()
+            })?;
+        Ok(InstallAttempt {
+            gate: self,
+            handed_off: false,
+        })
+    }
+}
+
+struct InstallAttempt<'a> {
+    gate: &'a InstallGate,
+    handed_off: bool,
+}
+
+impl Drop for InstallAttempt<'_> {
+    fn drop(&mut self) {
+        if !self.handed_off {
+            self.gate.0.store(false, Ordering::Release);
+        }
+    }
+}
+
+/// Only the running version is a rollback candidate. A failed attempt may have recorded the
+/// pending installer as Current already; never move or archive that file on a retry.
+fn keep_previous(dir: &Path, running: Version, pending: &Path) {
+    let Some(current) = Current::load(dir) else {
+        return;
+    };
+    if current.version != running || current.installer == pending {
+        return;
+    }
+    let kept = Previous::folder(dir).join(format!("MagicBill-{}.exe", current.version));
+    if let Some(parent) = kept.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // Copy so even an installer already handed to Windows retains its source path.
+    if std::fs::copy(&current.installer, &kept).is_ok() {
+        let _ = Previous {
+            version: current.version,
+            installer: kept,
+        }
+        .save(dir);
+    }
+}
+
 /// Download, check, keep the way back, hand the installer to Windows. The counter closes so
 /// the installer can replace it; the shop's data is not touched.
 pub fn install_on(
@@ -543,6 +602,7 @@ pub fn install_on(
 ) -> crate::words::UiResult<String> {
     use crate::words::UiError;
     crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
+    let mut attempt = app.update_install.begin()?;
     let dir = crate::config::AppConfig::directory();
     let Some(manifest) = manifest_for(app) else {
         return Err(UiError::new(
@@ -604,21 +664,7 @@ pub fn install_on(
     }
 
     // Keep the way back: the installer that put THIS version here becomes the previous one.
-    if let Some(current) = Current::load(&dir) {
-        let kept = Previous::folder(&dir).join(format!("MagicBill-{}.exe", current.version));
-        if let Some(parent) = kept.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if std::fs::rename(&current.installer, &kept).is_ok()
-            || std::fs::copy(&current.installer, &kept).is_ok()
-        {
-            let _ = Previous {
-                version: current.version,
-                installer: kept,
-            }
-            .save(&dir);
-        }
-    }
+    keep_previous(&dir, Version::running(), &to);
     let _ = Current {
         version: manifest.version,
         installer: to.clone(),
@@ -635,6 +681,7 @@ pub fn install_on(
     app.set_updates(state);
     tell("installing", 1, 1);
     run_installer(&to, handle)?;
+    attempt.handed_off = true;
     Ok(format!(
         "Version {} is installing. Magic Bill will close and open again on the new version — your \
          shop's data is not touched.",
@@ -652,6 +699,14 @@ fn run_installer(
     installer: &Path,
     handle: Option<&tauri::AppHandle>,
 ) -> crate::words::UiResult<()> {
+    if !installer.is_file() {
+        return Err(crate::words::UiError::new(
+            "update.missing",
+            "The downloaded installer is no longer available. Magic Bill will stay open. \
+             Check for updates and download it again.",
+        )
+        .with_detail(installer.display().to_string()));
+    }
     let exe =
         std::env::current_exe().map_err(|e| crate::words::from_io("Finding the program", &e))?;
     cmd_line(&relaunch_line(installer, &exe))
@@ -742,6 +797,7 @@ pub fn go_back_on(
     handle: Option<&tauri::AppHandle>,
 ) -> crate::words::UiResult<String> {
     crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
+    let mut attempt = app.update_install.begin()?;
     let dir = crate::config::AppConfig::directory();
     let Some(previous) = Previous::load(&dir) else {
         return Err(crate::words::UiError::new(
@@ -755,6 +811,7 @@ pub fn go_back_on(
         previous.installer.display()
     );
     run_installer(&previous.installer, handle)?;
+    attempt.handed_off = true;
     Ok(going_back_says(Some(&previous)))
 }
 
@@ -792,6 +849,83 @@ pub fn install_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_install_failure_allows_retry_but_handoff_stays_locked_until_exit() {
+        let gate = InstallGate::default();
+        let attempt = gate.begin().expect("first attempt");
+        assert!(matches!(gate.begin(), Err(error) if error.code == "update.busy"));
+        drop(attempt);
+        let mut retry = gate.begin().expect("retry after failure");
+        retry.handed_off = true;
+        drop(retry);
+        assert!(matches!(gate.begin(), Err(error) if error.code == "update.busy"));
+    }
+
+    #[test]
+    fn retrying_a_pending_update_keeps_its_installer_and_the_real_rollback() {
+        let scratch = crate::signin_tests::Scratch::new("update_retry");
+        let dir = scratch.dir();
+        let previous_file = dir.join("old.exe");
+        std::fs::write(&previous_file, b"older installer").expect("old installer");
+        let previous = Previous {
+            version: Version::new(1, 7, 9),
+            installer: previous_file,
+        };
+        previous.save(dir).expect("rollback record");
+        let pending = dir.join("MagicBill-1.8.3.exe");
+        std::fs::write(&pending, b"verified download").expect("download");
+        Current {
+            version: Version::new(1, 8, 3),
+            installer: pending.clone(),
+        }
+        .save(dir)
+        .expect("record left by first attempt");
+
+        keep_previous(dir, Version::new(1, 8, 0), &pending);
+
+        assert_eq!(
+            std::fs::read(&pending).expect("installer still at launch path"),
+            b"verified download"
+        );
+        assert_eq!(Previous::load(dir), Some(previous));
+        assert!(!Previous::folder(dir).join("MagicBill-1.8.3.exe").exists());
+    }
+
+    #[test]
+    fn a_running_version_is_copied_for_rollback_without_moving_either_installer() {
+        let scratch = crate::signin_tests::Scratch::new("update_backup");
+        let dir = scratch.dir();
+        let current = dir.join("MagicBill-1.8.0.exe");
+        let pending = dir.join("MagicBill-1.8.3.exe");
+        std::fs::write(&current, b"installed version").expect("current installer");
+        std::fs::write(&pending, b"new version").expect("pending installer");
+        Current {
+            version: Version::new(1, 8, 0),
+            installer: current.clone(),
+        }
+        .save(dir)
+        .expect("current record");
+
+        keep_previous(dir, Version::new(1, 8, 0), &pending);
+
+        let previous = Previous::load(dir).expect("rollback saved");
+        assert_eq!(previous.version, Version::new(1, 8, 0));
+        assert_eq!(
+            std::fs::read(previous.installer).expect("backup"),
+            b"installed version"
+        );
+        assert!(current.is_file());
+        assert_eq!(std::fs::read(&pending).expect("new installer"), b"new version");
+    }
+
+    #[test]
+    fn a_missing_installer_is_reported_before_starting_windows_handoff() {
+        let scratch = crate::signin_tests::Scratch::new("update_missing");
+        let error = run_installer(&scratch.dir().join("missing.exe"), None)
+            .expect_err("do not hand a missing file to Windows");
+        assert_eq!(error.code, "update.missing");
+    }
 
     #[test]
     fn versions_compare_as_numbers_and_never_as_names() {
@@ -1057,7 +1191,7 @@ mod github_tests {
 
         // And the way it used to be handed over still mangles it, so this test keeps meaning
         // something if somebody swaps `raw_arg` back for `arg`.
-        let mangled = std::process::Command::new("cmd.exe")
+        let mangled = crate::share::hidden_cmd()
             .args(["/C", &format!("echo {shape}")])
             .output()
             .expect("cmd ran");

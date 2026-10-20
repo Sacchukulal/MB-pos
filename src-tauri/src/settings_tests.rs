@@ -23,6 +23,30 @@ fn a_shop(scratch: &Scratch, name: &str) -> App {
 }
 
 #[test]
+fn parcel_method_amount_and_delivery_survive_reload_and_off_keeps_amounts() {
+    use crate::settings::ipc::{SettingEdit, save_on};
+    use crate::settings::ParcelChargeMethod;
+    let scratch = Scratch::new("parcel_method_settings");
+    let app = a_shop(&scratch, "parcel_method_settings");
+    assert_eq!(app.shop_config().billing.parcel_charge_method, ParcelChargeMethod::Off);
+    for method in ["per_bill", "per_item", "off"] {
+        save_on(&app, vec![
+            SettingEdit { key: "billing.parcel_charge_method".into(), value: method.into() },
+            SettingEdit { key: "billing.packing_charge".into(), value: "15.00".into() },
+            SettingEdit { key: "billing.parcel_charge_delivery".into(), value: "1".into() },
+        ]).expect("save method");
+        app.reload_shop_config();
+        let billing = app.shop_config().billing;
+        assert_eq!(billing.parcel_charge_method.code(), method);
+        assert_eq!(billing.packing_charge.paise(), 1500);
+        assert!(billing.parcel_charge_delivery);
+    }
+    assert!(save_on(&app, vec![
+        SettingEdit { key: "billing.parcel_charge_method".into(), value: "both".into() },
+    ]).is_err());
+}
+
+#[test]
 fn parcel_display_ticks_are_independent_and_survive_reloading_settings() {
     use crate::settings::ipc::{SettingEdit, save_on};
     let scratch = Scratch::new("parcel_ticks");

@@ -534,6 +534,7 @@ impl<'a> WireRepo<'a> {
                 json!({
                     "bill_discount": bill.bill_discount,
                     "charges": charges,
+                    "parcel_charge_per_item": bill.parcel_charge_per_item,
                     "place_of_supply": bill.place_of_supply,
                     "registration": bill.registration,
                     "state_tax": bill.state_tax,
@@ -876,6 +877,7 @@ impl<'a> WireRepo<'a> {
                 cart: &core.cart,
                 bill_discount: input.bill_discount,
                 charges: &input.charges,
+                parcel_charge_per_item: input.parcel_charge_per_item,
                 place_of_supply: input.place_of_supply,
                 registration: input.registration,
                 state_tax: input.state_tax,
@@ -1032,6 +1034,8 @@ struct Restore {
 
 #[derive(Debug, Deserialize)]
 struct RestoreInput {
+    #[serde(default)]
+    parcel_charge_per_item: Option<bool>,
     #[serde(default)]
     bill_discount: Option<DiscountEntry>,
     charges: Vec<Charge>,

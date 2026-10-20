@@ -219,6 +219,8 @@ pub struct Billing {
     pub service_charge_tax: String,
     pub packing_charge: Money,
     pub packing_charge_tax: String,
+    pub parcel_charge_method: ParcelChargeMethod,
+    pub parcel_charge_delivery: bool,
     pub parcel_charge_separate_screen: bool,
     pub delivery_charge: Money,
     pub delivery_charge_tax: String,
@@ -245,6 +247,8 @@ impl Default for Billing {
             service_charge_tax: "tax_packaged_18".to_owned(),
             packing_charge: Money::ZERO,
             packing_charge_tax: "tax_food_5".to_owned(),
+            parcel_charge_method: ParcelChargeMethod::Off,
+            parcel_charge_delivery: false,
             parcel_charge_separate_screen: true,
             delivery_charge: Money::ZERO,
             delivery_charge_tax: "tax_food_5".to_owned(),
@@ -252,7 +256,39 @@ impl Default for Billing {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParcelChargeMethod {
+    Off,
+    PerItem,
+    PerBill,
+}
+
+impl ParcelChargeMethod {
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::PerItem => "per_item",
+            Self::PerBill => "per_bill",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "off" => Some(Self::Off),
+            "per_item" => Some(Self::PerItem),
+            "per_bill" => Some(Self::PerBill),
+            _ => None,
+        }
+    }
+}
+
 impl Billing {
+    pub fn parcel_applies_to(&self, order_type: mb_core::OrderType) -> bool {
+        order_type == mb_core::OrderType::Parcel
+            || (order_type == mb_core::OrderType::Delivery && self.parcel_charge_delivery)
+    }
+
     /// The charges this order type attracts, ready for `BillInput`.
     /// The charges this order type carries, each taxed by its slab in the book. A charge whose
     /// slab is gone is an error, not a zero — the bill must not quietly change.
@@ -279,22 +315,8 @@ impl Billing {
                     );
                 }
             }
-            // Parcel uses the frozen per-item amounts in billing::bill_for.
-            OrderType::Parcel => {}
-            OrderType::SelfService => {
-                if !self.packing_charge.is_zero() {
-                    let tax = spec(&self.packing_charge_tax)?;
-                    out.push(
-                        Charge::flat(
-                            ChargeKind::Packing,
-                            "Packing",
-                            self.packing_charge,
-                            tax.rate,
-                        )
-                        .with_tax(tax),
-                    );
-                }
-            }
+            // Both parcel methods are computed in billing::bill_for, where the cart is known.
+            OrderType::Parcel | OrderType::SelfService => {}
             OrderType::Delivery => {
                 if !self.delivery_charge.is_zero() {
                     let tax = spec(&self.delivery_charge_tax)?;

@@ -235,6 +235,8 @@ fn backup_before_historical_returns_still_verifies_and_migrates_on_restore() {
             ALTER TABLE bill_reverts DROP COLUMN discarded_by;
             ALTER TABLE items DROP COLUMN parcel_charge;
             ALTER TABLE order_lines DROP COLUMN parcel_charge;
+            ALTER TABLE bills DROP COLUMN parcel_charge_basis;
+            DELETE FROM settings WHERE key = 'billing.parcel_charge_method';
             DELETE FROM schema_version WHERE version >= 22;")?;
         Ok(())
     }).expect("legacy fixture schema");

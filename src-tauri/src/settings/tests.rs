@@ -264,7 +264,7 @@ fn charges_follow_the_order_type() {
         .charges_for(OrderType::Parcel, &book)
         .expect("charges");
     assert!(parcel.is_empty(), "parcel packing comes from item snapshots, never the flat fee");
-    assert_eq!(billing.charges_for(OrderType::SelfService, &book).expect("charges")[0].kind, ChargeKind::Packing);
+    assert!(billing.charges_for(OrderType::SelfService, &book).expect("charges").is_empty());
     // A parcel is not a table: no service charge on food nobody served.
     assert!(!parcel.iter().any(|c| c.kind == ChargeKind::Service));
 

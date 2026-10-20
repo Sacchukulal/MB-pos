@@ -7,6 +7,7 @@ import { useId, type ReactNode } from 'react';
 
 import {
   Card,
+  Button,
   cx,
   Checkbox,
   Choice,
@@ -35,7 +36,7 @@ const TOPIC_EXTRAS: Record<string, () => ReactNode> = {
 };
 
 /** Choices of a handful, drawn as buttons rather than a list. */
-const AS_BUTTONS = new Set(['receipt.design', 'receipt.font', 'kitchen.format']);
+const AS_BUTTONS = new Set(['receipt.design', 'receipt.font', 'kitchen.format', 'billing.parcel_charge_method']);
 
 /** The edits a person has made and not yet saved, by key. */
 export type Edits = Record<string, string>;
@@ -58,19 +59,47 @@ export function Section({
   section,
   edits,
   onChange,
+  onOpenMenu,
 }: {
   section: GroupView;
   edits: Edits;
   onChange: (key: string, value: string) => void;
+  onOpenMenu?: () => void;
 }) {
+  const parcelMethod = edits['billing.parcel_charge_method']
+    ?? section.settings.find((setting) => setting.key === 'billing.parcel_charge_method')?.value;
+  const visible = section.settings.filter((setting) => {
+    if (parcelMethod === undefined) return true;
+    if (setting.key === 'billing.packing_charge') return parcelMethod === 'per_bill';
+    if (setting.key === 'billing.parcel_charge_separate_screen'
+      || setting.key === 'receipt.parcel_charge_separate') return parcelMethod === 'per_item';
+    if (setting.key === 'billing.packing_charge_tax'
+      || setting.key === 'billing.parcel_charge_delivery') return parcelMethod !== 'off';
+    return true;
+  });
   return (
     <>
-      {topicsOf(section).map(({ topic, settings }) => (
+      {topicsOf({ ...section, settings: visible }).map(({ topic, settings }) => (
         <Card key={topic}>
           {/* A setting with no heading of its own falls back to its section's name, which the
               panel already wears. */}
           {topic === section.label ? null : <SectionHeader title={topic} />}
           {TOPIC_EXTRAS[settings[0]!.key]?.()}
+          {settings.some((setting) => setting.key === 'billing.parcel_charge_method') && (
+            <div className="mb-settings__parcel-help">
+              <p>
+                {parcelMethod === 'per_item'
+                  ? 'Each item’s parcel charge × quantity. Item charges are added together once.'
+                  : parcelMethod === 'per_bill'
+                    ? 'One fixed parcel charge for the whole bill. Item parcel charges are ignored.'
+                    : 'No parcel charges are added. Saved item and bill amounts are kept for later.'}
+              </p>
+              <p>Applies to Parcel orders. Self service and Dine in do not add parcel charges.</p>
+              {parcelMethod === 'per_item' && onOpenMenu && (
+                <Button variant="quiet" onClick={onOpenMenu}>Edit item parcel charges in Menu</Button>
+              )}
+            </div>
+          )}
           {/*
             A run of tick boxes packs tighter than a run of boxes to type in, and a run of
             shared lines stacks as a table.

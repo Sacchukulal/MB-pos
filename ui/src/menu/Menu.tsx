@@ -750,7 +750,7 @@ function EditItem({
         <p className="mb-menu__tax">GST {row.rate}</p>
         <MoneyInput
           label="Parcel charge per unit"
-          hint="Added automatically for each unit on Parcel orders. Zero means no parcel charge. Tax follows the packing-charge setting."
+          hint="Used only when Settings > Billing > Parcel / packing charges is set to Per item. Multiplied by quantity. Zero means no charge for this item."
           value={parcelCharge}
           onChange={setParcelCharge}
         />

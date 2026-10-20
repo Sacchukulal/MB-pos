@@ -650,9 +650,9 @@ impl<'a> OrderRepo<'a> {
                                 place_of_supply, rounding_mode, computed_at,
                                 total_vat, untaxed_value, registration, state_tax,
                                 bill_discount_kind, bill_discount_value, bill_discount_reason,
-                                bill_discount_by)
+                                bill_discount_by, parcel_charge_basis)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
             rusqlite::params![
                 order_id,
                 encode::money_to_sql(bill.subtotal),
@@ -680,6 +680,11 @@ impl<'a> OrderRepo<'a> {
                 discount_value,
                 given.and_then(|d| d.reason.clone()),
                 given.and_then(|d| d.authorised_by.as_ref().map(|s| s.as_str().to_owned())),
+                match bill.parcel_charge_per_item {
+                    Some(true) => "per_item",
+                    Some(false) => "per_bill",
+                    None => "legacy",
+                },
             ],
         )?;
 
@@ -1117,7 +1122,8 @@ impl<'a> OrderRepo<'a> {
                     total_sgst, total_igst, non_gst_value, exempt_value, round_off, grand_total,
                     place_of_supply, rounding_mode,
                     total_vat, untaxed_value, registration, state_tax,
-                    bill_discount_kind, bill_discount_value, bill_discount_reason, bill_discount_by
+                    bill_discount_kind, bill_discount_value, bill_discount_reason, bill_discount_by,
+                    parcel_charge_basis
                FROM bills WHERE order_id = ?1",
         )?;
         let mut rows = stmt.query([order_id])?;
@@ -1150,6 +1156,12 @@ impl<'a> OrderRepo<'a> {
             lines: self.read_bill_lines(order_id)?,
             bill_discount,
             charges: self.read_bill_charges(order_id)?,
+            parcel_charge_per_item: match row.get::<_, String>(24)?.as_str() {
+                "per_item" => Some(true),
+                "per_bill" => Some(false),
+                "legacy" => None,
+                _ => return Err(DbError::invariant("unrecognised parcel charge basis")),
+            },
             summary: self.read_summary(
                 order_id,
                 encode::money_from_sql(row.get(10)?),

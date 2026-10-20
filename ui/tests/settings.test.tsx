@@ -16,7 +16,7 @@ const { ToastProvider } = await import('../src/kit');
 import type { SettingsView } from '../src/ipc/generated/SettingsView';
 import type { SettingView } from '../src/ipc/generated/SettingView';
 import type { PreviewLine } from '../src/ipc/generated/PreviewLine';
-import { Field } from '../src/settings/Form';
+import { Field, Section } from '../src/settings/Form';
 import { MayProvider } from '../src/shell/permissions';
 
 vi.mock('../src/menu/Menu', () => ({ Menu: () => <h2>Menu management</h2> }));
@@ -65,6 +65,45 @@ function setting(
     ...extra,
   };
 }
+
+it('shows only the controls for the chosen parcel method and keeps saved amounts', () => {
+  const section = {
+    code: 'billing', label: 'Billing', canEdit: true,
+    settings: [
+      setting('billing.parcel_charge_method', 'Charge method', 'choice', 'off', {
+        choices: [{ value: 'off', label: 'Off' }, { value: 'per_item', label: 'Per item' }, { value: 'per_bill', label: 'Per bill' }],
+      }),
+      setting('billing.packing_charge', 'Parcel charge per bill', 'amount', '15.00'),
+      setting('billing.packing_charge_tax', 'Tax on parcel charges', 'choice', 'food', {
+        choices: [{ value: 'food', label: 'GST 5%' }],
+      }),
+      setting('billing.parcel_charge_delivery', 'Also apply to Delivery orders', 'tick', '0'),
+      setting('billing.parcel_charge_separate_screen', 'Show separately on screen', 'tick', '1'),
+      setting('receipt.parcel_charge_separate', 'Show separately on receipt', 'tick', '1'),
+    ],
+  };
+  const onChange = vi.fn();
+  const onOpenMenu = vi.fn();
+  const draw = (method: string) => <Section section={section}
+    edits={{ 'billing.parcel_charge_method': method }} onChange={onChange} onOpenMenu={onOpenMenu} />;
+  const { rerender } = render(draw('off'));
+  expect(screen.queryByLabelText('Parcel charge per bill')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Tax on parcel charges')).not.toBeInTheDocument();
+  rerender(draw('per_bill'));
+  expect(screen.getByLabelText('Parcel charge per bill')).toHaveValue('15.00');
+  expect(screen.getByLabelText('Tax on parcel charges')).toBeInTheDocument();
+  expect(screen.queryByLabelText('Show separately on screen')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit item parcel charges in Menu' })).not.toBeInTheDocument();
+  rerender(draw('per_item'));
+  expect(screen.queryByLabelText('Parcel charge per bill')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Show separately on screen')).toBeChecked();
+  expect(screen.getByLabelText('Also apply to Delivery orders')).not.toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit item parcel charges in Menu' }));
+  expect(onOpenMenu).toHaveBeenCalledOnce();
+  rerender(draw('per_bill'));
+  expect(screen.getByLabelText('Parcel charge per bill')).toHaveValue('15.00');
+  expect(onChange).not.toHaveBeenCalled();
+});
 
 it('keeps Print KOT and Save order as one exclusive persisted setting', () => {
   const changed = vi.fn();

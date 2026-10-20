@@ -888,6 +888,7 @@ fn the_phone_and_the_counter_agree_on_the_total() {
     let app = a_shop(&scratch, "total");
     let mut config = app.shop_config();
     config.billing.packing_charge = mb_core::Money::from_paise(1_000);
+    config.billing.parcel_charge_method = crate::settings::ParcelChargeMethod::PerItem;
     config.billing.packing_charge_tax = "tax_food_5".to_owned();
     app.publish_shop_config(config.clone());
     app.with_shop(|shop| shop.db.transaction(|tx| {
