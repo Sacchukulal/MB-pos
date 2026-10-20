@@ -276,9 +276,9 @@ it('waits for sign-in before offering an available update', async () => {
   await screen.findByText('Select your name');
   expect(screen.queryByRole('dialog', { name: 'Version 1.8.4 is ready' })).toBeNull();
   expect(call).not.toHaveBeenCalledWith('look_for_an_update');
-  fireEvent.click(screen.getByRole('button', { name: /Meena/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /Meena/ }));
   for (const digit of ['4', '8', '2', '9']) {
-    fireEvent.click(screen.getByRole('button', { name: digit }));
+    fireEvent.click(await screen.findByRole('button', { name: digit }));
   }
   expect(await screen.findByRole('dialog', { name: 'Version 1.8.4 is ready' })).toBeTruthy();
 });
