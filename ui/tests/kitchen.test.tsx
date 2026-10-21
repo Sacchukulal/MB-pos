@@ -1,6 +1,6 @@
 /** The kitchen display. */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const call = vi.fn();
@@ -141,7 +141,9 @@ describe('the kitchen display', () => {
   // runs in about half a second on an idle machine, and vitest runs twenty-five files at once.
   it('clears a card from the number key as well as the button', { timeout: 20_000 }, async () => {
     serve(view({ tickets: [ticket({ id: 'first' }), ticket({ id: 'second' })] }));
-    show();
+    // Cards can reach the DOM before the passive keyboard effect. Finish both mocked
+    // startup reads and their effects before sending the one keypress being tested.
+    await act(async () => { show(); });
     await screen.findAllByText('Table 5');
 
     fireEvent.keyDown(window, { key: '2' });
@@ -175,7 +177,7 @@ describe('the kitchen display', () => {
   /** And the number key on a cancelled card acknowledges rather than clears. */
   it('the number key acknowledges a cancelled card', async () => {
     serve(view({ tickets: [ticket({ isCancelled: true, tone: 'cancelled' })] }));
-    show();
+    await act(async () => { show(); });
     await screen.findByText('Table 5');
 
     fireEvent.keyDown(window, { key: '1' });
