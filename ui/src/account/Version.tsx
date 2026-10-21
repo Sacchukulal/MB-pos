@@ -24,6 +24,7 @@ export function Version() {
   const mayGoBack = may('settings.store');
   const [view, setView] = useState<UpdateState | null>(null);
   const run = useUpdateRun();
+  const { withdraw } = run;
   const [checking, setChecking] = useState(false);
   const [confirmingBack, setConfirmingBack] = useState(false);
   const toast = useToast();
@@ -35,24 +36,40 @@ export function Version() {
     [toast],
   );
 
+  const refresh = useCallback(() => {
+    call('look_for_an_update')
+      .then((fresh) => {
+        setView(fresh);
+        if (!fresh.available) withdraw();
+      })
+      .catch(complain);
+  }, [complain, withdraw]);
+
   // What is already known: no network, so the panel draws at once.
   useEffect(() => {
-    call('look_for_an_update').then(setView).catch(complain);
-  }, [complain]);
+    refresh();
+  }, [refresh]);
+
+  const failed = run.step?.kind === 'failed';
+  useEffect(() => {
+    if (failed) refresh();
+  }, [failed, refresh]);
 
   // A shelf read elsewhere — the update watcher — lands here too.
   useEffect(() => {
     let stop: (() => void) | undefined;
+    let disposed = false;
     subscribe((message: Pushed) => {
       if (message.kind !== 'version') return;
-      call('look_for_an_update').then(setView).catch(complain);
+      refresh();
     })
       .then((unlisten) => {
-        stop = unlisten;
+        if (disposed) unlisten();
+        else stop = unlisten;
       })
       .catch(() => undefined);
-    return () => stop?.();
-  }, [complain]);
+    return () => { disposed = true; stop?.(); };
+  }, [refresh]);
 
   if (!view) {
     return (
@@ -69,7 +86,10 @@ export function Version() {
       .then((fresh) => {
         setView(fresh);
         if (fresh.available) run.offer(fresh.available, fresh.notes, fresh.downloaded);
-        else toast.show('ok', `This is the newest version, ${fresh.running}.`);
+        else {
+          withdraw();
+          toast.show('ok', `This is the newest version, ${fresh.running}.`);
+        }
       })
       .catch((cause: unknown) => {
         toast.show(
@@ -83,26 +103,49 @@ export function Version() {
   /** The version waiting on the shelf, if one is. */
   const waiting = view.available;
 
+  const openOffer = () => {
+    setChecking(true);
+    call('look_for_an_update')
+      .then((fresh) => {
+        setView(fresh);
+        if (fresh.available) run.offer(fresh.available, fresh.notes, fresh.downloaded);
+        else {
+          run.withdraw();
+          toast.show('info', 'This update is no longer available. Check for updates for the latest version.');
+        }
+      })
+      .catch(complain)
+      .finally(() => setChecking(false));
+  };
+
   return (
     <Panel
       title="Version"
       actions={
-        waiting ? (
-          <Button
-            variant="primary"
-            onClick={() => run.offer(waiting, view.notes, view.downloaded)}
-          >
-            <Icon name="download" size="sm" />
-            Install {waiting}
-          </Button>
-        ) : (
+        <>
           <Button variant="secondary" disabled={checking} onClick={check}>
             {checking ? <Spinner label="Checking" /> : <Icon name="refresh" size="sm" />}
             Check for updates
           </Button>
-        )
+          {waiting ? (
+            <Button
+              variant="primary"
+              disabled={checking}
+              onClick={openOffer}
+            >
+              <Icon name="download" size="sm" />
+              Install {waiting}
+            </Button>
+          ) : null}
+        </>
       }
     >
+      {view.lastFailure ? (
+        <Notice tone="warn">
+          Update to {view.lastFailure.version} did not finish. {view.lastFailure.message}
+          {' '}This counter is running version {view.running}. Check for updates before trying again.
+        </Notice>
+      ) : null}
       {waiting ? (
         <Notice tone="accent" icon="download">
           Version {waiting} is ready to install.

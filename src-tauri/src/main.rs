@@ -165,6 +165,10 @@ use startup::Startup;
 use state::App;
 
 fn main() {
+    // The copied updater must never open the shop, logger or single-instance window.
+    if updates::run_helper_if_requested() {
+        return;
+    }
     // Step 1, before anything that can fail.
     let config_dir = AppConfig::directory();
     logging::start(&config_dir.join("logs"));
@@ -200,6 +204,7 @@ fn main() {
 
     // Steps 3 to 6. The order is load-bearing and `startup.rs` explains why: a restore happens
     // BEFORE anything opens the database.
+    let mut healthy_start = false;
     match startup::run(&config_dir) {
         Startup::Ready { db, path, restored } => {
             if restored {
@@ -207,13 +212,13 @@ fn main() {
             }
             app_state.open_shop(*db, path);
             // The counter is up.
-            updates::Starts::healthy(&config_dir);
+            healthy_start = true;
         }
         Startup::FirstRun => {
             log_info!("first run — the window opens to set-up");
             // A counter with no shop yet is still a counter that started, so this start counts
             // as healthy.
-            updates::Starts::healthy(&config_dir);
+            healthy_start = true;
         }
         Startup::FoundCandidates { candidates, .. } => {
             log_info!(
@@ -290,6 +295,10 @@ fn main() {
             if let Some(main) = app.get_webview_window("main") {
                 window::restore_and_show(&main, &window_state);
                 log_info!("the window is up");
+                if healthy_start && main.is_visible().unwrap_or(false) {
+                    updates::Starts::healthy(&config_dir);
+                    updates::acknowledge_start(&config_dir, running);
+                }
             }
             Ok(())
         })

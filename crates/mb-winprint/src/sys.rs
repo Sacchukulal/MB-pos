@@ -489,6 +489,8 @@ pub const SW_HIDE: i32 = 0;
 pub const ERROR_CANCELLED: Dword = 1223;
 pub const WAIT_OBJECT_0: Dword = 0;
 pub const WAIT_TIMEOUT: Dword = 258;
+pub const PROCESS_SYNCHRONIZE: Dword = 0x0010_0000;
+pub const ERROR_INVALID_PARAMETER: Dword = 87;
 
 #[link(name = "ole32")]
 unsafe extern "system" {
@@ -518,6 +520,7 @@ unsafe extern "system" {
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
+    pub fn OpenProcess(access: Dword, inherit: Bool, process_id: Dword) -> Handle;
     pub fn WaitForSingleObject(object: Handle, milliseconds: Dword) -> Dword;
     pub fn GetExitCodeProcess(process: Handle, code: *mut Dword) -> Bool;
 }

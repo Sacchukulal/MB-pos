@@ -295,7 +295,7 @@ export function Shell() {
   /** Notices from Magic Bill, and how many are unread — the bell's other half. */
   const [notices, setNotices] = useState<NoticesView>({ unseen: 0, notices: [], alertsSeen: [] });
   /** The version waiting to be installed, if the last shelf read found one. */
-  const [update, setUpdate] = useState<string | null>(null);
+  const [update, setUpdate] = useState<string | null | undefined>(undefined);
   const { theme, toggle } = useTheme();
   const toast = useToast();
 
@@ -557,7 +557,7 @@ export function Shell() {
   /** The counter's own alerts — conditions that hold until they are fixed. */
   const own: Omit<Alert, 'seen'>[] = [];
   // The bell opens Updates, which every signed-in staff member can use.
-  const waiting = update ?? status?.update ?? null;
+  const waiting = update === undefined ? status?.update ?? null : update;
   if (waiting) {
     own.push({
       id: 'update',
@@ -758,9 +758,9 @@ export function Shell() {
       {!locked ? <SettleDesk /> : null}
       {/*
         A new version, offered to every signed-in staff member.
-        Later leaves it to the bell and the Updates page.
+        The Updates page owns its own offer, so a manual check cannot open two dialogs.
       */}
-      {!locked ? <UpdateOffer version={waiting} /> : null}
+      {!locked && active?.id !== 'updates' ? <UpdateOffer version={waiting} /> : null}
       {!locked && dayState && dayState.pending.length > 0 && !gateWaived ? (
         <DayGate
           state={dayState}

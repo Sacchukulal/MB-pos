@@ -23,7 +23,7 @@ the same single point of failure as "the laptop that has the key".
 | key | what it signs | where it must be |
 |---|---|---|
 | **Release signing key** (Ed25519) | the update manifest the counter checks | 1Password → *Magic Bill / Release signing key*, **and** the CI secret `MB_RELEASE_KEY` |
-| **Windows code-signing certificate** | the `.exe`, so SmartScreen does not warn | 1Password → *Magic Bill / Windows code signing*, **and** CI secret `MB_WINDOWS_CERT` (+ `MB_WINDOWS_CERT_PASSWORD`) |
+| **Windows code-signing certificate** | the `.exe`, to identify its publisher and build Windows reputation; warnings can still occur | 1Password → *Magic Bill / Windows code signing*, **and** CI secret `MB_WINDOWS_CERT` (+ `MB_WINDOWS_CERT_PASSWORD`) |
 | **Android keystore** | the APK/AAB | 1Password → *Magic Bill / Android keystore*, **and** CI secrets `MB_ANDROID_KEYSTORE` (base64) + `MB_ANDROID_KEYSTORE_PASSWORD` + `MB_ANDROID_KEY_ALIAS` |
 
 ### ⚠ WHAT TO DO IF A KEY IS LOST
@@ -136,6 +136,22 @@ hands the new installer to Windows **silently (`/S`) and starts Magic Bill again
 done** — the counter comes back on the new version by itself. Health's Version row says what
 is waiting until then.
 
+The updater keeps a pending attempt separately from the installed version. Its hidden helper
+waits for the original process to exit, checks the installer fingerprint again, captures the
+installer result and restarts the same installation. Only a healthy start of the expected
+version confirms an upgrade. A failed attempt remains visible in Updates for manual retry;
+it must not repeatedly open the automatic offer or replace the real rollback installer.
+
+**Recovery from clients through 1.8.3:** their updater can move a pending installer out of
+`updates/incoming` on retry. A fix inside a newer download cannot repair that running updater.
+For an affected counter, finish and save work, close Magic Bill, then run the verified full
+installer directly into the existing installation. Do not uninstall first or remove shop
+data. Test this recovery from both 1.8.2 and 1.8.3 before a broad rollout.
+
+An installer built locally for testing is not a public release. Do not push its local tag or
+upload its artifacts until the laptop and testing-team checks pass. Check the installer hash,
+version and Authenticode status; a signed update manifest does not sign the Windows executable.
+
 ## 3. Staging a release
 
 `rollout.percent` starts at **5**. The counter decides with a stable hash of its
@@ -163,8 +179,9 @@ reaching anybody who has not taken it yet, within one check.
 
 For shops that already took it, the counter has its own way back and it does not
 need us: **Settings → Go back to the previous version** runs the installer it
-kept (D97). Two failed starts on a new version roll it back automatically
-(D98) — so a release that will not start at all recovers without a phone call.
+kept (D97). Startup failures are counted and logged, but this is not an automatic installer
+rollback. If the app cannot open, support must use a verified full installer and check database
+compatibility before restoring an earlier version.
 
 **What rollback does NOT undo is a database migration.** If the bad release
 migrated the shop's data, going back leaves a database a newer schema wrote,

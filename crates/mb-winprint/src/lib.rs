@@ -10,6 +10,10 @@ mod drives;
 #[cfg(windows)]
 mod firewall;
 #[cfg(windows)]
+mod process;
+#[cfg(windows)]
+pub use process::{ProcessWait, open_process};
+#[cfg(windows)]
 pub mod serial;
 #[cfg(windows)]
 mod spooler;

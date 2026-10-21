@@ -1,9 +1,10 @@
 /** The shell, and the one thing it must not do. */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type { PrintJobView } from '../src/ipc/generated/PrintJobView';
+import type { Pushed } from '../src/ipc/generated/Pushed';
 
 // The title bar draws its own minimise/maximise/close, so it asks Tauri for the window.
 vi.mock('@tauri-apps/api/window', () => ({
@@ -15,15 +16,15 @@ vi.mock('@tauri-apps/api/window', () => ({
 }));
 
 const call = vi.fn();
-const listeners: Record<string, (payload: unknown) => void> = {};
+const listeners = new Set<(payload: Pushed) => void>();
 vi.mock('../src/ipc/call', () => ({
   call: (...args: unknown[]) => call(...args),
   inApp: () => true,
   isUiError: () => false,
   isLicenceRefusal: () => false,
-  subscribe: (name: string, fn: (payload: unknown) => void) => {
-    listeners[name] = fn;
-    return Promise.resolve(() => undefined);
+  subscribe: (fn: (payload: Pushed) => void) => {
+    listeners.add(fn);
+    return Promise.resolve(() => { listeners.delete(fn); });
   },
 }));
 
@@ -91,6 +92,7 @@ function answer(command: string): Promise<unknown> {
         daysOnThisVersion: 1,
         running: '1.8.3',
         isDevBuild: false,
+        lastFailure: null,
       });
     case 'install_update':
       return Promise.resolve('Magic Bill is closing.');
@@ -133,6 +135,8 @@ function answer(command: string): Promise<unknown> {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
+  listeners.clear();
   signedInAs = null;
   availableUpdate = null;
   held = ['bill.create', 'menu.manage', 'staff.manage', 'reports.view'];
@@ -263,7 +267,7 @@ it('offers an update to a cashier and keeps it reachable through the bell after 
   fireEvent.click(await screen.findByRole('button', { name: 'Open Updates' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Install 1.8.4' }));
   expect(screen.queryByRole('button', { name: 'Go back' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: /Download and install/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /Download and install/ }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('install_update'));
   expect(call).not.toHaveBeenCalledWith('account');
   expect(call).not.toHaveBeenCalledWith('report_list');
@@ -281,6 +285,58 @@ it('waits for sign-in before offering an available update', async () => {
     fireEvent.click(await screen.findByRole('button', { name: digit }));
   }
   expect(await screen.findByRole('dialog', { name: 'Version 1.8.4 is ready' })).toBeTruthy();
+});
+
+it('clears a withdrawn update instead of falling back to the startup version', async () => {
+  signedInAs = 'Meena';
+  held = ['bill.create'];
+  availableUpdate = '1.8.4';
+  show();
+  await screen.findByRole('dialog', { name: 'Version 1.8.4 is ready' });
+  availableUpdate = null;
+  act(() => {
+    for (const listener of listeners) listener({ kind: 'version', available: null });
+  });
+  expect(screen.queryByRole('dialog', { name: 'Version 1.8.4 is ready' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /Alerts/ }));
+  expect(screen.queryByRole('button', { name: 'Open Updates' })).toBeNull();
+});
+
+it('does not repeat a postponed update after locking and signing in again', async () => {
+  signedInAs = 'Meena';
+  held = ['bill.create'];
+  availableUpdate = '1.8.4';
+  show();
+  fireEvent.click(await screen.findByRole('button', { name: 'Later' }));
+  signedInAs = null;
+  act(() => {
+    for (const listener of listeners) listener({ kind: 'session', who: null, role: null, stand_in: false });
+  });
+  await screen.findByText('Select your name');
+  fireEvent.click(await screen.findByRole('button', { name: /Meena/ }));
+  for (const digit of ['4', '8', '2', '9']) {
+    fireEvent.click(await screen.findByRole('button', { name: digit }));
+  }
+  await screen.findByRole('button', { name: /Signed in as Meena/ });
+  await act(async () => undefined);
+  expect(screen.queryByRole('dialog', { name: 'Version 1.8.4 is ready' })).toBeNull();
+});
+
+it('shows one offer when a manual check also announces the version to the shell', async () => {
+  signedInAs = 'Meena';
+  held = [];
+  call.mockImplementation((command: string) => {
+    if (command === 'check_for_update') {
+      availableUpdate = '1.8.4';
+      for (const listener of listeners) listener({ kind: 'version', available: availableUpdate });
+      return answer('look_for_an_update');
+    }
+    return answer(command);
+  });
+  show();
+  fireEvent.click(await screen.findByRole('button', { name: 'Check for updates' }));
+  await screen.findByRole('dialog', { name: 'Version 1.8.4 is ready' });
+  expect(screen.getAllByRole('dialog')).toHaveLength(1);
 });
 
 /**

@@ -792,6 +792,7 @@ fn hex_of(bytes: &[u8]) -> String {
 }
 
 /// SHA-256, lowercase hex — what a manifest's `sha256` is compared with.
+#[cfg(test)]
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex_of(ring::digest::digest(&ring::digest::SHA256, bytes).as_ref())

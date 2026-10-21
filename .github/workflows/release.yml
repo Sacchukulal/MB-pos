@@ -59,7 +59,7 @@ on:
       percent:
         description: 'rollout.percent for it (0 pulls the release back)'
         required: false
-        default: '100'
+        default: '5'
 
 permissions:
   contents: write
@@ -285,7 +285,7 @@ jobs:
             notes   = $notes
             url     = "https://github.com/${{ github.repository }}/releases/download/v$version/Magic-Bill-$version-setup.exe"
             sha256  = "${{ steps.installer.outputs.sha256 }}"
-            rollout = [ordered]@{ percent = 100; shops = @() }
+            rollout = [ordered]@{ percent = 5; shops = @() }
           }
           $json = $manifest | ConvertTo-Json -Compress -Depth 4
           [IO.File]::WriteAllText("dist/manifest.json", $json)
@@ -363,6 +363,10 @@ jobs:
           notes=$(git tag -l --format='%(contents:subject)' "$TAG" | sed 's/[[:space:]]*$//')
           [ -n "$notes" ] || notes="Version $version."
           case "$PERCENT" in ''|*[!0-9]*) echo "percent must be a whole number: $PERCENT" >&2; exit 1;; esac
+          if [ "$PERCENT" -gt 100 ]; then
+            echo "percent must be between 0 and 100" >&2
+            exit 1
+          fi
           jq -cn --arg v "$version" --arg n "$notes" --arg s "$sha" --argjson p "$PERCENT" \
             --arg u "https://github.com/${{ github.repository }}/releases/download/$TAG/Magic-Bill-$version-setup.exe" \
             '{version: $v, notes: $n, url: $u, sha256: $s, rollout: {percent: $p, shops: []}}' \

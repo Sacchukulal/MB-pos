@@ -8,6 +8,36 @@ use ts_rs::TS;
 
 use crate::health::HealthRow;
 
+mod transaction;
+
+/// A Windows handoff failure that must survive closing and reopening the counter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../ui/src/ipc/generated/")]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFailure {
+    pub version: String,
+    pub message: String,
+}
+
+pub fn run_helper_if_requested() -> bool {
+    transaction::run_helper_if_requested()
+}
+
+pub fn acknowledge_start(dir: &Path, running: Version) {
+    let result =
+        std::env::current_exe().and_then(|exe| transaction::acknowledge_start(dir, running, &exe));
+    if let Err(error) = result {
+        crate::log_warn!("could not confirm update startup: {error}");
+        let _ = transaction::record_failure(
+            dir,
+            running,
+            &format!(
+                "Magic Bill opened, but could not save the update result: {error}. Contact support if this continues."
+            ),
+        );
+    }
+}
+
 // A version is a number.
 
 /// A version, as three numbers. On the wire it is the string "1.2.0" — what the release shelf
@@ -257,6 +287,10 @@ impl Starts {
 pub struct Previous {
     pub version: Version,
     pub installer: PathBuf,
+    #[serde(default)]
+    pub sha256: Option<String>,
+    #[serde(default)]
+    pub supports_startup_ack: bool,
 }
 
 impl Previous {
@@ -270,7 +304,11 @@ impl Previous {
     pub fn load(dir: &Path) -> Option<Previous> {
         let text = std::fs::read_to_string(Previous::folder(dir).join("previous.json")).ok()?;
         let previous: Previous = serde_json::from_str(&text).ok()?;
-        previous.installer.exists().then_some(previous)
+        let verified = previous.sha256.as_ref().map_or_else(
+            || previous.installer.is_file(),
+            |sha| transaction::verify_installer(&previous.installer, sha).is_ok(),
+        );
+        verified.then_some(previous)
     }
 }
 
@@ -279,6 +317,10 @@ impl Previous {
 pub struct Current {
     pub version: Version,
     pub installer: PathBuf,
+    #[serde(default)]
+    pub sha256: Option<String>,
+    #[serde(default)]
+    pub supports_startup_ack: bool,
 }
 
 impl Current {
@@ -291,26 +333,21 @@ impl Current {
     pub fn load(dir: &Path) -> Option<Current> {
         let text = std::fs::read_to_string(Current::path(dir)).ok()?;
         let current: Current = serde_json::from_str(&text).ok()?;
-        current.installer.exists().then_some(current)
+        let verified = current.sha256.as_ref().map_or_else(
+            || current.installer.is_file(),
+            |sha| transaction::verify_installer(&current.installer, sha).is_ok(),
+        );
+        verified.then_some(current)
     }
 
     fn save(&self, dir: &Path) -> std::io::Result<()> {
-        let path = Current::path(dir);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, serde_json::to_string_pretty(self).unwrap_or_default())
+        transaction::write_json(&Current::path(dir), self)
     }
 }
 
 impl Previous {
     fn save(&self, dir: &Path) -> std::io::Result<()> {
-        let folder = Previous::folder(dir);
-        std::fs::create_dir_all(&folder)?;
-        std::fs::write(
-            folder.join("previous.json"),
-            serde_json::to_string_pretty(self).unwrap_or_default(),
-        )
+        transaction::write_json(&Previous::folder(dir).join("previous.json"), self)
     }
 }
 
@@ -347,6 +384,8 @@ pub struct UpdateState {
     pub days_on_this_version: u32,
     pub running: String,
     pub is_dev_build: bool,
+    #[serde(default)]
+    pub last_failure: Option<UpdateFailure>,
 }
 
 /// How long is too long on one version.
@@ -411,6 +450,19 @@ pub fn known_on(app: &crate::state::App) -> crate::words::UiResult<UpdateState> 
     let mut state = app.updates();
     state.previous =
         Previous::load(&crate::config::AppConfig::directory()).map(|p| p.version.to_string());
+    state.last_failure = transaction::failure(&crate::config::AppConfig::directory());
+    if let Some(version) = state
+        .available
+        .as_ref()
+        .and_then(|version| version.parse().ok())
+    {
+        let dir = crate::config::AppConfig::directory();
+        let installer = dir
+            .join("updates")
+            .join("incoming")
+            .join(format!("MagicBill-{version}.exe"));
+        state.downloaded = transaction::downloaded_for(&dir, version, &installer);
+    }
     Ok(state)
 }
 
@@ -460,22 +512,29 @@ pub fn check_now(app: &crate::state::App) -> UpdateState {
     let before = state.available.clone();
     let dir = crate::config::AppConfig::directory();
     state.previous = Previous::load(&dir).map(|p| p.version.to_string());
+    state.last_failure = transaction::failure(&dir);
 
     match manifest_for(app) {
-        Some(manifest) => {
+        Ok(Some(manifest)) => {
             let newer = manifest.version > Version::running();
             if newer {
                 state.available = Some(manifest.version.to_string());
                 state.notes = manifest.notes.clone();
-                state.downloaded = incoming(&dir, &manifest).exists();
+                state.downloaded =
+                    transaction::verify_installer(&incoming(&dir, &manifest), &manifest.sha256)
+                        .is_ok();
             } else {
                 state.available = None;
                 state.notes = String::new();
                 state.downloaded = false;
             }
         }
-        None => {
+        Err(()) => {
+            // A temporary network failure must not erase an offer and ring its bell again.
+        }
+        Ok(None) => {
             state.available = None;
+            state.notes.clear();
             state.downloaded = false;
         }
     }
@@ -490,29 +549,29 @@ pub fn check_now(app: &crate::state::App) -> UpdateState {
 }
 
 /// The published manifest, when it verifies and this shop is in its rollout.
-fn manifest_for(app: &crate::state::App) -> Option<Manifest> {
+fn manifest_for(app: &crate::state::App) -> Result<Option<Manifest>, ()> {
     let (json, signature) = match app.releases().latest() {
         Ok(found) => found,
         Err(why) => {
             crate::log_info!("no update check: {why}");
-            return None;
+            return Err(());
         }
     };
     let manifest = match check(&json, &signature) {
         Ok(manifest) => manifest,
         Err(refused) => {
             crate::log_warn!("an update manifest was refused: {}", refused.says());
-            return None;
+            return Ok(None);
         }
     };
     let machine = app.with_licence(|l| l.machine().value().to_owned());
     let shop = app
         .with_licence(|l| l.snapshot().and_then(|s| s.licence.restaurant_id))
         .unwrap_or_default();
-    manifest
+    Ok(manifest
         .rollout
         .includes(&machine, &shop)
-        .then_some(manifest)
+        .then_some(manifest))
 }
 
 /// How far a download has got, 0 to 100; nought until the size is known.
@@ -597,32 +656,48 @@ fn begin_install(
     Ok((action, attempt))
 }
 
-/// Only the running version is a rollback candidate. A failed attempt may have recorded the
-/// pending installer as Current already; never move or archive that file on a retry.
-fn keep_previous(dir: &Path, running: Version, pending: &Path) {
-    let Some(current) = Current::load(dir) else {
-        return;
-    };
-    if current.version != running || current.installer == pending {
-        return;
-    }
-    let kept = Previous::folder(dir).join(format!("MagicBill-{}.exe", current.version));
-    if let Some(parent) = kept.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    // Copy so even an installer already handed to Windows retains its source path.
-    if std::fs::copy(&current.installer, &kept).is_ok() {
-        let _ = Previous {
-            version: current.version,
-            installer: kept,
-        }
-        .save(dir);
-    }
-}
-
 /// Download, check, keep the way back, hand the installer to Windows. The counter closes so
 /// the installer can replace it; the shop's data is not touched.
 pub fn install_on(
+    app: &crate::state::App,
+    handle: Option<&tauri::AppHandle>,
+) -> crate::words::UiResult<String> {
+    let result = install_attempt_on(app, handle);
+    if let Err(error) = &result
+        && !matches!(
+            error.code.as_str(),
+            "auth.locked"
+                | "auth.denied"
+                | "update.busy"
+                | "update.counter_busy"
+                | "update.unsaved_bill"
+                | "update.none"
+        )
+    {
+        let mut state = app.updates();
+        if let Some(version) = state
+            .available
+            .as_ref()
+            .and_then(|version| version.parse().ok())
+        {
+            let dir = crate::config::AppConfig::directory();
+            let _ = transaction::record_failure(&dir, version, &error.message);
+            state.last_failure = transaction::failure(&dir);
+            let installer = dir
+                .join("updates")
+                .join("incoming")
+                .join(format!("MagicBill-{version}.exe"));
+            state.downloaded = transaction::downloaded_for(&dir, version, &installer);
+            app.set_updates(state.clone());
+            app.push(crate::state::Pushed::Version {
+                available: state.available,
+            });
+        }
+    }
+    result
+}
+
+fn install_attempt_on(
     app: &crate::state::App,
     handle: Option<&tauri::AppHandle>,
 ) -> crate::words::UiResult<String> {
@@ -630,7 +705,7 @@ pub fn install_on(
     crate::guard::require_signed_in(app)?;
     let (_one_at_a_time, mut attempt) = begin_install(app)?;
     let dir = crate::config::AppConfig::directory();
-    let Some(manifest) = manifest_for(app) else {
+    let Ok(Some(manifest)) = manifest_for(app) else {
         return Err(UiError::new(
             "update.none",
             "There is no update to install. Check again after the next licence check.",
@@ -647,8 +722,17 @@ pub fn install_on(
         )
         .quietly());
     }
+    transaction::ensure_idle(&dir)
+        .map_err(|error| UiError::new("update.busy", error.to_string()))?;
+    transaction::clear_failure(&dir)
+        .map_err(|error| crate::words::from_io("Preparing the update", &error))?;
     let to = incoming(&dir, &manifest);
     let version = manifest.version.to_string();
+    let mut state = app.updates();
+    state.available = Some(version.clone());
+    state.notes = manifest.notes.clone();
+    state.last_failure = None;
+    app.set_updates(state);
     let tell = |stage: &str, bytes: u64, total: u64| {
         app.push(crate::state::Pushed::Update {
             version: version.clone(),
@@ -659,16 +743,14 @@ pub fn install_on(
         });
     };
     // A downloaded installer that already matched is not fetched twice.
-    let already = to.is_file()
-        && std::fs::read(&to)
-            .map(|bytes| crate::cloud::sha256_hex(&bytes).eq_ignore_ascii_case(&manifest.sha256))
-            .unwrap_or(false);
+    let already = transaction::verify_installer(&to, &manifest.sha256).is_ok();
+    let downloading = to.with_extension("download");
     let sha = if already {
         manifest.sha256.clone()
     } else {
         let mut last_told = 0u64;
         app.link()
-            .download(&manifest.url, None, &to, &mut |bytes, total| {
+            .download(&manifest.url, None, &downloading, &mut |bytes, total| {
                 // The screen hears every step of one percent, not every packet.
                 let total = total.unwrap_or(0);
                 let a_step_on = bytes.saturating_sub(last_told).saturating_mul(100) >= total;
@@ -681,7 +763,7 @@ pub fn install_on(
     };
     tell("checking", 1, 1);
     if !sha.eq_ignore_ascii_case(&manifest.sha256) {
-        let _ = std::fs::remove_file(&to);
+        let _ = std::fs::remove_file(&downloading);
         return Err(UiError::new(
             "update.fingerprint",
             "The downloaded update did not match its published fingerprint, so it has not been \
@@ -689,13 +771,12 @@ pub fn install_on(
         ));
     }
 
-    // Keep the way back: the installer that put THIS version here becomes the previous one.
-    keep_previous(&dir, Version::running(), &to);
-    let _ = Current {
-        version: manifest.version,
-        installer: to.clone(),
+    if !already {
+        transaction::verify_installer(&downloading, &manifest.sha256)
+            .map_err(|error| crate::words::from_io("Checking the update", &error))?;
+        std::fs::rename(&downloading, &to)
+            .map_err(|error| crate::words::from_io("Saving the update", &error))?;
     }
-    .save(&dir);
 
     crate::log_warn!(
         "installing version {} from {} — the counter is closing for the installer",
@@ -706,7 +787,7 @@ pub fn install_on(
     state.downloaded = true;
     app.set_updates(state);
     tell("installing", 1, 1);
-    run_installer(&to, handle)?;
+    run_installer(&dir, manifest.version, &to, &manifest.sha256, true, handle)?;
     attempt.handed_off = true;
     Ok(format!(
         "Version {} is installing. Magic Bill will close and open again on the new version — your \
@@ -715,65 +796,47 @@ pub fn install_on(
     ))
 }
 
-/// Hand the installer to Windows and come back on the new version.
-///
-/// The installer runs silently (`/S`) once this process has gone, and when it is done the
-/// program is started again from where it was installed — so from the counter's side, pressing
-/// the button ends with Magic Bill open on the new version. All of that is one `cmd` line,
-/// detached from this process, because this process is about to exit.
+/// The worker confirms readiness before the counter closes. It waits for this exact
+/// process to exit, runs NSIS, records its result and starts the installed program.
 fn run_installer(
+    dir: &Path,
+    version: Version,
     installer: &Path,
+    sha256: &str,
+    expects_ack: bool,
     handle: Option<&tauri::AppHandle>,
 ) -> crate::words::UiResult<()> {
-    if !installer.is_file() {
-        return Err(crate::words::UiError::new(
-            "update.missing",
-            "The downloaded installer is no longer available. Magic Bill will stay open. \
-             Check for updates and download it again.",
-        )
-        .with_detail(installer.display().to_string()));
-    }
-    let exe =
-        std::env::current_exe().map_err(|e| crate::words::from_io("Finding the program", &e))?;
-    cmd_line(&relaunch_line(installer, &exe))
-        .spawn()
-        .map_err(|e| crate::words::from_io("Starting the installer", &e))?;
+    transaction::handoff(dir, version, installer, sha256, expects_ack)
+        .map_err(|error| crate::words::UiError::new("update.install", error.to_string()))?;
     if let Some(handle) = handle {
+        let watchdog = handle.clone();
+        let dir = dir.to_path_buf();
+        std::thread::spawn(move || {
+            use tauri::Manager as _;
+            std::thread::sleep(std::time::Duration::from_secs(65));
+            // If this original process still exists, the worker cannot have installed.
+            // Persist cancellation before unlocking billing or offering another attempt.
+            if let Ok(Some(failure)) = transaction::recover_handoff(&dir)
+                && let Some(app) = watchdog.try_state::<crate::state::App>()
+            {
+                app.update_install.0.store(false, Ordering::Release);
+                let mut state = app.updates();
+                state.last_failure = Some(failure);
+                app.set_updates(state.clone());
+                app.push(crate::state::Pushed::Version {
+                    available: state.available,
+                });
+            }
+        });
         let handle = handle.clone();
         std::thread::spawn(move || {
-            // Let the reply reach the screen first.
+            // Let the IPC reply reach the screen; the worker waits for real process exit.
             std::thread::sleep(std::time::Duration::from_millis(800));
             handle.exit(0);
         });
     }
     Ok(())
 }
-
-/// One `cmd` line, handed to Windows exactly as written, with no console box on the screen.
-///
-/// `raw_arg` and not `arg`: Rust quotes an argument the way a normal Windows program reads one,
-/// which escapes the quotes already inside the line as `\"` — and cmd.exe does not read `\"` as
-/// a quote. `start "" /wait "C:\...\Setup.exe" /S` arrived as `start \"\" /wait \"C:\...`, so
-/// `start` was handed a lone backslash and Windows answered *cannot find '\'*. Every quote in
-/// the line has to survive the trip.
-pub(crate) fn cmd_line(line: &str) -> std::process::Command {
-    use std::os::windows::process::CommandExt as _;
-
-    let mut command = crate::share::hidden_cmd();
-    command.raw_arg("/C ").raw_arg(line);
-    command
-}
-
-/// The `cmd` line: wait for this process to let go, install silently, start the program again.
-#[must_use]
-pub fn relaunch_line(installer: &Path, exe: &Path) -> String {
-    format!(
-        "ping -n 3 127.0.0.1 >nul & start \"\" /wait \"{}\" /S & start \"\" \"{}\"",
-        installer.display(),
-        exe.display()
-    )
-}
-
 // GitHub releases: where a shipped counter looks first.
 
 /// The repository whose Releases page is the shelf.
@@ -807,6 +870,12 @@ impl GitHubReleases {
 
 impl Releases for GitHubReleases {
     fn latest(&self) -> Result<(String, String), String> {
+        // Watcher, manual check and install share the two manifest paths. Keep each signed
+        // pair together so another request cannot truncate a file while it is being read.
+        static FETCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _fetch = FETCH
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match (self.fetch("manifest.json"), self.fetch("manifest.json.sig")) {
             (Ok(json), Ok(signature)) => Ok((json, signature.trim().to_owned())),
             (Err(why), _) | (_, Err(why)) => {
@@ -825,6 +894,8 @@ pub fn go_back_on(
     crate::guard::require(app, mb_auth::Permission::SettingsStore)?;
     let (_one_at_a_time, mut attempt) = begin_install(app)?;
     let dir = crate::config::AppConfig::directory();
+    transaction::ensure_idle(&dir)
+        .map_err(|error| crate::words::UiError::new("update.busy", error.to_string()))?;
     let Some(previous) = Previous::load(&dir) else {
         return Err(crate::words::UiError::new(
             "update.no_previous",
@@ -836,7 +907,16 @@ pub fn go_back_on(
         previous.version,
         previous.installer.display()
     );
-    run_installer(&previous.installer, handle)?;
+    let sha256 = transaction::fingerprint(&previous.installer)
+        .map_err(|error| crate::words::from_io("Checking the previous installer", &error))?;
+    run_installer(
+        &dir,
+        previous.version,
+        &previous.installer,
+        &sha256,
+        previous.supports_startup_ack,
+        handle,
+    )?;
     attempt.handed_off = true;
     Ok(going_back_says(Some(&previous)))
 }
@@ -1009,74 +1089,6 @@ mod tests {
         retry.handed_off = true;
         drop(retry);
         assert!(matches!(gate.begin(), Err(error) if error.code == "update.busy"));
-    }
-
-    #[test]
-    fn retrying_a_pending_update_keeps_its_installer_and_the_real_rollback() {
-        let scratch = crate::signin_tests::Scratch::new("update_retry");
-        let dir = scratch.dir();
-        let previous_file = dir.join("old.exe");
-        std::fs::write(&previous_file, b"older installer").expect("old installer");
-        let previous = Previous {
-            version: Version::new(1, 7, 9),
-            installer: previous_file,
-        };
-        previous.save(dir).expect("rollback record");
-        let pending = dir.join("MagicBill-1.8.3.exe");
-        std::fs::write(&pending, b"verified download").expect("download");
-        Current {
-            version: Version::new(1, 8, 3),
-            installer: pending.clone(),
-        }
-        .save(dir)
-        .expect("record left by first attempt");
-
-        keep_previous(dir, Version::new(1, 8, 0), &pending);
-
-        assert_eq!(
-            std::fs::read(&pending).expect("installer still at launch path"),
-            b"verified download"
-        );
-        assert_eq!(Previous::load(dir), Some(previous));
-        assert!(!Previous::folder(dir).join("MagicBill-1.8.3.exe").exists());
-    }
-
-    #[test]
-    fn a_running_version_is_copied_for_rollback_without_moving_either_installer() {
-        let scratch = crate::signin_tests::Scratch::new("update_backup");
-        let dir = scratch.dir();
-        let current = dir.join("MagicBill-1.8.0.exe");
-        let pending = dir.join("MagicBill-1.8.3.exe");
-        std::fs::write(&current, b"installed version").expect("current installer");
-        std::fs::write(&pending, b"new version").expect("pending installer");
-        Current {
-            version: Version::new(1, 8, 0),
-            installer: current.clone(),
-        }
-        .save(dir)
-        .expect("current record");
-
-        keep_previous(dir, Version::new(1, 8, 0), &pending);
-
-        let previous = Previous::load(dir).expect("rollback saved");
-        assert_eq!(previous.version, Version::new(1, 8, 0));
-        assert_eq!(
-            std::fs::read(previous.installer).expect("backup"),
-            b"installed version"
-        );
-        assert!(current.is_file());
-        assert_eq!(
-            std::fs::read(&pending).expect("new installer"),
-            b"new version"
-        );
-    }
-
-    #[test]
-    fn a_missing_installer_is_reported_before_starting_windows_handoff() {
-        let scratch = crate::signin_tests::Scratch::new("update_missing");
-        let error = run_installer(&scratch.dir().join("missing.exe"), None)
-            .expect_err("do not hand a missing file to Windows");
-        assert_eq!(error.code, "update.missing");
     }
 
     #[test]
@@ -1294,6 +1306,8 @@ mod tests {
         let with = going_back_says(Some(&Previous {
             version: Version::new(1, 4, 4),
             installer: PathBuf::from("x.exe"),
+            sha256: None,
+            supports_startup_ack: false,
         }));
         assert!(with.contains("1.4.4"));
         // The reassurance that matters most.
@@ -1304,55 +1318,6 @@ mod tests {
 #[cfg(test)]
 mod github_tests {
     use super::*;
-
-    #[test]
-    fn the_relaunch_line_installs_silently_and_starts_the_program_again() {
-        let line = relaunch_line(
-            Path::new(r"C:\data\updates\incoming\MagicBill-0.4.0.exe"),
-            Path::new(r"C:\Program Files\Magic Bill\magic-bill.exe"),
-        );
-        assert!(
-            line.contains(r#"/wait "C:\data\updates\incoming\MagicBill-0.4.0.exe" /S"#),
-            "{line}"
-        );
-        assert!(
-            line.ends_with(r#"start "" "C:\Program Files\Magic Bill\magic-bill.exe""#),
-            "{line}"
-        );
-        // The wait comes first: the installer must not start while this process still holds the exe.
-        assert!(line.starts_with("ping"), "{line}");
-    }
-
-    /// The line is right and it never arrived. `Command::arg` escapes the quotes inside it as
-    /// `\"`, cmd.exe does not read `\"` as a quote, and `start` was handed a lone backslash —
-    /// *"Windows cannot find '\'"*, with the update never installed. This runs a real cmd and
-    /// reads back what it parsed, because asserting on the string is what let it ship.
-    #[test]
-    fn the_line_reaches_cmd_with_every_quote_it_was_written_with() {
-        // The shape that broke: an empty quoted title, then a quoted path with spaces in it.
-        let shape = r#"start "" /wait "C:\Program Files\Magic Bill\Setup.exe" /S"#;
-
-        let sent = cmd_line(&format!("echo {shape}"))
-            .output()
-            .expect("cmd ran");
-        assert_eq!(
-            String::from_utf8_lossy(&sent.stdout).trim(),
-            shape,
-            "cmd did not get the line it was given"
-        );
-
-        // And the way it used to be handed over still mangles it, so this test keeps meaning
-        // something if somebody swaps `raw_arg` back for `arg`.
-        let mangled = crate::share::hidden_cmd()
-            .args(["/C", &format!("echo {shape}")])
-            .output()
-            .expect("cmd ran");
-        assert_ne!(
-            String::from_utf8_lossy(&mangled.stdout).trim(),
-            shape,
-            "arg() no longer escapes quotes, so this test is guarding nothing"
-        );
-    }
 
     #[test]
     fn the_shelf_is_the_latest_release_and_never_the_api() {
