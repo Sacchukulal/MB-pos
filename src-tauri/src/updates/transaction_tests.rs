@@ -3,8 +3,8 @@
 use super::*;
 use std::os::windows::process::CommandExt as _;
 
-const ENTRY: &str = "updates::transaction::subprocess_tests::worker_entry";
-const EARLY_EXIT: &str = "updates::transaction::subprocess_tests::worker_exits_before_ready";
+const ENTRY: &str = "updates::transaction::transaction_tests::worker_entry";
+const EARLY_EXIT: &str = "updates::transaction::transaction_tests::worker_exits_before_ready";
 
 struct RunningChild(Child);
 
